@@ -16,6 +16,7 @@ import {
   getSet,
   getSetCards,
   findCards,
+  priceScale,
   searchCards,
   usdRange,
 } from "./tcgdex";
@@ -49,7 +50,7 @@ Rules:
 - Never invent data. Every card, set, artist, price, memory or collector you mention must come from a tool result or a photo in this conversation. If a tool returns nothing, say so and offer a next step.
 - Card ids are TCGdex ids such as "swsh7-215". Find them with search_catalogue first (search by the Pokémon/card name, then pick the result whose number matches); never guess an id. Never show ids to the collector; name cards by name and number (e.g. **Umbreon VMAX 215/203**).
 - Photos: when the user sends card photos, read the card name and the collector number printed at the bottom left (e.g. 125/094), then search_catalogue by name and pick the result whose number matches. Never claim to identify a photo you have not seen.
-- Prices: only quote prices from get_card_prices. Give one range in US$ (e.g. "**US$525 to US$615** raw, ungraded"); do not name marketplaces or data sources. If there is no price data, say so. You may estimate graded value only as a clearly labelled rough estimate based on the raw price, never as data.
+- Prices: only quote prices from get_card_prices. Lead with the market price (price_points_usd.market, based on recent sales), then the spread from the lowest listing to the mid price, in US$ (e.g. "**US$523** market price, listings from **US$467**, mid **US$590**, raw, ungraded"). When the collector asks where prices come from, name the source exactly as get_card_prices gives it (TCGplayer US$ prices via TCGdex, updated daily); week-on-month changes from my_price_movers and market_trends compare Cardmarket 7-day and 30-day average prices (EUR). If there is no price data, say so. You may estimate graded value only as a clearly labelled rough estimate based on the raw price, never as data.
 - Pre-grading (only when the collector asks for a pre-grade or whether to grade; never for a plain price check): only from photos you have seen; if there are no photos, ask for front and back photos. Identify the card, call get_card_prices, then call pre_grade_report exactly once with: the three most likely whole PSA-scale grades (e.g. 10, 9, 8, or 9, 8, 7; no half grades) with probabilities that add up to 100 and a short visible reason each; subgrade scores (0-100) for centering, corners, edges and surface as PSA, CGC, BGS and TAG would see them; the overall grade each company would likely give; your confidence (0-100, lower when glare or angle hides detail); a short notes line (e.g. "60/40 back · light corner whitening"); and Mori's take: start with a clear verdict ("Worth sending." or "Sell it raw." or "Keep it raw."), then one short sentence why, weighing the likely grade against the raw price and a typical grading fee plus shipping (about US$25-150). Be realistic: a PSA 10 is rarely the most likely outcome from photos. After pre_grade_report, reply with one short sentence at most (it already shows the full report).
 - Should I grade it (without new photos): compare the raw price range with the likely graded outcome after a typical grading fee, and recommend clearly.
 - Buy or sell orders: you need buy or sell, the card, and a price in US$. Ask for anything missing. Check get_card_prices so you can say how the price compares with the market, then call set_order. Orders are watch alerts in this demo: Mori notifies the collector when a matching listing appears; nothing is bought or sold automatically. The collector can change buy/sell, the price and how long it stays open (7, 30 or 90 days) on the card before confirming. For their open orders, or to cancel one, call list_my_orders: the orders appear as cards with a Cancel button, so reply in one short line and never claim you cancelled an order yourself.
@@ -417,6 +418,17 @@ async function runReadTool(db: DB, name: string, a: Args): Promise<unknown> {
           rarity: r.card.rarity,
         },
         raw_price_usd: usdRange(r.pricing) ?? { note: "No market price data for this card" },
+        ...(() => {
+          const p = priceScale(r.pricing);
+          return p
+            ? {
+                price_points_usd: { lowest_listing: p.low, market: p.market, mid: p.mid },
+                source: `TCGplayer US$ prices (${p.variant}) via TCGdex${
+                  p.updated ? `, updated ${p.updated.slice(0, 10)}` : ""
+                }. Market price is based on recent sales.`,
+              }
+            : {};
+        })(),
       };
     }
     case "find_related_cards": {
@@ -1207,7 +1219,8 @@ export async function finishMoriTurn(
         r.kind === "orders" ||
         r.kind === "binders" ||
         r.kind === "video" ||
-        r.kind === "people",
+        r.kind === "people" ||
+        r.kind === "price",
     );
     const reply = { role: "mori" as const, kind: "text", content: finalText };
     if (confirmAt >= 0) rows.splice(confirmAt, 0, reply);

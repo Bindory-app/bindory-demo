@@ -89,8 +89,8 @@ export async function getCardPricing(
   return { card: c, pricing: c.pricing ?? null };
 }
 
-/** One US$ price range for a raw (ungraded) card, from the daily market prices. Collectors see only
- *  the range, not which marketplaces it comes from. Null when there is no US$ market data. */
+/** One US$ price range for a raw (ungraded) card: TCGplayer's market price to its mid price (widened
+ *  to ±8% when they are close). Null when there is no US$ market data. */
 export function usdRange(
   pricing: CardPricing | null | undefined,
 ): { low: number; high: number; typical: number } | null {
@@ -115,6 +115,32 @@ export function usdRange(
   const round = (n: number) =>
     n >= 100 ? Math.round(n / 5) * 5 : n >= 10 ? Math.round(n) : Math.round(n * 100) / 100;
   return { low: round(low), high: round(high), typical: round(typical) };
+}
+
+/** The real market points behind a price check, for the chat's price card: TCGplayer's lowest
+ *  listing, market price (recent sales) and mid price in US$, for the same printing usdRange uses,
+ *  with when TCGdex last updated them. Null when there is no US$ market data. */
+export function priceScale(pricing: CardPricing | null | undefined): {
+  low?: number | undefined;
+  market?: number | undefined;
+  mid?: number | undefined;
+  variant: string;
+  updated?: string | undefined;
+} | null {
+  const tp = pricing?.tcgplayer;
+  if (!tp) return null;
+  const variants = Object.entries(tp).filter(
+    (e): e is [string, { lowPrice?: number; marketPrice?: number; midPrice?: number }] =>
+      typeof e[1] === "object" && e[1] !== null && ("marketPrice" in e[1] || "midPrice" in e[1]),
+  );
+  const [variant, v] =
+    variants.find(([, x]) => typeof x.marketPrice === "number") ?? variants[0] ?? [];
+  if (!variant || !v) return null;
+  const num = (n: unknown) =>
+    typeof n === "number" && n > 0 ? Math.round(n * 100) / 100 : undefined;
+  const out = { low: num(v.lowPrice), market: num(v.marketPrice), mid: num(v.midPrice) };
+  if (out.low === undefined && out.market === undefined && out.mid === undefined) return null;
+  return { ...out, variant, updated: typeof tp.updated === "string" ? tp.updated : undefined };
 }
 
 /** A set with its card list (id, number, name). */

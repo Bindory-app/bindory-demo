@@ -148,6 +148,26 @@
       '<div class="cp-mori-actions"><button class="cp-mori-go" data-bd-confirm="' + id + '"' + (done ? " disabled" : "") + ">" + (p.status === "confirmed" ? "Saved" : "Confirm") + '</button><button data-bd-edit="' + id + '"' + (done ? " disabled" : "") + ">Change details</button></div></div>";
   }
 
+  // A live price check: the real market points (lowest listing, market price, mid price) on one
+  // scale, with where they come from and when they were updated.
+  function priceCardHTML(p) {
+    const s = p.scale || {}, c = p.card || {};
+    const pts = [["Lowest listing", s.low], ["Market price", s.market], ["Mid price", s.mid]].filter((x) => typeof x[1] === "number");
+    if (!pts.length) return "";
+    const usd = (n) => "US$" + n.toLocaleString("en-US", { minimumFractionDigits: n < 100 ? 2 : 0, maximumFractionDigits: n < 100 ? 2 : 0 });
+    const vals = pts.map((x) => x[1]), lo = Math.min(...vals), hi = Math.max(...vals), span = hi - lo || 1;
+    const at = (v) => 4 + Math.round(((v - lo) / span) * 92);
+    const dot = (x) => '<i style="position:absolute;top:50%;left:' + at(x[1]) + '%;width:' + (x[0] === "Market price" ? 12 : 8) + "px;height:" + (x[0] === "Market price" ? 12 : 8) + 'px;border-radius:50%;transform:translate(-50%,-50%);background:' + (x[0] === "Market price" ? "#674fd0" : "#fff") + ';border:2px solid #674fd0;box-sizing:border-box"></i>';
+    const day = p.updated ? new Date(p.updated).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" }) : "";
+    const headline = typeof s.market === "number" ? s.market : vals[0];
+    return '<div class="cp-val"><div class="cp-val-head"><small>Mori market check · raw, ungraded</small><b>' +
+      esc((c.name || "") + (c.number ? " " + c.number : "")) + " · " + usd(headline) + "</b><span>" + esc([c.set, c.rarity].filter(Boolean).join(" · ")) + "</span></div>" +
+      '<div style="position:relative;height:6px;margin:14px 12px 6px;border-radius:3px;background:linear-gradient(90deg,#e4e0ff,#9a88ef)">' + pts.map(dot).join("") + "</div>" +
+      '<div class="cp-val-values">' + pts.map((x) => "<span><small>" + esc(x[0]) + "</small><b>" + usd(x[1]) + "</b></span>").join("") + "</div>" +
+      '<p class="cp-val-note" style="background:#f3f1ff;color:#4b4866">Source: ' + esc(p.source || "TCGplayer") + " " + esc(p.currency === "USD" ? "US$" : p.currency || "") + " prices via " + esc(p.via || "TCGdex") +
+      (day ? ", updated " + esc(day) : "") + ". Market price is based on recent sales; lowest listing is the cheapest current listing.</p></div>";
+  }
+
   function renderRows(rows, ui, steps) {
     steps = [...new Set(steps)];
     let stepsHTML = steps.length ? '<ul class="cp-mori-steps">' + steps.map((s) => '<li class="is-done"><i></i><span>' + esc(s) + "</span></li>").join("") + "</ul>" : "";
@@ -188,6 +208,12 @@
         if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", list);
         else last = ui.say(stepsHTML + list);
         if (last) refreshOrders(last);
+      }
+      else if (r.kind === "price" && r.payload) {
+        // Mori's reply and the price card share one bubble.
+        const card = priceCardHTML(r.payload);
+        if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", card);
+        else last = ui.say(stepsHTML + card);
       }
       else if (r.kind === "grade" && r.payload && P.gradeReportHTML) {
         const [should, take] = P.gradeReportHTML(r.payload);

@@ -20,6 +20,7 @@ import {
   type OutputItem,
 } from "./harnessrouter.server";
 import { readSignedRows, sealCollector, stripRowBlocks } from "./mori-mcp-auth.server";
+import { cardImage, getCardPricing, priceScale } from "./tcgdex";
 import { finishMoriTurn, tools, type MoriRowDraft } from "./mori-agent.server";
 
 type DB = SupabaseClient<Database>;
@@ -183,6 +184,35 @@ async function toolCalls(r: HRResponse, sessionId: string) {
   return calls;
 }
 
+/** The price card for one card: TCGplayer's lowest listing, market price and mid price (US$). */
+export async function priceCardRow(cardId: string): Promise<MoriRowDraft | null> {
+  const r = await getCardPricing(cardId);
+  const scale = r ? priceScale(r.pricing) : null;
+  if (!r || !scale) return null;
+  const headline = scale.market ?? scale.mid ?? scale.low;
+  return {
+    role: "mori",
+    kind: "price",
+    content: `Price check: ${r.card.name} ${r.card.localId}${headline ? `, market US$${headline}` : ""}`,
+    payload: {
+      card: {
+        id: r.card.id,
+        name: r.card.name,
+        number: r.card.localId,
+        set: r.card.set.name,
+        rarity: r.card.rarity,
+        image: cardImage(r.card.image, "low"),
+      },
+      scale: { low: scale.low, market: scale.market, mid: scale.mid },
+      variant: scale.variant,
+      currency: "USD",
+      source: "TCGplayer",
+      via: "TCGdex",
+      updated: scale.updated,
+    } as Json,
+  };
+}
+
 export async function runMoriHarness(
   db: DB,
   userId: string,
@@ -263,6 +293,7 @@ export async function runMoriHarness(
     if (r.id && sessionId) hrIds = { response_id: r.id, session_id: sessionId, agent };
 
     let lastCard = "";
+    let lastPricedId = "";
     for (const c of await toolCalls(r, sessionId)) {
       const result = toolResult(c.output);
       rows.push({
@@ -276,10 +307,12 @@ export async function runMoriHarness(
         } as Json,
       });
       const card = asObject(asObject(result)["card"]);
-      if (c.name === "get_card_prices" && typeof card["name"] === "string")
+      if (c.name === "get_card_prices" && typeof card["name"] === "string") {
         lastCard = `${card["name"]}${card["number"] ? ` ${String(card["number"])}` : ""}${
           card["set"] ? ` (${String(card["set"])})` : ""
         }`;
+        if (typeof card["id"] === "string") lastPricedId = card["id"];
+      }
       for (const row of readSignedRows(c.output ?? "", userId).filter(isRow)) {
         const p = asObject(row.payload);
         if (row.kind === "grade" && !p["card"] && lastCard) {
@@ -288,6 +321,13 @@ export async function runMoriHarness(
         }
         rows.push(row);
       }
+    }
+
+    // A price check shows the real market points on a scale, read here from TCGdex (not from the
+    // agent), with the source and date.
+    if (agent === "price" && lastPricedId) {
+      const row = await priceCardRow(lastPricedId).catch(() => null);
+      if (row) rows.push(row);
     }
 
     finalText = stripRowBlocks(answerText(r)).replace(/^\s*role_mismatch\s*/i, "");
