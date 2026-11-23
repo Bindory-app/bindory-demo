@@ -1,0 +1,619 @@
+<!-- Bindory demo: connect the wireframe to the real backend, without changing how it looks.
+     - Its Log in / Sign up sheet signs in for real (Supabase: Google, or a 6-digit email code),
+       then hands back to the wireframe's own flow (onboarding for sign up, welcome back for log in).
+     - When you're signed in, everything you type or tap in Ask Mori (shortcuts, suggestions and the
+       Take a photo option) goes to the real Mori agent (/api/mori-chat), and replies are drawn with the
+       wireframe's own chat bubbles and confirmation card.
+     Everything else is the wireframe's own markup, styles and script. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
+<script>
+(() => {
+  const P = window.cpProto;
+  const app = document.getElementById("cp-app");
+  if (!P || !app || !window.supabase) return;
+
+  const sb = window.supabase.createClient(
+    "https://auiwcpwphlzipfuzdoan.supabase.co",
+    "sb_publishable_VxXGcKFvZiQVbWExEnDw5g_C-3H-K1q",
+    { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: "implicit" } },
+  );
+  let session = null;
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const fresh = async () => (session = (await sb.auth.getSession()).data.session);
+  window.bdLive = { sb, signedIn: () => !!session };
+
+  /* ---------------- Sign-in ---------------- */
+  let passThrough = false;
+  sb.auth.onAuthStateChange((_event, s) => { session = s; });
+  // An email link that was already used comes back as #error=...; offer a fresh code instead.
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const linkFailed = hash.get("error_code") || hash.get("error");
+  fresh().then((s) => {
+    if (s) P.open("mori"); // signed in: skip the guest screen, as the wireframe does after sign-in
+    else if (linkFailed) {
+      history.replaceState(null, "", location.pathname);
+      P.toast("That sign-in link expired. Tap Log in for a new code.");
+    }
+  });
+
+  document.addEventListener("click", async (e) => {
+    const verify = e.target.closest("[data-bd-verify]");
+    const back = e.target.closest("[data-bd-back]");
+    if (verify || back) {
+      e.stopImmediatePropagation(); e.preventDefault();
+      const card = (verify || back).closest(".cp-auth-card");
+      if (back) return restoreSheet(card);
+      const email = card.dataset.bdEmail;
+      const code = (card.querySelector("[data-bd-code]").value || "").replace(/\D/g, "");
+      if (code.length < 6) return P.toast("Enter the code from the email");
+      verify.disabled = true; verify.textContent = "Checking…";
+      const { error } = await sb.auth.verifyOtp({ email, token: code, type: "email" });
+      verify.disabled = false; verify.textContent = "Continue";
+      if (error) return P.toast("That code didn't work. Check it, or send a new one.");
+      await fresh();
+      const original = card.querySelector('[data-auth-provider="email"]');
+      restoreSheet(card);
+      passThrough = true; original.click(); // the wireframe's own sign-up / log-in flow continues
+      return;
+    }
+
+    const btn = e.target.closest("[data-auth-provider]");
+    if (!btn || !app.contains(btn)) return;
+    if (passThrough) { passThrough = false; return; }
+    const card = btn.closest(".cp-auth-card");
+    if (btn.dataset.authProvider === "Google") {
+      e.stopImmediatePropagation(); e.preventDefault();
+      await sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + "/" } });
+      return;
+    }
+    const email = (card.querySelector("[data-auth-email]").value || "").trim();
+    if (!email) return; // the wireframe asks for an email itself
+    e.stopImmediatePropagation(); e.preventDefault();
+    const label = btn.textContent;
+    btn.disabled = true; btn.textContent = "Sending your code…";
+    const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + "/" } });
+    btn.disabled = false; btn.textContent = label;
+    if (error) return P.toast(/rate|security/i.test(error.message) ? "Too many emails just now. Try again in a minute." : "Could not send the code. Please try again.");
+    showCodeStep(card, email);
+  }, true);
+
+  function showCodeStep(card, email) {
+    card.dataset.bdEmail = email;
+    [...card.children].forEach((el) => { if (!el.matches(".cp-auth-close, .cp-mori-face")) { el.dataset.bdHidden = ""; el.hidden = true; } });
+    const step = document.createElement("div");
+    step.dataset.bdCodeStep = "";
+    step.innerHTML =
+      "<b>Check your email</b><small>We sent a 6-digit code to " + esc(email) + ".</small>" +
+      '<input class="cp-auth-email-input" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="6-digit code" aria-label="Code from the email" data-bd-code>' +
+      '<button class="cp-auth-email" type="button" data-bd-verify>Continue</button>' +
+      '<button class="cp-auth-switch" type="button" data-bd-back>Use a different email</button>';
+    step.style.display = "contents";
+    card.append(step);
+    step.querySelector("[data-bd-code]").focus();
+  }
+  function restoreSheet(card) {
+    card.querySelector("[data-bd-code-step]")?.remove();
+    card.querySelectorAll("[data-bd-hidden]").forEach((el) => { el.hidden = false; delete el.dataset.bdHidden; });
+  }
+
+  /* ---------------- Ask Mori ---------------- */
+  // Mori's text may use **bold** and [label](link); show it as plain wireframe text.
+  const fmt = (t) => esc(t).replace(/(^|\n)[ \t]*[*-][ \t]+/g, "$1• ").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/(^|[^*\w])\*([^*\n]+?)\*(?!\*)/g, "$1$2").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/\n+/g, "<br>");
+  const row = (k, v, muted) => "<li><small>" + esc(k) + "</small><b" + (muted ? ' class="is-muted"' : "") + ">" + esc(v) + "</b></li>";
+  const cardImg = (c) => (c && /^https:\/\/assets\.tcgdex\.net\//.test(c.image || "") ? c.image : "");
+
+  // Order cards the collector can still change before confirming: id -> { side, price, days, ... }.
+  const orders = new Map();
+  const usdx = (n) => "US$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
+  const orderRows = (o) =>
+    row(o.side === "buy" ? "Buy for up to" : "Sell for at least", usdx(o.price)) +
+    (o.market ? row("Market price now", "About " + usdx(o.market)) : "") +
+    row("Watching", "Listings and collectors you follow") + row("Expires", "In " + o.days + " days") + (o.note ? row("Note", o.note) : "");
+  const orderHead = (o) => "<small>" + (o.side === "buy" ? "Buy order" : "Sell order") + " · price alert</small><b>" + esc(o.name) + "</b>";
+
+  const proposals = new Map(); // id -> tool, for the next steps after Confirm
+  const niceDate = (d) => {
+    const t = /^\d{4}-\d{2}-\d{2}$/.test(d) ? new Date(d + "T12:00:00") : null;
+    return t && !isNaN(t) ? t.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : d;
+  };
+  function proposalHTML(p, id) {
+    proposals.set(id, p.tool);
+    const done = p.status !== "pending";
+    let head = "", rows = "", art = "";
+    if (p.tool === "add_card_to_collection" || p.tool === "add_to_wishlist") {
+      head = "<small>" + (p.tool === "add_to_wishlist" ? "Wish list" : "New card") + "</small><b>" + esc(p.card.name) + "</b>";
+      art = cardImg(p.card) ? '<div class="cp-mori-ident"><img src="' + esc(cardImg(p.card)) + '" alt=""><div><small>Catalogue result</small><b>' + esc(p.card.name) + "</b><span>" + esc(p.card.set_name || "") + "</span></div></div>" : "";
+      rows = row("Card", p.card.name) + row("Set", p.card.set_name || "Not listed", !p.card.set_name) + (p.card.reason ? row("Why", p.card.reason) : "") + (p.note ? row("Note", p.note) : "");
+    } else if (p.tool === "create_binder") {
+      head = "<small>New binder · Private</small><b>" + esc(p.name) + "</b>";
+      art = '<div style="display:flex;gap:6px;overflow-x:auto;margin:8px 0">' + (p.cards || []).map((c) => (cardImg(c) ? '<img src="' + esc(cardImg(c)) + '" alt="' + esc(c.name) + '" style="height:84px;border-radius:6px">' : "")).join("") + "</div>";
+      rows = row("Cards", String((p.cards || []).length)) + (p.description ? row("About", p.description) : "");
+    } else if (p.tool === "set_order") {
+      const o = { side: p.side === "sell" ? "sell" : "buy", price: p.price_usd, days: p.expires_days || 30, market: p.market_usd, note: p.note, name: p.card.name };
+      if (!done) orders.set(id, o);
+      head = orderHead(o);
+      art = cardImg(p.card) ? '<div class="cp-mori-ident"><img src="' + esc(cardImg(p.card)) + '" alt=""><div><small>' + esc(p.card.set_name || "") + "</small><b>" + esc(p.card.name) + "</b></div></div>" : "";
+      rows = orderRows(o);
+    } else if (p.tool === "save_memory") {
+      head = "<small>New memory · Private</small><b>" + esc(p.title) + "</b>";
+      // A trade shows both cards; otherwise the one card the memory is about.
+      if (p.traded_card && p.card && P.tradePairHTML)
+        art = P.tradePairHTML({ name: p.traded_card.name, image: cardImg(p.traded_card) }, { name: p.card.name, image: cardImg(p.card) });
+      else if (p.card && cardImg(p.card))
+        art = '<div class="cp-mori-ident"><img src="' + esc(cardImg(p.card)) + '" alt=""><div><small>' + esc(p.card.set_name || "") + "</small><b>" + esc(p.card.name) + "</b></div></div>";
+      rows = row("Story", p.story) + row("With", p.with_whom || "Not added", !p.with_whom) + row("Where", p.place || "Not added", !p.place) + row("When", p.date ? niceDate(p.date) : "Not added", !p.date) + (p.traded_card && p.card ? "" : p.card ? row("Card", p.card.name) : "");
+    }
+    return '<p>Here it is. Nothing is saved until you confirm.</p>' + art +
+      '<div class="cp-mori-confirm"><div class="cp-mori-confirm-head">' + head + "</div><ul>" + rows + "</ul>" +
+      '<div class="cp-mori-actions"><button class="cp-mori-go" data-bd-confirm="' + id + '"' + (done ? " disabled" : "") + ">" + (p.status === "confirmed" ? "Saved" : "Confirm") + '</button><button data-bd-edit="' + id + '"' + (done ? " disabled" : "") + ">Change details</button></div></div>";
+  }
+
+  function renderRows(rows, ui, steps) {
+    steps = [...new Set(steps)];
+    let stepsHTML = steps.length ? '<ul class="cp-mori-steps">' + steps.map((s) => '<li class="is-done"><i></i><span>' + esc(s) + "</span></li>").join("") + "</ul>" : "";
+    let last = null, lastKind = "";
+    for (const r of rows) {
+      if (r.role !== "mori" || r.kind === "status") continue;
+      if (r.kind === "suggest") {
+        // Follow-up questions go under the last bubble of this answer.
+        const list = (r.payload && r.payload.suggestions) || [];
+        if (list.length && P.nextUpHTML) {
+          if (last) last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", P.nextUpHTML(list));
+          else ui.say(P.nextUpHTML(list));
+          ui.scrollDown();
+        }
+        continue;
+      }
+      if (r.kind === "confirm" && r.payload) last = ui.say(stepsHTML + proposalHTML(r.payload, r.id));
+      else if (r.kind === "people" && r.payload && P.peopleHTML) {
+        const cards = P.peopleHTML(r.payload.people || []);
+        if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", cards);
+        else last = ui.say(stepsHTML + cards);
+      }
+      else if (r.kind === "video" && r.payload && P.videoPlanHTML) {
+        const board = P.videoPlanHTML(r.payload);
+        if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", board);
+        else last = ui.say(stepsHTML + board);
+        videos.set(String(videos.size), r.payload);
+        last.querySelector("[data-video-plan]:not([data-video-key])")?.setAttribute("data-video-key", String(videos.size - 1));
+      }
+      else if (r.kind === "binders" && r.payload && P.binderPickHTML) {
+        const list = P.binderPickHTML(r.payload);
+        if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", list);
+        else last = ui.say(stepsHTML + list);
+      }
+      else if (r.kind === "orders" && r.payload && P.ordersListHTML) {
+        // Mori's one-line summary and the order cards share one bubble.
+        const list = P.ordersListHTML(r.payload.orders || []);
+        if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", list);
+        else last = ui.say(stepsHTML + list);
+        if (last) refreshOrders(last);
+      }
+      else if (r.kind === "grade" && r.payload && P.gradeReportHTML) {
+        const [should, take] = P.gradeReportHTML(r.payload);
+        // Mori's own intro line and the "Should I grade?" card share one bubble.
+        if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", should);
+        else ui.say(stepsHTML + should);
+        last = ui.say(take);
+      }
+      else last = ui.say(stepsHTML + "<p>" + fmt(r.content) + "</p>");
+      lastKind = r.kind;
+      stepsHTML = "";
+    }
+  }
+
+  // Each visit and each "New chat" starts a fresh conversation for Mori (the server only sends it
+  // messages after this time). A few seconds back, so a slightly fast phone clock cannot hide the first message.
+  let chatSince = new Date(Date.now() - 5000).toISOString();
+  app.addEventListener("click", (e) => { if (e.target.closest("[data-mori-reset]")) chatSince = new Date(Date.now() - 5000).toISOString(); }, true);
+  app.addEventListener("cp:mori-new-chat", () => { chatSince = new Date().toISOString(); });
+
+  // Called from the wireframe's own route() (patched at build time) for typed and tapped messages.
+  window.bdLiveRoute = async (text, ui) => {
+    if (!(await fresh())) return false; // guests keep the wireframe's scripted Mori
+    const typing = ui.addMsg("mori", '<div class="cp-mori-typing"><i></i><i></i><i></i><span>Thinking</span></div>', "is-typing");
+    const steps = [];
+    let bubble = null, streamed = "";
+    try {
+      const res = await fetch("/api/mori-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
+        body: JSON.stringify(Object.assign({ message: text, since: chatSince }, ui.photo ? { demo_photo: "card" } : {})),
+      });
+      if (!res.ok || !res.body) throw new Error("unavailable");
+      const reader = res.body.getReader(), dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n"); buf = lines.pop() || "";
+        for (const line of lines) {
+          if (!line) continue;
+          const ev = JSON.parse(line);
+          // The status text goes in the typing bubble's label, never in Mori's avatar.
+          if (ev.type === "status") { steps.push(ev.text); const label = typing.querySelector(".cp-mori-typing span"); if (label) label.textContent = ev.text; }
+          if (ev.type === "text") {
+            if (!bubble) { bubble = ui.say("<p></p>"); typing.after(bubble); }
+            streamed += ev.text; bubble.querySelector("p").innerHTML = fmt(streamed.replace(/(^|\n|(?<=[.?!])[ \t]+)[ \t*_]*suggestions?[ \t*_]*:[\s\S]*$/i, "")); ui.scrollDown();
+          }
+          if (ev.type === "error") throw new Error(ev.text);
+          if (ev.type === "done") { typing.remove(); bubble?.remove(); bubble = null; renderRows(ev.rows, ui, steps); }
+        }
+      }
+    } catch {
+      typing.remove(); bubble?.remove();
+      ui.say("<p>Sorry, I could not answer just now. Please try again.</p>");
+    }
+    typing.remove();
+    return true;
+  };
+
+  /* ---------------- The wireframe's demo, plus your own activity ---------------- */
+  // The wireframe's sample content IS the demo and stays exactly as designed (Wing, 422 followers,
+  // the slab grails, Search's collectors and binders, posts). On top of it we add only what you do in
+  // the demo: cards, binders, memories and wish-list cards Mori saves, follows, saved binders,
+  // check-ins and the points they earn. It's stored in your account, so it's there next time too.
+  const keyFor = (id) => "r" + String(id).replace(/-/g, "");
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const COLORS = ["purple", "pink", "blue"];
+  const S0 = P.S;
+  const BASE = {
+    points: S0.points, followers: S0.followers, following: S0.following, streak: S0.streak,
+    binders: S0.binders.slice(), memories: S0.memories.slice(), saved: S0.savedBinders.slice(),
+    followingSet: new Set(S0.followingSet), wish: window.bdL ? window.bdL.wish.slice() : [],
+    posts: window.bdPOSTS ? window.bdPOSTS.slice() : [], reels: window.bdREELS ? window.bdREELS.slice() : [],
+  };
+  window.bdCollectorIds = {}; // wireframe collector name -> real account id (Follow)
+  window.bdBinderIds = {}; // wireframe public binder key -> real binder id (Save binder)
+  const plain = (t) => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
+  function addCard(key, c) {
+    const meta = [c.set_name, c.number && "#" + c.number].filter(Boolean).join(" · ");
+    P.CARDS[key] = {
+      name: c.name, glyph: "✦", meta, type: c.rarity || "", artist: c.illustrator || "Unknown artist",
+      set: c.set_name || "", theme: "", note: "", home: "", img: key,
+      caption: [c.name, c.rarity, [c.set_name, c.number].filter(Boolean).join(" ")].filter(Boolean).join(" · "),
+    };
+    if (c.image_url) P.IMG[key] = c.image_url;
+  }
+
+  function replaceProfileText(name) {
+    const root = app.querySelector('[data-screen="profile"]');
+    if (!root || !name) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const n = walker.currentNode;
+      const v = n.nodeValue.replace(/Wing Wu/g, name);
+      if (v !== n.nodeValue) n.nodeValue = v;
+    }
+  }
+
+  async function loadMyData() {
+    if (!(await fresh())) return;
+    const uid = session.user.id;
+    const prof = await sb.from("profiles").select("display_name, settings").eq("id", uid).maybeSingle();
+    // Everything before the demo collection was loaded is the database's own sample; the wireframe
+    // already shows the demo, so only count what happened after.
+    const since = (prof.data && prof.data.settings && prof.data.settings.demo_loaded) || "1970-01-01T00:00:00Z";
+    const after = (q) => q.gt("created_at", since);
+    const [cards, binders, links, mems, wish, pts, fers, fo, sv, checks, posts, cols, bins] = await Promise.all([
+      after(sb.from("cards").select("*").eq("user_id", uid)).order("created_at", { ascending: false }),
+      after(sb.from("binders").select("id, name, description, is_public, cover_image").eq("user_id", uid)).order("created_at"),
+      sb.from("binder_cards").select("binder_id, card_id, position").eq("user_id", uid).order("position"),
+      after(sb.from("memories").select("*").eq("user_id", uid)).order("created_at", { ascending: false }),
+      after(sb.from("wishlist").select("*").eq("user_id", uid)).order("created_at", { ascending: false }),
+      after(sb.from("points_events").select("points").eq("user_id", uid)),
+      sb.from("follows").select("follower_id", { count: "exact", head: true }).eq("followee_id", uid),
+      sb.from("follows").select("followee_id").eq("follower_id", uid),
+      sb.from("saved_binders").select("binder_id").eq("user_id", uid),
+      sb.from("check_ins").select("day").eq("user_id", uid),
+      after(sb.from("posts").select("*").eq("user_id", uid)).order("created_at", { ascending: false }),
+      sb.rpc("list_public_collectors", { p_query: "" }),
+      sb.rpc("list_public_binders", { p_query: "" }),
+    ]);
+    const S = P.S;
+
+    // Map the wireframe's collectors and public binders to the real ones with the same name,
+    // so Follow and Save binder are stored for real.
+    if (Array.isArray(cols.data))
+      for (const c of cols.data) {
+        const first = (c.display_name || c.username || "").split(" ")[0];
+        if (P.COLLECTORS[first]) window.bdCollectorIds[first] = c.id;
+      }
+    if (Array.isArray(bins.data))
+      for (const b of bins.data) {
+        if (b.is_mine) continue;
+        const k = Object.keys(P.PB).find((key) => plain(P.PB[key].name) === plain(b.name));
+        if (k) window.bdBinderIds[k] = b.id;
+      }
+
+    // Cards and binders you added in the demo
+    const byId = new Map();
+    for (const c of cards.data || []) { const k = keyFor(c.id); addCard(k, c); byId.set(c.id, k); }
+    const newBinders = (binders.data || []).map((b, i) => ({
+      id: keyFor(b.id), name: b.name, type: b.description || "Binder", privacy: b.is_public ? "Public" : "Private",
+      color: COLORS[i % COLORS.length], cover: b.cover_image ? { type: "img", src: b.cover_image } : null, coverNote: "Binder cover",
+      cards: (links.data || []).filter((l) => l.binder_id === b.id).map((l) => byId.get(l.card_id)).filter(Boolean), extra: 0,
+    }));
+    S.binders = BASE.binders.concat(newBinders);
+    const inNew = new Set(newBinders.flatMap((b) => b.cards));
+    S.loose = [...byId.values()].filter((k) => !inNew.has(k));
+
+    // Memories and wish-list cards you added
+    const newMems = (mems.data || []).map((m) => {
+      const d = m.happened_on ? new Date(m.happened_on + "T00:00:00Z") : new Date(m.created_at);
+      return {
+        id: keyFor(m.id), prompt: 0, title: m.title, card: "", day: String(d.getUTCDate()),
+        month: MONTHS[d.getUTCMonth()], year: String(d.getUTCFullYear()), occasion: m.place || "", text: m.note || "",
+      };
+    });
+    S.memories = newMems.concat(BASE.memories);
+    if (window.bdL)
+      window.bdL.wish = (wish.data || []).map((w) => {
+        const k = keyFor(w.id);
+        addCard(k, { name: w.name, image_url: w.image_url, set_name: "", rarity: "" });
+        return k;
+      }).concat(BASE.wish);
+
+    // Points, follows, saves, check-ins: the demo's numbers plus yours
+    P.setPoints(BASE.points + (pts.data || []).reduce((n, p) => n + p.points, 0));
+    S.followers = BASE.followers + (fers.count || 0);
+    const followedIds = new Set((fo.data || []).map((r) => r.followee_id));
+    const followedNames = Object.keys(window.bdCollectorIds).filter((n) => followedIds.has(window.bdCollectorIds[n]));
+    S.followingSet = new Set([...BASE.followingSet, ...followedNames]);
+    S.following = BASE.following + followedNames.filter((n) => !BASE.followingSet.has(n)).length;
+    const savedIds = new Set((sv.data || []).map((r) => r.binder_id));
+    const savedKeys = Object.keys(window.bdBinderIds).filter((k) => savedIds.has(window.bdBinderIds[k]));
+    S.savedBinders = [...new Set([...savedKeys, ...BASE.saved])];
+    const today = new Date().toISOString().slice(0, 10);
+    S.checkedIn = (checks.data || []).some((c) => c.day === today);
+    S.streak = BASE.streak + (S.checkedIn ? 1 : 0);
+
+    // Posts you created in the demo, before the demo's own
+    if (window.bdPOSTS && window.bdREELS) {
+      const KIND = { post: "Post", video: "Video", story_card: "Story card", recap: "Recap", cover: "Binder cover" };
+      const mine = (posts.data || []).map((p) => {
+        const k = "rpo" + keyFor(p.id);
+        P.IMG[k] = p.media_url || (p.body && p.body.frames && p.body.frames[0] && p.body.frames[0].image) || (p.body && p.body.image) || "";
+        return { p, k };
+      }).filter((x) => P.IMG[x.k]);
+      window.bdPOSTS.splice(0, window.bdPOSTS.length, ...mine.map(({ p, k }) => ({ img: k, kind: KIND[p.kind] || "Post", video: p.kind === "video", caption: p.caption || "" })), ...BASE.posts);
+      window.bdREELS.splice(0, window.bdREELS.length, ...mine.filter(({ p }) => p.kind === "video").map(({ p, k }) => ({ img: k, source: p.made_with_mori ? "Made with Mori" : "Uploaded", length: "0:15", views: "New", caption: p.caption || "" })), ...BASE.reels);
+    }
+
+    // Your name in the greetings and profile header
+    const name = (prof.data && prof.data.display_name) || "";
+    if (name) { window.bdFirstName = name.split(" ")[0]; replaceProfileText(name); }
+
+    // Redraw with the wireframe's own renderers
+    for (const fn of ["renderMyBinder", "renderJourney", "renderProfile", "renderFeed"]) try { P[fn](); } catch {}
+    for (const r of ["collection", "home", "profile", "mori-room"]) try { P.R[r] && P.R[r](); } catch {}
+  }
+
+
+  // Follow, Save binder and Check in also write to your account (the wireframe updates its own screen).
+  document.addEventListener("click", (e) => {
+    if (!session) return;
+    const uid = session.user.id;
+    const S = P.S;
+    const fail = ({ error }) => { if (error && error.code !== "23505") P.toast("Could not save that. Please try again."); };
+    const f = e.target.closest("[data-follow-name],[data-follow-collector],[data-follow-owner]");
+    if (f && app.contains(f)) {
+      const name = f.dataset.followName || ("followCollector" in f.dataset ? S.currentCollector : P.PB[S.currentPB]?.owner);
+      const id = window.bdCollectorIds[name];
+      if (id) {
+        const follow = !S.followingSet.has(name);
+        (follow
+          ? sb.from("follows").insert({ follower_id: uid, followee_id: id })
+          : sb.from("follows").delete().eq("follower_id", uid).eq("followee_id", id)).then(fail);
+      }
+    }
+    const sv = e.target.closest("[data-save-binder]");
+    if (sv && app.contains(sv)) {
+      const k = S.currentPB, id = window.bdBinderIds[k];
+      if (id) {
+        const save = !S.savedBinders.includes(k);
+        (save
+          ? sb.from("saved_binders").insert({ user_id: uid, binder_id: id })
+          : sb.from("saved_binders").delete().eq("user_id", uid).eq("binder_id", id)).then(fail);
+      }
+    }
+    const ci = e.target.closest("[data-check-in],[data-home-checkin],[data-room-checkin]");
+    if (ci && app.contains(ci) && !S.checkedIn) sb.from("check_ins").insert({ user_id: uid }).then(fail);
+  }, true);
+
+  window.bdLive.reload = loadMyData;
+  // Order alerts and the demo payment method (setup/010). Only a label is stored, never payment details.
+  const loadOrderSettings = async () => {
+    if (!session) return;
+    const { data } = await sb.from("order_settings").select("alert_push, alert_email, wallet").maybeSingle();
+    if (data) Object.assign(P.orderSettings || (P.orderSettings = {}), data);
+  };
+  app.addEventListener("cp:order-settings", async (e) => {
+    if (!(await fresh())) return;
+    const { error } = await sb.from("order_settings").upsert({ user_id: session.user.id, ...e.detail, updated_at: new Date().toISOString() });
+    if (error) console.warn("Order settings not saved", error.message);
+  });
+  fresh().then((s) => s && loadOrderSettings());
+  sb.auth.onAuthStateChange((event) => { if (event === "SIGNED_IN") setTimeout(loadOrderSettings, 0); });
+  fresh().then((s) => s && loadMyData());
+  sb.auth.onAuthStateChange((event) => { if (event === "SIGNED_IN") setTimeout(loadMyData, 0); });
+
+  // Order cards drawn from chat history may be out of date: mark ones already cancelled.
+  async function refreshOrders(el) {
+    const ids = [...el.querySelectorAll("[data-order-id]")].map((x) => x.dataset.orderId);
+    if (!ids.length) return;
+    const { data } = await sb.from("market_orders").select("id, status").in("id", ids);
+    (data || []).forEach((o) => { if (o.status !== "open") markCancelled(el.querySelector('[data-order-id="' + o.id + '"]')); });
+  }
+  function markCancelled(item) {
+    if (!item) return;
+    item.classList.remove("is-asking");
+    item.classList.add("is-cancelled");
+    item.querySelector(".cp-order-item-act").innerHTML = "<mark>Cancelled</mark>";
+  }
+  // Post or save a video Mori storyboarded (posts table, owner-only by RLS).
+  const videos = new Map();
+  app.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-bd-video-post],[data-bd-video-draft]");
+    if (!b || !app.contains(b)) return;
+    e.stopPropagation();
+    const board = b.closest("[data-video-plan]"), v = videos.get(board.dataset.videoKey);
+    if (!v) return;
+    const pub = "bdVideoPost" in b.dataset;
+    board.querySelectorAll(".cp-mori-actions button").forEach((x) => (x.disabled = true));
+    await fresh();
+    const { error } = await sb.from("posts").insert({
+      user_id: session.user.id, kind: "video", caption: v.title, media_url: v.frames[0].image,
+      body: { frames: v.frames }, made_with_mori: true, is_public: pub,
+    });
+    if (error) { board.querySelectorAll(".cp-mori-actions button").forEach((x) => (x.disabled = false)); P.toast("Could not save that. Please try again."); return; }
+    b.textContent = pub ? "Posted" : "Saved";
+    P.toast(pub ? "Posted to your profile" : "Saved as a draft");
+    loadMyData();
+    const body = b.closest(".cp-mori-body");
+    body?.querySelectorAll(".cp-mori-next").forEach((x) => x.remove());
+    if (body && P.nextUpHTML) body.insertAdjacentHTML("beforeend", P.nextUpHTML(pub ? ["Plan another video", "Build a binder for these cards", "Which collectors share my taste?"] : ["Plan another video", "Build a binder for these cards"]));
+  });
+
+  // Add here on a binder Mori suggested: put the collector's own card into that binder.
+  app.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-bd-binder-add]");
+    if (!b || !app.contains(b)) return;
+    e.stopPropagation();
+    const item = b.closest("[data-binder-id]"), list = b.closest("[data-binder-card]");
+    const binderId = item.dataset.binderId, cardId = list.dataset.binderCard;
+    list.querySelectorAll("[data-bd-binder-add]").forEach((x) => (x.disabled = true));
+    await fresh();
+    const have = await sb.from("binder_cards").select("id").eq("binder_id", binderId).eq("card_id", cardId).limit(1);
+    let error = have.error;
+    const already = !error && have.data.length > 0;
+    if (!already && !error) {
+      ({ error } = await sb.from("binder_cards").insert({ user_id: session.user.id, binder_id: binderId, card_id: cardId, position: Number(item.dataset.binderCount) || 0 }));
+    }
+    if (error) { list.querySelectorAll("[data-bd-binder-add]").forEach((x) => (x.disabled = false)); P.toast("Could not add it. Please try again."); return; }
+    item.querySelector(".cp-order-item-act").innerHTML = "<mark>" + (already ? "Already here" : "Added") + "</mark>";
+    list.querySelectorAll("[data-bd-binder-add]").forEach((x) => x.closest(".cp-order-item").classList.add("is-done"));
+    const name = item.querySelector("b").textContent;
+    P.toast(already ? "It is already in " + name : "Added to " + name);
+    loadMyData();
+    const body = b.closest(".cp-mori-body");
+    body?.querySelectorAll(".cp-mori-next").forEach((x) => x.remove());
+    if (body && P.nextUpHTML) body.insertAdjacentHTML("beforeend", P.nextUpHTML(["Plan a video of this binder", "Price check this card", "Add another card"]));
+  });
+
+  // Cancel on an open order: ask once, then cancel it (owner-only by RLS).
+  app.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-bd-order-cancel],[data-bd-order-yes],[data-bd-order-keep]");
+    if (!b || !app.contains(b)) return;
+    e.stopPropagation();
+    const item = b.closest("[data-order-id]"), act = item.querySelector(".cp-order-item-act");
+    if ("bdOrderCancel" in b.dataset) {
+      item.classList.add("is-asking");
+      act.innerHTML = "<p>Cancel this order?</p><button data-bd-order-keep>Keep it</button><button class=\"is-danger\" data-bd-order-yes>Yes, cancel</button>";
+      return;
+    }
+    if ("bdOrderKeep" in b.dataset) {
+      item.classList.remove("is-asking");
+      act.innerHTML = "<button data-bd-order-cancel>Cancel</button>";
+      return;
+    }
+    act.querySelectorAll("button").forEach((x) => (x.disabled = true));
+    await fresh();
+    const { error } = await sb.from("market_orders").update({ status: "cancelled" }).eq("id", item.dataset.orderId).eq("status", "open");
+    if (error) { act.querySelectorAll("button").forEach((x) => (x.disabled = false)); P.toast("Could not cancel that. Please try again."); return; }
+    markCancelled(item);
+    P.toast("Order cancelled");
+  });
+
+  // Change details on an order card opens an editor in the card; nothing is sent until Confirm.
+  app.addEventListener("click", (e) => {
+    const save = e.target.closest("[data-order-save],[data-order-cancel]");
+    if (!save || !app.contains(save)) return;
+    e.stopPropagation();
+    const card = save.closest(".cp-mori-confirm"), ed = save.closest("[data-order-edit]");
+    const id = card.querySelector("[data-bd-confirm]").dataset.bdConfirm, o = orders.get(id);
+    if ("orderSave" in save.dataset && o) {
+      const price = Number(ed.querySelector("[data-order-price]").value);
+      if (!(price > 0 && price <= 1000000)) { P.toast("Enter a price in US$"); return; }
+      o.side = ed.querySelector("[data-order-side].is-selected")?.dataset.orderSide === "sell" ? "sell" : "buy";
+      o.days = Number(ed.querySelector("[data-order-days].is-selected")?.dataset.orderDays) || 30;
+      o.price = Math.round(price * 100) / 100;
+      o.changed = true;
+      card.querySelector(".cp-mori-confirm-head").innerHTML = orderHead(o);
+      card.querySelector("ul").innerHTML = orderRows(o);
+      P.toast("Order updated. Tap Confirm to set it.");
+    }
+    ed.remove();
+    card.querySelector("ul").hidden = false;
+    card.querySelector(".cp-mori-actions").hidden = false;
+  });
+
+  // Confirm / Change details on Mori's real proposals.
+  app.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-bd-confirm],[data-bd-edit]");
+    if (!b) return;
+    e.stopPropagation();
+    const action = "bdConfirm" in b.dataset ? "confirm" : "edit";
+    const id = b.dataset.bdConfirm || b.dataset.bdEdit;
+    const box = b.closest(".cp-mori-actions");
+    const order = orders.get(id);
+    if (action === "edit" && order && P.orderEditorHTML) {
+      const card = b.closest(".cp-mori-confirm");
+      card.querySelector("ul").hidden = true;
+      box.hidden = true;
+      box.insertAdjacentHTML("afterend", P.orderEditorHTML(order));
+      card.querySelector("[data-order-price]").focus();
+      return;
+    }
+    box.querySelectorAll("button").forEach((x) => (x.disabled = true));
+    try {
+      await fresh();
+      const res = await fetch("/api/mori-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
+        body: JSON.stringify({ messageId: id, action, ...(order && order.changed ? { changes: { side: order.side, price_usd: order.price, expires_days: order.days } } : {}) }),
+      });
+      if (!res.ok) throw new Error("failed");
+      const out = await res.json();
+      if (action === "confirm") { b.textContent = "Saved"; P.toast("Saved"); loadMyData(); }
+      const thread = b.closest("[data-mori-thread]");
+      if (out.reply && thread) {
+        const msg = document.createElement("div");
+        msg.className = "cp-mori-msg cp-mori-mori";
+        const faceEl = thread.querySelector(".cp-mori-mori .cp-mori-face");
+        msg.innerHTML = (faceEl ? faceEl.outerHTML : "") + '<div class="cp-mori-body"><p>' + fmt(out.reply.content) + "</p></div>";
+        thread.append(msg);
+        msg.scrollIntoView({ block: "end", behavior: "smooth" });
+      }
+      // What to do next after each kind of confirmed card.
+      const NEXT = {
+        add_card_to_collection: ["Which binder should it go in?", "Log a memory about this card", "Price check this card"],
+        add_to_wishlist: ["Set a buy order for this card", "Price check this card", "What else should I chase?"],
+        create_binder: ["Plan a video of this binder", "Which collectors share my taste?", "Build another binder"],
+        save_memory: ["Log another memory", "Plan a video of my collection", "What card should I chase next?"],
+      };
+      const tool = proposals.get(id);
+      if (action === "confirm" && NEXT[tool] && P.nextUpHTML) {
+        const last = thread && [...thread.querySelectorAll(".cp-mori-mori .cp-mori-body")].pop();
+        if (last) last.insertAdjacentHTML("beforeend", P.nextUpHTML(NEXT[tool]));
+      }
+      if (action === "confirm" && order) {
+        orders.delete(id);
+        if (P.orderNext) setTimeout(() => P.orderNext({ side: order.side, card: order.name, price: order.price, days: order.days }), 500);
+      }
+      if (action === "edit") {
+        // Other proposals: Mori asks what to change, and the next message makes a new card.
+        b.textContent = "Changing";
+        P.toast("Tell Mori what to change");
+        const q = document.querySelector("[data-mori-input]") || document.querySelector("#cp-app [data-screen='mori'] input[type='text'], #cp-app [data-screen='mori'] textarea");
+        if (q) q.focus();
+      }
+    } catch {
+      box.querySelectorAll("button").forEach((x) => (x.disabled = false));
+      P.toast("Could not save that. Please try again.");
+    }
+  });
+})();
+</script>

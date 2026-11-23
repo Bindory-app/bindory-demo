@@ -1,0 +1,172 @@
+/*
+ * Tailwind v4 entry: config lives here, with no tailwind.config.js or PostCSS plugin.
+ * - Keep every @import in this top block, above @theme and the rest of the file. Install an
+ *   npm package before @importing its CSS. Never @import a remote URL (web fonts, CDN CSS): the
+ *   build resolves @import from the filesystem. Load those with a <link> in the head() of
+ *   src/routes/__root.tsx and name the family in a --font-* token in @theme inline below.
+ */
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design system definition.
+ *
+ * The design lives in this file: oklch color tokens on the shadcn variables
+ * (--background, --foreground, --primary, --secondary, --muted, --accent, ...) plus
+ * new tokens as needed, font tokens, and custom styles and animations.
+ *
+ * The @theme inline block maps CSS custom properties to Tailwind utility
+ * classes (e.g. --color-primary -> bg-primary, text-primary).
+ *
+ * The :root and .dark blocks define the actual color values using oklch.
+ * All colors MUST use oklch format.
+ *
+ * To add a new semantic color:
+ * 1. Add the variable to :root (light value) and .dark (dark value)
+ * 2. Register it in @theme inline as --color-<name>: var(--<name>)
+ */
+
+@theme inline {
+  --font-sans: "Quicksand", ui-sans-serif, system-ui, sans-serif;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-banner-foreground: var(--banner-foreground);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+
+:root {
+  --radius: 1.25rem;
+  --background: oklch(0.975 0.008 290);
+  --canvas-outer: oklch(0.94 0.02 290);
+  --foreground: oklch(0.25 0.05 270);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.25 0.05 270);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.25 0.05 270);
+  --primary: oklch(0.5414751 0.20505699 283.98028);
+  --primary-foreground: oklch(0.99 0 0);
+  --brand-from: oklch(0.52 0.2 284);
+  --brand-to: oklch(0.74 0.13 340);
+  --banner-foreground: oklch(0.99 0 0);
+  --collection-from: oklch(0.3 0.12 285);
+  --collection-middle: oklch(0.5 0.2 285);
+  --collection-to: oklch(0.67 0.15 315);
+  --progress-track: oklch(0.56 0.12 290);
+  --progress-highlight: oklch(0.91 0.13 95);
+  --showcase-from: oklch(0.55 0.12 190);
+  --showcase-to: oklch(0.65 0.13 250);
+  --challenge-from: oklch(0.59 0.14 30);
+  --challenge-to: oklch(0.66 0.14 350);
+  --secondary: oklch(0.95 0.025 290);
+  --secondary-foreground: oklch(0.25 0.05 270);
+  --muted: oklch(0.95 0.02 290);
+  --muted-foreground: oklch(0.5 0.04 275);
+  --accent: oklch(0.94 0.04 290);
+  --accent-foreground: oklch(0.4 0.17 284);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.91 0.035 290);
+  --input: oklch(0.91 0.035 290);
+  --ring: oklch(0.53 0.2 284);
+  --shadow-orb: 0 10px 24px -6px color-mix(in oklab, var(--primary) 55%, transparent);
+  --shadow-phone: 0 0 60px -20px color-mix(in oklab, var(--primary) 30%, transparent);
+}
+.dark {
+  --background: oklch(0.2 0.04 270);
+  --canvas-outer: oklch(0.15 0.03 270);
+  --foreground: oklch(0.96 0.01 290);
+  --card: oklch(0.25 0.045 272);
+  --card-foreground: oklch(0.96 0.01 290);
+  --popover: oklch(0.25 0.045 272);
+  --popover-foreground: oklch(0.96 0.01 290);
+  --primary: oklch(0.68 0.16 284);
+  --primary-foreground: oklch(0.18 0.04 270);
+  --brand-from: oklch(0.52 0.2 284);
+  --brand-to: oklch(0.74 0.13 340);
+  --secondary: oklch(0.3 0.05 275);
+  --secondary-foreground: oklch(0.96 0.01 290);
+  --muted: oklch(0.3 0.045 275);
+  --muted-foreground: oklch(0.74 0.03 285);
+  --accent: oklch(0.32 0.07 284);
+  --accent-foreground: oklch(0.9 0.05 290);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.36 0.06 280);
+  --input: oklch(0.36 0.06 280);
+  --ring: oklch(0.68 0.16 284);
+  --shadow-orb: 0 10px 24px -6px oklch(0 0 0 / 60%);
+  --shadow-phone: 0 0 60px -20px oklch(0 0 0 / 70%);
+}
+
+@utility bg-brand { background-image: linear-gradient(135deg, var(--brand-from), var(--brand-to)); }
+@utility bg-collection-progress { background-image: linear-gradient(120deg, var(--collection-from), var(--collection-middle), var(--collection-to)); }
+@utility bg-showcase { background-image: linear-gradient(135deg, var(--showcase-from), var(--showcase-to)); }
+@utility bg-challenge { background-image: linear-gradient(135deg, var(--challenge-from), var(--challenge-to)); }
+@utility text-brand { background-image: linear-gradient(135deg, var(--brand-from), var(--brand-to)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+@utility shadow-orb { box-shadow: var(--shadow-orb); }
+@utility shadow-phone { box-shadow: var(--shadow-phone); }
+@utility bg-canvas-outer { background-color: var(--canvas-outer); }
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html, body { overflow-x: hidden; }
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+  }
+}
+
+/* Mori-made videos are image sequences: a slow pan per frame, with reduced motion respected. */
+@keyframes mori-pan {
+  from { transform: scale(1.04) translate3d(0, 0, 0); }
+  to { transform: scale(1.14) translate3d(-2%, -2%, 0); }
+}
+@utility animate-mori-pan { animation: mori-pan 3.2s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .animate-mori-pan { animation: none; }
+}

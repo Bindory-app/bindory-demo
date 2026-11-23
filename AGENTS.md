@@ -1,0 +1,18 @@
+- Brand tokens and phone shell live in src/styles.css and src/components/AppShell.tsx; signed-in pages wrap in AppShell; Ask Mori at / renders its own shell and shows the bottom bar only when signed in.
+- Guest actions on / save the request (src/lib/pending-intent.ts) and open AuthSheet; after sign-in the saved request is replayed so the conversation continues.
+- User tables remain owner-only via RLS; public binder reads use a narrowly projected, publication-gated RPC so private cards, memories and photos stay inaccessible. Profiles are created on signup.
+- Mori's server-only agent runs through Vercel AI Gateway (src/lib/ai-gateway.server.ts); authenticated RPCs handle history and confirmation, while /api/mori-chat verifies the bearer and streams native events as NDJSON for live chat updates.
+- Points are awarded by database triggers on cards/memories inserts; clients cannot insert points_events.
+- New-user onboarding runs inside the Ask Mori chat (steps in src/lib/onboarding.ts); profiles.onboarded_at decides whether it runs, and the bottom bar stays hidden until it finishes.
+- All card lookups go through src/lib/tcgdex.ts (TCGdex search + detail); images are hotlinked via cardImage() and never stored.
+- Home event destinations have dedicated routes; unavailable public showcase data renders an honest empty state rather than invented collectors.
+- Home progress uses owner-scoped collection and binder membership reads; daily prompt rotation and dismissal keys live in a shared browser-safe helper for deterministic testing.
+- Home uses an opt-in AppShell presentation and an Embla event carousel; other screens keep their existing shell and navigation presentation.
+- Mori confirmation uses a SECURITY INVOKER database function with a locked proposal row and one transaction; binder creation uses owned cards only so suggestions never become invented ownership.
+- Mori UI composes AI Elements conversation, message, tool and composer primitives; assistant borders intentionally match the supplied chat references.
+- Collection tabs read only owner-scoped live rows; shared browser-safe helpers govern card pagination and session notices, while collection changes go through Mori confirmation.
+- Grail selections use owner-scoped cards with an invoker user_cards view and transactional rank RPC; only private uploaded slab photos render in grail slots, never ordinary card imagery.
+- AppShell owns one icon-only active-aware bottom navigation shared across screens; collection presentation opts into a card surface and kicker.
+- Mori initialization keys on user identity rather than session tokens; profile failures are retryable and onboarding saves upsert the owned profile before entering chat.
+- Photo ownership is validated at the chat boundary and memory proposal, with private storage policies restricting every operation to the owner's first path segment.
+- Binder details use authenticated server functions and atomic owner-validated save/creation RPCs; anonymous binder links use a safe public projection. Nine-slot pages share one Embla-based viewer, and publishing requires explicit confirmation.
