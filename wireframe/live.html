@@ -158,22 +158,16 @@
     const vals = pts.map((x) => x[1]), lo = Math.min(...vals), hi = Math.max(...vals), span = hi - lo || 1;
     const at = (v) => 4 + Math.round(((v - lo) / span) * 92);
     const dot = (x) => '<i style="position:absolute;top:50%;left:' + at(x[1]) + '%;width:' + (x[0] === "Market price" ? 12 : 8) + "px;height:" + (x[0] === "Market price" ? 12 : 8) + 'px;border-radius:50%;transform:translate(-50%,-50%);background:' + (x[0] === "Market price" ? "#674fd0" : "#fff") + ';border:2px solid #674fd0;box-sizing:border-box"></i>';
-    const day = (iso) => (iso ? new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "");
     const soldText = (x) => !x ? "No recent sales" : typeof x.value_usd === "number" ? usd(x.value_usd) + (x.status === "thin" ? "<small>few sales</small>" : "") : typeof x.last_sale_usd === "number" ? "<small>Last sale</small>" + usd(x.last_sale_usd) : "No recent sales";
     const headline = typeof s.market === "number" ? s.market : vals.length ? vals[0] : sold && typeof sold.raw.value_usd === "number" ? sold.raw.value_usd : null;
-    const latest = sold ? [sold.raw, sold.psa9, sold.psa10].map((x) => x && x.newest_sale_at).filter(Boolean).sort().pop() : "";
-    const sources = [
-      pts.length ? esc(p.source || "TCGplayer") + " US$ prices via " + esc(p.via || "TCGdex") + (p.updated ? " (updated " + esc(day(p.updated)) + ")" : "") : "",
-      sold ? "eBay sold prices via SilphCo Analytics, median of the last 3 sales" + (latest ? " (latest " + esc(day(latest)) + ")" : "") : "",
-    ].filter(Boolean);
     return '<div class="cp-val"><div class="cp-val-head"><small>Mori market check</small><b>' +
       esc((c.name || "") + (c.number ? " " + c.number : "")) + (headline !== null ? " · " + usd(headline) : "") + "</b><span>" + esc([c.set, c.rarity].filter(Boolean).join(" · ")) + "</span></div>" +
       (pts.length ? '<small style="display:block;margin:9px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Raw, ungraded · today</small>' +
         '<div style="position:relative;height:6px;margin:12px 12px 6px;border-radius:3px;background:linear-gradient(90deg,#e4e0ff,#9a88ef)">' + pts.map(dot).join("") + "</div>" +
         '<div class="cp-val-values">' + pts.map((x) => "<span><small>" + esc(x[0]) + "</small><b>" + usd(x[1]) + "</b></span>").join("") + "</div>" : "") +
-      (sold ? '<small style="display:block;margin:4px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Recent eBay sales</small>' +
+      (sold ? '<small style="display:block;margin:4px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Recent sales</small>' +
         '<div class="cp-val-values">' + [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]].map((x) => "<span><small>" + x[0] + "</small><b>" + soldText(x[1]) + "</b></span>").join("") + "</div>" : "") +
-      '<p class="cp-val-note" style="background:#f3f1ff;color:#4b4866">Sources: ' + sources.join("; ") + ". Market price is based on recent sales; lowest listing is the cheapest current listing.</p></div>";
+      "</div>";
   }
 
   function renderRows(rows, ui, steps) {

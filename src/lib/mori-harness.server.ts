@@ -210,14 +210,10 @@ export async function priceCardRow(cardId: string): Promise<MoriRowDraft | null>
             scale: { low: scale.low, market: scale.market, mid: scale.mid },
             variant: scale.variant,
             currency: "USD",
-            source: "TCGplayer",
-            via: "TCGdex",
             updated: scale.updated,
           }
         : {}),
-      ...(sold
-        ? { sold: { raw: sold.raw, psa9: sold.psa9, psa10: sold.psa10, source: sold.source } }
-        : {}),
+      ...(sold ? { sold: { raw: sold.raw, psa9: sold.psa9, psa10: sold.psa10 } } : {}),
     } as Json,
   };
 }
@@ -235,6 +231,7 @@ export async function runMoriHarness(
   const rows: MoriRowDraft[] = [];
   let finalText = "";
   let hrIds: { response_id: string; session_id: string; agent: MoriAgent } | undefined;
+  let cardsOnly = false;
   try {
     const sessions = await chatSessions(db, since);
     const current = sessions[0];
@@ -256,6 +253,8 @@ export async function runMoriHarness(
       let streaming = false;
       const onEvent = (ev: { type: string; delta?: string; item?: OutputItem }) => {
         if (ev.type === "response.output_text.delta" && typeof ev.delta === "string") {
+          // The Price Check agent answers with the market card alone, so its text is not streamed.
+          if (agent === "price") return;
           if (streaming) return emit({ type: "text", text: ev.delta });
           head += ev.delta;
           if (head.length >= 14 || !"role_mismatch".startsWith(head.trimStart().slice(0, 13))) {
@@ -333,10 +332,13 @@ export async function runMoriHarness(
     }
 
     // A price check shows the real market points on a scale, read here from TCGdex (not from the
-    // agent), with the source and date.
+    // agent).
     if (agent === "price" && lastPricedId) {
       const row = await priceCardRow(lastPricedId).catch(() => null);
-      if (row) rows.push(row);
+      if (row) {
+        rows.push(row);
+        cardsOnly = true;
+      }
     }
 
     finalText = stripRowBlocks(answerText(r)).replace(/^\s*role_mismatch\s*/i, "");
@@ -360,5 +362,5 @@ export async function runMoriHarness(
   }
   if (!finalText && !rows.some((row) => row.kind === "confirm" || row.kind === "grade"))
     finalText = "I could not finish that request. Please try again.";
-  return finishMoriTurn(db, rows, finalText, askedAt, emit, hrIds);
+  return finishMoriTurn(db, rows, finalText, askedAt, emit, hrIds, cardsOnly);
 }
