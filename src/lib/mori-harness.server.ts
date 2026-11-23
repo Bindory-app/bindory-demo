@@ -21,6 +21,7 @@ import {
 } from "./harnessrouter.server";
 import { readSignedRows, sealCollector, stripRowBlocks } from "./mori-mcp-auth.server";
 import { cardImage, getCardPricing, priceScale } from "./tcgdex";
+import { ebaySoldPrices } from "./silphco.server";
 import { finishMoriTurn, tools, type MoriRowDraft } from "./mori-agent.server";
 
 type DB = SupabaseClient<Database>;
@@ -188,8 +189,9 @@ async function toolCalls(r: HRResponse, sessionId: string) {
 export async function priceCardRow(cardId: string): Promise<MoriRowDraft | null> {
   const r = await getCardPricing(cardId);
   const scale = r ? priceScale(r.pricing) : null;
-  if (!r || !scale) return null;
-  const headline = scale.market ?? scale.mid ?? scale.low;
+  const sold = r ? await ebaySoldPrices(r.card.id) : null;
+  if (!r || (!scale && !sold)) return null;
+  const headline = scale?.market ?? scale?.mid ?? scale?.low ?? sold?.raw.value_usd ?? undefined;
   return {
     role: "mori",
     kind: "price",
@@ -203,12 +205,19 @@ export async function priceCardRow(cardId: string): Promise<MoriRowDraft | null>
         rarity: r.card.rarity,
         image: cardImage(r.card.image, "low"),
       },
-      scale: { low: scale.low, market: scale.market, mid: scale.mid },
-      variant: scale.variant,
-      currency: "USD",
-      source: "TCGplayer",
-      via: "TCGdex",
-      updated: scale.updated,
+      ...(scale
+        ? {
+            scale: { low: scale.low, market: scale.market, mid: scale.mid },
+            variant: scale.variant,
+            currency: "USD",
+            source: "TCGplayer",
+            via: "TCGdex",
+            updated: scale.updated,
+          }
+        : {}),
+      ...(sold
+        ? { sold: { raw: sold.raw, psa9: sold.psa9, psa10: sold.psa10, source: sold.source } }
+        : {}),
     } as Json,
   };
 }
