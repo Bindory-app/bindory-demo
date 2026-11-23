@@ -34,7 +34,7 @@ type DB = SupabaseClient<Database>;
 // Default is on the AI Gateway free tier; newer models need paid credits.
 const MODEL = process.env["AI_GATEWAY_MODEL"] || "google/gemini-2.5-flash";
 
-const SYSTEM = `You are Mori, a warm, concise Pokémon TCG collector agent inside the Bindory app. Keep replies short (2-5 sentences, or a short list), friendly, US English, sentence case. Use **bold** for card names and key numbers. Write money with thousands separators, e.g. US$2,211.14 or €1,810.68.
+export const SYSTEM = `You are Mori, a warm, concise Pokémon TCG collector agent inside the Bindory app. Keep replies short (2-5 sentences, or a short list), friendly, US English, sentence case. Use **bold** for card names and key numbers. Write money with thousands separators, e.g. US$2,211.14 or €1,810.68.
 Every answer ends with a concrete next step the collector can take in the app, never a dead end.
 - What to chase next: list_my_cards, pick the set or theme they collect most, get_set_cards for it, choose ONE specific card they are missing (prefer a notable one), get_card_prices for it, and in the same answer always call add_to_wishlist for that card (do not ask first; the collector confirms on the card). Your text: one or two sentences on why it fits, with today's price range.
 - Trendy collections: call market_trends and name the 2-3 cards or sets rising fastest, with the change in % and today's price range. Say which of them the collector already owns (list_my_cards).
@@ -69,7 +69,7 @@ Rules:
   These are 2-3 short follow-ups the collector might tap next, written as the collector speaking (under 40 characters each), that you can actually help with. After a pre-grade report, include "Where can I send it for grading?" and "What does grading cost?".`;
 
 const str = (d: string) => ({ type: "string", description: d });
-const tools: NonNullable<ResponsesRequest["tools"]> = [
+export const tools: NonNullable<ResponsesRequest["tools"]> = [
   {
     type: "function",
     name: "search_catalogue",
@@ -379,7 +379,7 @@ const tools: NonNullable<ResponsesRequest["tools"]> = [
   },
 ];
 
-type Args = Record<string, unknown>;
+export type Args = Record<string, unknown>;
 const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
 async function briefCard(id: string, reason?: string): Promise<ProposalCard | null> {
@@ -599,7 +599,7 @@ async function buildProposal(
   name: string,
   a: Args,
   message = "",
-  seen: Set<string> = new Set(),
+  seen: Set<string> | null = new Set(),
 ): Promise<Proposal | { error: string }> {
   if (!isWriteTool(name)) return { error: "Unknown tool" };
   const parsed = validateWriteArgs(name, a);
@@ -659,8 +659,10 @@ async function buildProposal(
     // Cards are optional: keep only ones Mori actually looked up, so a guessed id never shows the wrong card.
     const cid = s(a["card_id"]);
     const tid = s(a["traded_card_id"]);
-    const card = cid && seen.has(cid) ? ((await briefCard(cid)) ?? undefined) : undefined;
-    const traded_card = tid && seen.has(tid) ? ((await briefCard(tid)) ?? undefined) : undefined;
+    const card =
+      cid && (!seen || seen.has(cid)) ? ((await briefCard(cid)) ?? undefined) : undefined;
+    const traded_card =
+      tid && (!seen || seen.has(tid)) ? ((await briefCard(tid)) ?? undefined) : undefined;
     // From the fill-in template, the story is exactly what the collector wrote (facts, feelings, ratings).
     const fromTemplate = message.endsWith(TEMPLATE_END);
     const story = fromTemplate
@@ -800,6 +802,220 @@ async function streamWithFallback(
   }
 }
 
+export type MoriRowDraft = { role: "mori"; kind: string; content: string; payload?: Json };
+export type MoriToolContext = {
+  /** The collector's message this answer is for (memory templates keep their exact words). */
+  message: string;
+  /** Card ids looked up in this chat; null when the caller cannot know them (the MCP endpoint),
+   *  in which case a card only has to exist in the catalogue. */
+  seenIds: Set<string> | null;
+  /** The card most recently priced in this answer, so a pre-grade report can name it. */
+  lastCard: string;
+};
+
+/** Runs one of Mori's tools for this collector. `rows` are the chat cards it shows (confirmation,
+ *  pre-grade report, profiles, storyboard, binders, orders); `stop` means the answer should end
+ *  after it. Shared by the AI Gateway loop and the HarnessRouter MCP endpoint. */
+export async function executeMoriTool(
+  db: DB,
+  userId: string,
+  name: string,
+  args: Args,
+  ctx: MoriToolContext,
+): Promise<{ result: unknown; rows: MoriRowDraft[]; stop: boolean }> {
+  const rows: MoriRowDraft[] = [];
+  let stop = false;
+  let result: unknown;
+  if (name === "pre_grade_report") {
+    const report = gradeReport(args);
+    if (!("error" in report) && !report.card && ctx.lastCard) report.card = ctx.lastCard;
+    if ("error" in report) result = report;
+    else {
+      rows.push({
+        role: "mori",
+        kind: "grade",
+        content: `Pre-grade${report.card ? ` for ${report.card}` : ""}: ${report.outcomes
+          .map((o) => `${o.grade} (${o.probability}%)`)
+          .join(", ")}. ${report.take}`,
+        payload: report as unknown as Json,
+      });
+      result = { shown_to_user: true, note: "The report is on screen." };
+      stop = true;
+    }
+  } else if (name === "show_collectors") {
+    // Only real public profiles; Mori supplies the reason.
+    const picks = (Array.isArray(args["picks"]) ? (args["picks"] as Args[]) : []).slice(0, 4);
+    const { data } = await db.rpc("list_public_collectors", { p_query: "" });
+    const all = (Array.isArray(data) ? data : []) as {
+      display_name?: string;
+      username?: string;
+      avatar_url?: string;
+    }[];
+    const people = picks
+      .map((x) => {
+        const c = all.find((o) => o.username === (s(x["username"]) ?? "").replace(/^@/, ""));
+        return c
+          ? {
+              name: c.display_name ?? c.username,
+              username: c.username,
+              avatar: c.avatar_url ?? null,
+              why: (s(x["why"]) ?? "").slice(0, 140),
+            }
+          : null;
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+    if (!people.length)
+      result = { error: "Use usernames exactly as find_collectors returned them." };
+    else {
+      rows.push({
+        role: "mori",
+        kind: "people",
+        content: `Collectors you may like: ${people.map((x) => x.name).join(", ")}`,
+        payload: { people } as unknown as Json,
+      });
+      result = {
+        shown_to_user: true,
+        note: "The profile cards are on screen. Reply in one short line.",
+      };
+    }
+  } else if (name === "plan_video") {
+    // Storyboard from the collector's own cards; they post or save it with a button.
+    const scenes = (Array.isArray(args["scenes"]) ? (args["scenes"] as Args[]) : []).slice(0, 6);
+    const ids = scenes.map((x) => s(x["card_id"]) ?? "");
+    const { data: owned } = await db
+      .from("cards")
+      .select("tcgdex_id, name, image_url")
+      .in("tcgdex_id", ids.length ? ids : ["-"]);
+    const frames = scenes
+      .map((x) => {
+        const c = (owned ?? []).find((o) => o.tcgdex_id === s(x["card_id"]));
+        return c && c.image_url
+          ? {
+              name: c.name,
+              image: c.image_url,
+              caption: (s(x["caption"]) ?? "").slice(0, 120),
+            }
+          : null;
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+    if (frames.length < 2)
+      result = { error: "Use 3-5 cards the collector owns (ids from list_my_cards)." };
+    else {
+      const title = (s(args["title"]) ?? "My collection").slice(0, 80);
+      rows.push({
+        role: "mori",
+        kind: "video",
+        content: `Video plan: ${title}`,
+        payload: { title, frames } as unknown as Json,
+      });
+      result = {
+        shown_to_user: true,
+        note: "The storyboard is on screen with Post to profile and Save draft buttons. Reply in one short line.",
+      };
+    }
+  } else if (name === "suggest_binder_for_card") {
+    // The collector picks the binder with an Add here button; Mori only suggests one.
+    result = await runReadTool(db, name, args).catch((e: unknown) => ({
+      error: e instanceof Error ? e.message : "Tool failed",
+    }));
+    const r = result as {
+      card?: { id: string; name: string } | null;
+      binders?: { id: string; name: string; binder_cards?: { count: number }[] }[];
+    };
+    const owned = r.card
+      ? await db.from("cards").select("id").eq("tcgdex_id", r.card.id).limit(1).maybeSingle()
+      : null;
+    if (!r.card) result = { error: "Card not found" };
+    else if (!owned?.data)
+      result = {
+        note: "This card is not in the collection yet. Offer to add it to the collection first.",
+      };
+    else if (!r.binders?.length)
+      result = {
+        note: "The collector has no binders yet. Offer to build one with this card.",
+      };
+    else {
+      rows.push({
+        role: "mori",
+        kind: "binders",
+        content: `Pick a binder for ${r.card.name}`,
+        payload: {
+          card: { name: r.card.name, owned_card_id: owned.data.id },
+          binders: r.binders.map((b) => ({
+            id: b.id,
+            name: b.name,
+            count: b.binder_cards?.[0]?.count ?? 0,
+          })),
+        } as unknown as Json,
+      });
+      result = {
+        shown_to_user: true,
+        binders: r.binders.map((b) => ({ name: b.name })),
+        note: "The binders are on screen, each with an Add here button. In one or two short sentences, say which binder fits best and why. Never claim you added the card.",
+      };
+    }
+  } else if (name === "list_my_orders") {
+    // Open orders are shown as cards with a Cancel button; Mori only summarises them.
+    result = await runReadTool(db, name, args).catch((e: unknown) => ({
+      error: e instanceof Error ? e.message : "Tool failed",
+    }));
+    if (Array.isArray(result) && result.length) {
+      rows.push({
+        role: "mori",
+        kind: "orders",
+        content: `${result.length} open order${result.length > 1 ? "s" : ""}`,
+        payload: { orders: result } as unknown as Json,
+      });
+      result = {
+        shown_to_user: true,
+        count: result.length,
+        note: 'The open orders are on screen as cards, each with a Cancel button. Reply in one short, warm line such as "Here are your open orders. Tap Cancel on any you no longer want." Do not list them again.',
+      };
+    }
+  } else if (
+    (name === "add_to_wishlist" || name === "add_card_to_collection") &&
+    ctx.seenIds !== null &&
+    !ctx.seenIds.has(s(args["card_id"]) ?? "")
+  ) {
+    result = {
+      error:
+        "Look this card up first with search_catalogue (name and number) and use the id it returns.",
+    };
+  } else if (isWriteTool(name)) {
+    const p = await buildProposal(db, userId, name, args, ctx.message, ctx.seenIds);
+    if ("error" in p) result = p;
+    else {
+      const payload: ProposalPayload = { ...p, status: "pending" };
+      rows.push({
+        role: "mori",
+        kind: "confirm",
+        content: proposalTitle(p),
+        payload: payload as unknown as Json,
+      });
+      result = { shown_to_user: true, note: "Waiting for the user to tap Confirm or Edit." };
+      stop = true;
+    }
+  } else {
+    result = await runReadTool(db, name, args).catch((e: unknown) => ({
+      error: e instanceof Error ? e.message : "Tool failed",
+    }));
+  }
+  // The card this answer is about, so the report and follow-ups can name it.
+  if (name === "get_card_prices" && result && typeof result === "object" && "card" in result) {
+    const c = (result as { card: { name?: string; number?: string; set?: string } }).card;
+    if (c.name)
+      ctx.lastCard = `${c.name}${c.number ? ` ${c.number}` : ""}${c.set ? ` (${c.set})` : ""}`;
+  }
+  for (const m of JSON.stringify(result ?? null).matchAll(/"(?:id|tcgdex_id)":"([^"]+)"/g))
+    if (m[1]) ctx.seenIds?.add(m[1]);
+  return { result, rows, stop };
+}
+
+/** Which agent runtime answers: "harnessrouter" (the Ask Mori harness) or "gateway" (default, and
+ *  the rollback). Set with MORI_RUNTIME in the server environment. */
+export const moriRuntime = (): "harnessrouter" | "gateway" =>
+  process.env["MORI_RUNTIME"]?.trim() === "harnessrouter" ? "harnessrouter" : "gateway";
+
 /** Server execution only: shared by the authenticated RPC and streaming HTTP handler. */
 export async function runMori(
   db: DB,
@@ -810,8 +1026,12 @@ export async function runMori(
   oidcToken?: string | null,
   images: string[] = [],
   since?: string,
+  accessToken?: string,
 ) {
-  const past = await history(db, since);
+  // HarnessRouter runs Mori when MORI_RUNTIME=harnessrouter; it needs the collector's session for
+  // the tool endpoint, so callers without one (the plain RPC) stay on AI Gateway.
+  const onHarness = moriRuntime() === "harnessrouter" && Boolean(accessToken);
+  const past = onHarness ? [] : await history(db, since);
   // The stored text notes the photos so later turns know they were sent (the images themselves are not stored).
   const stored = images.length
     ? `${message}\n[Sent ${images.length} card photos: front and back]`
@@ -823,6 +1043,10 @@ export async function runMori(
     .single();
   if (ins.error) throw ins.error;
   const askedAt = Date.parse(ins.data.created_at);
+  if (onHarness && accessToken) {
+    const { runMoriHarness } = await import("./mori-harness.server");
+    return runMoriHarness(db, userId, accessToken, message, emit, images, since, askedAt);
+  }
 
   const input: ResponsesInputItem[] = [
     ...past,
@@ -838,11 +1062,10 @@ export async function runMori(
   ];
   const rows: { role: "mori"; kind: string; content: string; payload?: Json }[] = [];
   let finalText = "";
-  let lastCard = "";
+  const ctx: MoriToolContext = { message, seenIds: new Set<string>(), lastCard: "" };
   // Card ids Mori has actually looked up in this chat, so it never proposes a card from a guessed id.
-  const seenIds = new Set<string>(
-    JSON.stringify(past).match(/[a-z0-9.]+-[a-z0-9]+(?=\\?")/gi) ?? [],
-  );
+  for (const id of JSON.stringify(past).match(/[a-z0-9.]+-[a-z0-9]+(?=\\?")/gi) ?? [])
+    ctx.seenIds?.add(id);
 
   try {
     for (let turn = 0; turn < 6; turn++) {
@@ -899,196 +1122,10 @@ export async function runMori(
           name,
           arguments: call.arguments ?? "{}",
         });
-        let result: unknown;
-        if (name === "pre_grade_report") {
-          const report = gradeReport(args);
-          if (!("error" in report) && !report.card && lastCard) report.card = lastCard;
-          if ("error" in report) result = report;
-          else {
-            rows.push({
-              role: "mori",
-              kind: "grade",
-              content: `Pre-grade${report.card ? ` for ${report.card}` : ""}: ${report.outcomes
-                .map((o) => `${o.grade} (${o.probability}%)`)
-                .join(", ")}. ${report.take}`,
-              payload: report as unknown as Json,
-            });
-            result = { shown_to_user: true, note: "The report is on screen." };
-            stop = true;
-          }
-        } else if (name === "show_collectors") {
-          // Only real public profiles; Mori supplies the reason.
-          const picks = (Array.isArray(args["picks"]) ? (args["picks"] as Args[]) : []).slice(0, 4);
-          const { data } = await db.rpc("list_public_collectors", { p_query: "" });
-          const all = (Array.isArray(data) ? data : []) as {
-            display_name?: string;
-            username?: string;
-            avatar_url?: string;
-          }[];
-          const people = picks
-            .map((x) => {
-              const c = all.find((o) => o.username === (s(x["username"]) ?? "").replace(/^@/, ""));
-              return c
-                ? {
-                    name: c.display_name ?? c.username,
-                    username: c.username,
-                    avatar: c.avatar_url ?? null,
-                    why: (s(x["why"]) ?? "").slice(0, 140),
-                  }
-                : null;
-            })
-            .filter((x): x is NonNullable<typeof x> => x !== null);
-          if (!people.length)
-            result = { error: "Use usernames exactly as find_collectors returned them." };
-          else {
-            rows.push({
-              role: "mori",
-              kind: "people",
-              content: `Collectors you may like: ${people.map((x) => x.name).join(", ")}`,
-              payload: { people } as unknown as Json,
-            });
-            result = {
-              shown_to_user: true,
-              note: "The profile cards are on screen. Reply in one short line.",
-            };
-          }
-        } else if (name === "plan_video") {
-          // Storyboard from the collector's own cards; they post or save it with a button.
-          const scenes = (Array.isArray(args["scenes"]) ? (args["scenes"] as Args[]) : []).slice(
-            0,
-            6,
-          );
-          const ids = scenes.map((x) => s(x["card_id"]) ?? "");
-          const { data: owned } = await db
-            .from("cards")
-            .select("tcgdex_id, name, image_url")
-            .in("tcgdex_id", ids.length ? ids : ["-"]);
-          const frames = scenes
-            .map((x) => {
-              const c = (owned ?? []).find((o) => o.tcgdex_id === s(x["card_id"]));
-              return c && c.image_url
-                ? {
-                    name: c.name,
-                    image: c.image_url,
-                    caption: (s(x["caption"]) ?? "").slice(0, 120),
-                  }
-                : null;
-            })
-            .filter((x): x is NonNullable<typeof x> => x !== null);
-          if (frames.length < 2)
-            result = { error: "Use 3-5 cards the collector owns (ids from list_my_cards)." };
-          else {
-            const title = (s(args["title"]) ?? "My collection").slice(0, 80);
-            rows.push({
-              role: "mori",
-              kind: "video",
-              content: `Video plan: ${title}`,
-              payload: { title, frames } as unknown as Json,
-            });
-            result = {
-              shown_to_user: true,
-              note: "The storyboard is on screen with Post to profile and Save draft buttons. Reply in one short line.",
-            };
-          }
-        } else if (name === "suggest_binder_for_card") {
-          // The collector picks the binder with an Add here button; Mori only suggests one.
-          result = await runReadTool(db, name, args).catch((e: unknown) => ({
-            error: e instanceof Error ? e.message : "Tool failed",
-          }));
-          const r = result as {
-            card?: { id: string; name: string } | null;
-            binders?: { id: string; name: string; binder_cards?: { count: number }[] }[];
-          };
-          const owned = r.card
-            ? await db.from("cards").select("id").eq("tcgdex_id", r.card.id).limit(1).maybeSingle()
-            : null;
-          if (!r.card) result = { error: "Card not found" };
-          else if (!owned?.data)
-            result = {
-              note: "This card is not in the collection yet. Offer to add it to the collection first.",
-            };
-          else if (!r.binders?.length)
-            result = {
-              note: "The collector has no binders yet. Offer to build one with this card.",
-            };
-          else {
-            rows.push({
-              role: "mori",
-              kind: "binders",
-              content: `Pick a binder for ${r.card.name}`,
-              payload: {
-                card: { name: r.card.name, owned_card_id: owned.data.id },
-                binders: r.binders.map((b) => ({
-                  id: b.id,
-                  name: b.name,
-                  count: b.binder_cards?.[0]?.count ?? 0,
-                })),
-              } as unknown as Json,
-            });
-            result = {
-              shown_to_user: true,
-              binders: r.binders.map((b) => ({ name: b.name })),
-              note: "The binders are on screen, each with an Add here button. In one or two short sentences, say which binder fits best and why. Never claim you added the card.",
-            };
-          }
-        } else if (name === "list_my_orders") {
-          // Open orders are shown as cards with a Cancel button; Mori only summarises them.
-          result = await runReadTool(db, name, args).catch((e: unknown) => ({
-            error: e instanceof Error ? e.message : "Tool failed",
-          }));
-          if (Array.isArray(result) && result.length) {
-            rows.push({
-              role: "mori",
-              kind: "orders",
-              content: `${result.length} open order${result.length > 1 ? "s" : ""}`,
-              payload: { orders: result } as unknown as Json,
-            });
-            result = {
-              shown_to_user: true,
-              count: result.length,
-              note: 'The open orders are on screen as cards, each with a Cancel button. Reply in one short, warm line such as "Here are your open orders. Tap Cancel on any you no longer want." Do not list them again.',
-            };
-          }
-        } else if (
-          (name === "add_to_wishlist" || name === "add_card_to_collection") &&
-          !seenIds.has(s(args["card_id"]) ?? "")
-        ) {
-          result = {
-            error:
-              "Look this card up first with search_catalogue (name and number) and use the id it returns.",
-          };
-        } else if (isWriteTool(name)) {
-          const p = await buildProposal(db, userId, name, args, message, seenIds);
-          if ("error" in p) result = p;
-          else {
-            const payload: ProposalPayload = { ...p, status: "pending" };
-            rows.push({
-              role: "mori",
-              kind: "confirm",
-              content: proposalTitle(p),
-              payload: payload as unknown as Json,
-            });
-            result = { shown_to_user: true, note: "Waiting for the user to tap Confirm or Edit." };
-            stop = true;
-          }
-        } else {
-          result = await runReadTool(db, name, args).catch((e: unknown) => ({
-            error: e instanceof Error ? e.message : "Tool failed",
-          }));
-        }
-        // The card this answer is about, so the report and follow-ups can name it.
-        if (
-          name === "get_card_prices" &&
-          result &&
-          typeof result === "object" &&
-          "card" in result
-        ) {
-          const c = (result as { card: { name?: string; number?: string; set?: string } }).card;
-          if (c.name)
-            lastCard = `${c.name}${c.number ? ` ${c.number}` : ""}${c.set ? ` (${c.set})` : ""}`;
-        }
-        for (const m of JSON.stringify(result ?? null).matchAll(/"(?:id|tcgdex_id)":"([^"]+)"/g))
-          if (m[1]) seenIds.add(m[1]);
+        const out = await executeMoriTool(db, userId, name, args, ctx);
+        rows.push(...out.rows);
+        if (out.stop) stop = true;
+        const result = out.result;
         statusRow.payload = {
           name,
           input: args as Json,
@@ -1117,6 +1154,21 @@ export async function runMori(
         : "Sorry, I could not answer just now. Please try again.";
   }
 
+  return finishMoriTurn(db, rows, finalText, askedAt, emit);
+}
+
+/** Ends one answer: pulls out the follow-up suggestions, puts the reply before any card, and saves
+ *  every row in order after the question. `hr` (HarnessRouter ids) is kept on the turn's last text
+ *  or status row so the next message can continue the same session. */
+export async function finishMoriTurn(
+  db: DB,
+  rows: MoriRowDraft[],
+  text: string,
+  askedAt: number,
+  emit: (event: MoriStreamEvent) => void,
+  hr?: { response_id: string; session_id: string; agent?: string },
+) {
+  let finalText = text;
   if (!finalText && !rows.some((row) => row.kind === "confirm" || row.kind === "grade"))
     finalText = "I could not finish that request. Please try again.";
   // Pull out the follow-up questions Mori suggests (shown as buttons under the answer).
@@ -1163,6 +1215,17 @@ export async function runMori(
   }
   if (suggestions.length)
     rows.push({ role: "mori", kind: "suggest", content: "", payload: { suggestions } });
+  if (hr) {
+    const holder = [...rows].reverse().find((r) => r.kind === "text" || r.kind === "status");
+    if (holder)
+      holder.payload = {
+        ...(holder.payload && typeof holder.payload === "object" && !Array.isArray(holder.payload)
+          ? holder.payload
+          : {}),
+        hr,
+      } as Json;
+    else rows.push({ role: "mori", kind: "status", content: "Answered", payload: { hr } as Json });
+  }
   // One insert gives every row the same time, and history is read back in time order, so give each
   // row its own millisecond (after the question) to keep the answer in order next time.
   const base = Math.max(Date.now(), Number.isFinite(askedAt) ? askedAt + 1 : 0);

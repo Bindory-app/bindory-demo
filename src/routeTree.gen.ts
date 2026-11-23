@@ -22,6 +22,7 @@ import { Route as TrendingBindersRouteImport } from './routes/trending-binders'
 import { Route as ApiGateRouteImport } from './routes/api/gate'
 import { Route as ApiMoriChatRouteImport } from './routes/api/mori-chat'
 import { Route as ApiMoriConfirmRouteImport } from './routes/api/mori-confirm'
+import { Route as ApiMoriMcpRouteImport } from './routes/api/mori-mcp'
 import { Route as BIdRouteImport } from './routes/b.$id'
 import { Route as BindersIdRouteImport } from './routes/binders.$id'
 import { Route as CUsernameRouteImport } from './routes/c.$username'
@@ -92,6 +93,11 @@ const ApiMoriConfirmRoute = ApiMoriConfirmRouteImport.update({
   path: '/api/mori-confirm',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMoriMcpRoute = ApiMoriMcpRouteImport.update({
+  id: '/api/mori-mcp',
+  path: '/api/mori-mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BIdRoute = BIdRouteImport.update({
   id: '/b/$id',
   path: '/b/$id',
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/api/gate': typeof ApiGateRoute
   '/api/mori-chat': typeof ApiMoriChatRoute
   '/api/mori-confirm': typeof ApiMoriConfirmRoute
+  '/api/mori-mcp': typeof ApiMoriMcpRoute
   '/b/$id': typeof BIdRoute
   '/binders/$id': typeof BindersIdRoute
   '/c/$username': typeof CUsernameRoute
@@ -146,6 +153,7 @@ export interface FileRoutesByTo {
   '/api/gate': typeof ApiGateRoute
   '/api/mori-chat': typeof ApiMoriChatRoute
   '/api/mori-confirm': typeof ApiMoriConfirmRoute
+  '/api/mori-mcp': typeof ApiMoriMcpRoute
   '/b/$id': typeof BIdRoute
   '/binders/$id': typeof BindersIdRoute
   '/c/$username': typeof CUsernameRoute
@@ -166,6 +174,7 @@ export interface FileRoutesById {
   '/api/gate': typeof ApiGateRoute
   '/api/mori-chat': typeof ApiMoriChatRoute
   '/api/mori-confirm': typeof ApiMoriConfirmRoute
+  '/api/mori-mcp': typeof ApiMoriMcpRoute
   '/b/$id': typeof BIdRoute
   '/binders/$id': typeof BindersIdRoute
   '/c/$username': typeof CUsernameRoute
@@ -187,6 +196,7 @@ export interface FileRouteTypes {
     | '/api/gate'
     | '/api/mori-chat'
     | '/api/mori-confirm'
+    | '/api/mori-mcp'
     | '/b/$id'
     | '/binders/$id'
     | '/c/$username'
@@ -206,6 +216,7 @@ export interface FileRouteTypes {
     | '/api/gate'
     | '/api/mori-chat'
     | '/api/mori-confirm'
+    | '/api/mori-mcp'
     | '/b/$id'
     | '/binders/$id'
     | '/c/$username'
@@ -225,6 +236,7 @@ export interface FileRouteTypes {
     | '/api/gate'
     | '/api/mori-chat'
     | '/api/mori-confirm'
+    | '/api/mori-mcp'
     | '/b/$id'
     | '/binders/$id'
     | '/c/$username'
@@ -245,6 +257,7 @@ export interface RootRouteChildren {
   ApiGateRoute: typeof ApiGateRoute
   ApiMoriChatRoute: typeof ApiMoriChatRoute
   ApiMoriConfirmRoute: typeof ApiMoriConfirmRoute
+  ApiMoriMcpRoute: typeof ApiMoriMcpRoute
   BIdRoute: typeof BIdRoute
   BindersIdRoute: typeof BindersIdRoute
   CUsernameRoute: typeof CUsernameRoute
@@ -344,6 +357,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMoriConfirmRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/mori-mcp': {
+      id: '/api/mori-mcp'
+      path: '/api/mori-mcp'
+      fullPath: '/api/mori-mcp'
+      preLoaderRoute: typeof ApiMoriMcpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/b/$id': {
       id: '/b/$id'
       path: '/b/$id'
@@ -389,6 +409,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiGateRoute: ApiGateRoute,
   ApiMoriChatRoute: ApiMoriChatRoute,
   ApiMoriConfirmRoute: ApiMoriConfirmRoute,
+  ApiMoriMcpRoute: ApiMoriMcpRoute,
   BIdRoute: BIdRoute,
   BindersIdRoute: BindersIdRoute,
   CUsernameRoute: CUsernameRoute,

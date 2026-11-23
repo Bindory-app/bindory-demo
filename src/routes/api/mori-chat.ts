@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { waitUntil } from "@vercel/functions";
 import { ownMessagePhotos } from "@/lib/mori-validation";
 
 export const Route = createFileRoute("/api/mori-chat")({
@@ -64,7 +65,18 @@ export const Route = createFileRoute("/api/mori-chat")({
             };
             // On Vercel each request carries a short-lived OIDC token that AI Gateway accepts directly.
             const oidcToken = request.headers.get("x-vercel-oidc-token");
-            void runMori(db, userId, message, emit, abort.signal, oidcToken, images, since)
+            // The collector's own session: the HarnessRouter path seals it for Mori's tool endpoint.
+            const task = runMori(
+              db,
+              userId,
+              message,
+              emit,
+              abort.signal,
+              oidcToken,
+              images,
+              since,
+              token.slice(7),
+            )
               .catch((error) => {
                 console.error(
                   "Mori chat failed",
@@ -75,6 +87,8 @@ export const Route = createFileRoute("/api/mori-chat")({
               .finally(() => {
                 if (!abort.signal.aborted) controller.close();
               });
+            // Keep the function alive until the answer is saved, even if the collector leaves.
+            waitUntil(task);
           },
           cancel() {
             abort.abort();
