@@ -4366,15 +4366,10 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     const t = /^\d{4}-\d{2}-\d{2}$/.test(d) ? new Date(d + "T12:00:00") : null;
     return t && !isNaN(t) ? t.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : d;
   };
-  // Condition rows for a sell order: overall, centering, each corner, edges, surface.
+  // The order card shows only the overall condition (e.g. Near mint). The detailed checks behind it
+  // (centering, each corner, edges, surface) stay with the order for Mori's own assessment.
   function conditionRows(c) {
-    if (!c || !c.overall) return "";
-    const ce = c.centering || {}, co = c.corners || {};
-    const centering = [ce.front && "Front " + ce.front, ce.back && "Back " + ce.back].filter(Boolean).join(" · ");
-    return row("Condition", c.overall + (c.summary ? " · " + c.summary : "")) +
-      (centering ? row("Centering", centering) : "") +
-      [["Top left", co.top_left], ["Top right", co.top_right], ["Bottom left", co.bottom_left], ["Bottom right", co.bottom_right]].filter((x) => x[1]).map((x) => row(x[0] + " corner", x[1])).join("") +
-      (c.edges ? row("Edges", c.edges) : "") + (c.surface ? row("Surface", c.surface) : "");
+    return c && c.overall ? row("Condition", c.overall) : "";
   }
   // The collector's private order photos: short-lived signed links, only for their own files.
   async function fillPhotos(el) {
