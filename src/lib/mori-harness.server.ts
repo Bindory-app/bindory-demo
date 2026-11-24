@@ -353,6 +353,7 @@ export async function runMoriHarness(
 
     let lastCard = "";
     let lastPricedId = "";
+    const pricedIds = new Set<string>();
     for (const c of await toolCalls(r, sessionId)) {
       const result = toolResult(c.output);
       rows.push({
@@ -370,7 +371,10 @@ export async function runMoriHarness(
         lastCard = `${card["name"]}${card["number"] ? ` ${String(card["number"])}` : ""}${
           card["set"] ? ` (${String(card["set"])})` : ""
         }`;
-        if (typeof card["id"] === "string") lastPricedId = card["id"];
+        if (typeof card["id"] === "string") {
+          lastPricedId = card["id"];
+          pricedIds.add(card["id"]);
+        }
       }
       for (const row of readSignedRows(c.output ?? "", userId).filter(isRow)) {
         const p = asObject(row.payload);
@@ -384,7 +388,11 @@ export async function runMoriHarness(
 
     // A price check shows the real market points on a scale, read here from TCGdex (not from the
     // agent).
-    if (agent === "price" && lastPricedId) {
+    // The same format every time, whichever agent answered: an answer that prices exactly one
+    // card and shows no other card (order, wishlist, grade, photos...) is a price check.
+    const singlePriceCheck =
+      pricedIds.size === 1 && !rows.some((row) => row.kind !== "status") && Boolean(lastPricedId);
+    if (singlePriceCheck) {
       const row = await priceCardRow(lastPricedId).catch(() => null);
       if (row) {
         rows.push(row);

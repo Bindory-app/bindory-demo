@@ -92,6 +92,8 @@ export function routeMoriMessage(
     return "order";
   if (/^(please )?add\b.*\bcollection\b|\badd (this|a|the) card\b/i.test(m)) return "add";
   if (/\bprice\b|\bworth\b|\bvalue\b|\bhow much\b/i.test(m)) return "price";
+  // Just a card name and its number (e.g. "Mega Charizard X ex 125/094") is a price check.
+  if (/^[\p{L}\p{N}'’.:&\- ]{2,60}\s#?[A-Z]{0,3}\d{1,4}\/[A-Z]{0,3}\d{1,4}$/iu.test(m)) return "price";
   if (hasPhotos) return "price";
   return null;
 }

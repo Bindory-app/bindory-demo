@@ -220,3 +220,17 @@ describe("Sell orders with photos", () => {
     expect(orderCondition.safeParse({ edges: "Clean" }).success).toBe(false);
   });
 });
+
+describe("Bare card names are price checks", () => {
+  it("sends just a card name and number to Price Check", () => {
+    expect(routeMoriMessage("Mega Charizard X ex 125/094")).toBe("price");
+    expect(routeMoriMessage("Umbreon VMAX 215/203")).toBe("price");
+    expect(routeMoriMessage("Pikachu 58/102")).toBe("price");
+    expect(routeMoriMessage("Charizard ex SV107/SV122")).toBe("price");
+  });
+  it("keeps other requests that mention a card number with their own agent", () => {
+    expect(routeMoriMessage("Add Umbreon VMAX 215/203 to my collection")).toBe("add");
+    expect(routeMoriMessage("Sell Mega Charizard X ex 125/094 for at least US$550")).toBe("order");
+    expect(routeMoriMessage("Is Umbreon VMAX 215/203 a good card to chase?")).toBeNull();
+  });
+});
