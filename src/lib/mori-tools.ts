@@ -1,4 +1,5 @@
 import type { Json } from "@/integrations/supabase/types";
+import type { OrderCondition } from "./mori-validation";
 /** Shared, browser-safe definitions for Mori's agent tools. */
 export const WRITE_TOOLS = [
   "add_card_to_collection",
@@ -30,6 +31,9 @@ export const TOOL_STATUS: Record<string, string> = {
   market_trends: "Checking what is trending",
   plan_video: "Storyboarding your video",
   show_collectors: "Matching collectors",
+  request_card_photos: "Asking for photos of your card",
+  web_search: "Searching the web",
+  web_fetch: "Reading the page",
 };
 
 export const POINTS = { card_added: 10, memory_saved: 25 } as const;
@@ -63,6 +67,10 @@ export type Proposal =
       price_usd: number;
       market_usd?: number | undefined;
       note?: string | undefined;
+      /** Sell orders: condition read from the collector's photos. */
+      condition?: OrderCondition | undefined;
+      /** Sell orders: the collector's own front and back photos (private storage paths), kept for the listing. */
+      photos?: { front: string; back: string } | undefined;
     };
 
 export type ProposalPayload = Proposal & { status: "pending" | "confirmed" | "edited" };

@@ -192,3 +192,31 @@ describe("Price card points", () => {
     expect(priceScale(null)).toBeNull();
   });
 });
+
+import { orderCondition, writeSchemas } from "@/lib/mori-validation";
+
+describe("Sell orders with photos", () => {
+  it("routes the sell-order photo message to the Orders agent", () => {
+    expect(routeMoriMessage("Here are photos of the front and back for my sell order.", true)).toBe(
+      "order",
+    );
+  });
+  it("accepts a condition read from the photos, per corner", () => {
+    const ok = writeSchemas.set_order.safeParse({
+      side: "sell",
+      card_id: "me02-125",
+      price_usd: 550,
+      condition: {
+        overall: "Near mint",
+        centering: { front: "55/45", back: "60/40" },
+        corners: { top_left: "Sharp", bottom_right: "Light whitening (back)" },
+        edges: "Clean",
+        surface: "No scratches visible",
+      },
+    });
+    expect(ok.success).toBe(true);
+  });
+  it("needs an overall condition", () => {
+    expect(orderCondition.safeParse({ edges: "Clean" }).success).toBe(false);
+  });
+});

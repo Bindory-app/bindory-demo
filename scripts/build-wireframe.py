@@ -29,6 +29,11 @@ for name in ("app-mode.html", "live.html"):
 
 html = html.replace("<title>Bindory</title>", "<title>Bindory · Ask Mori</title>", 1)
 
+# Sell orders ask for the card's front and back photos: the wireframe's photo step gets a "sell" message.
+PHOTO_SAYS = "const PHOTO_SAYS = { price: 'Here are photos of the front and back. What is this card worth?', grade: 'Here are photos of the front and back. Can you pre-grade this card?', add: 'Here are photos of the front and back. Please add this card to my collection.' };"
+assert html.count(PHOTO_SAYS) == 1, "wireframe PHOTO_SAYS not found: update the hook in build-wireframe.py"
+html = html.replace(PHOTO_SAYS, "const PHOTO_SAYS = { price: 'Here are photos of the front and back. What is this card worth?', grade: 'Here are photos of the front and back. Can you pre-grade this card?', add: 'Here are photos of the front and back. Please add this card to my collection.', sell: 'Here are photos of the front and back for my sell order.' };", 1)
+
 # Hooks so the live layer answers with the real Mori when signed in: free-typed messages, shortcut
 # and suggestion taps, the fill-in templates (price, buy/sell order, pre-grade, add card) and the
 # "Take a photo" option (sent with the sample card photos). Onboarding, memory follow-ups and renaming

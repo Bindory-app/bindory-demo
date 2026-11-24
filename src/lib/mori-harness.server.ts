@@ -26,7 +26,7 @@ import { finishMoriTurn, tools, type MoriRowDraft } from "./mori-agent.server";
 
 type DB = SupabaseClient<Database>;
 const TOOL_NAMES = tools.map((t) => t.name);
-const ROW_KINDS = new Set(["confirm", "grade", "people", "video", "binders", "orders"]);
+const ROW_KINDS = new Set(["confirm", "grade", "people", "video", "binders", "orders", "photos"]);
 
 /** "mori__set_order", "mori.set_order" or "set_order" -> "set_order"; null for other tools. */
 export function moriToolName(raw: string | undefined): string | null {
@@ -158,6 +158,47 @@ async function buildInput(text: string, images: string[]) {
   return [{ role: "user", content: [{ type: "input_text", text: text + note }, ...files] }];
 }
 
+/** Saves the collector's front and back photos for a sell order in their own private folder
+ *  (owner-only storage rules), so the order and its marketplace listing can use them. */
+async function saveOrderPhotos(db: DB, userId: string, images: string[]) {
+  const parts = images.slice(0, 2).map(dataUrlBytes);
+  if (parts.length < 2 || parts.some((x) => !x)) return null;
+  const id = crypto.randomUUID();
+  const paths = {
+    front: `${userId}/orders/${id}-front.jpg`,
+    back: `${userId}/orders/${id}-back.jpg`,
+  };
+  const bucket = db.storage.from("memory-photos");
+  for (const [i, path] of [paths.front, paths.back].entries()) {
+    const img = parts[i]!;
+    const { error } = await bucket.upload(path, img.bytes, {
+      contentType: img.type,
+      upsert: false,
+    });
+    if (error) {
+      console.error("Order photo upload failed", error.message);
+      return null;
+    }
+  }
+  return paths;
+}
+
+/** The latest order photos saved in this chat, if any. */
+async function chatPhotos(db: DB, userId: string, since?: string) {
+  let q = db
+    .from("mori_messages")
+    .select("payload")
+    .eq("role", "mori")
+    .eq("kind", "status")
+    .not("payload->photos", "is", null);
+  if (since) q = q.gt("created_at", since);
+  const { data } = await q.order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const ph = asObject(asObject(data?.payload)["photos"]);
+  const ok = (v: unknown): v is string =>
+    typeof v === "string" && v.startsWith(`${userId}/orders/`) && !v.includes("..");
+  return ok(ph["front"]) && ok(ph["back"]) ? { front: ph["front"], back: ph["back"] } : null;
+}
+
 /** Tool calls of a finished task, paired with their outputs (from the turn if the response lacks them). */
 async function toolCalls(r: HRResponse, sessionId: string) {
   const items = r.output ?? [];
@@ -240,6 +281,16 @@ export async function runMoriHarness(
     const first: MoriAgent =
       routeMoriMessage(message, images.length > 0) ?? current?.agent ?? "ask";
     const headers = { "X-Mori-User": sealCollector({ userId, accessToken }) };
+    // Photos sent for a sell order are kept (privately) for the order and its listing.
+    const saved =
+      first === "order" && images.length >= 2 ? await saveOrderPhotos(db, userId, images) : null;
+    if (saved)
+      rows.push({
+        role: "mori",
+        kind: "status",
+        content: "Saved your photos for the listing",
+        payload: { photos: saved } as Json,
+      });
 
     const run = async (agent: MoriAgent, handoff: string) => {
       const prior = sessions.find((x) => x.agent === agent);
@@ -341,7 +392,35 @@ export async function runMoriHarness(
       }
     }
 
+    // A sell order needs the collector's own front and back photos: attach the ones from this chat,
+    // or ask for them instead of showing the order.
+    let photoRequest = false;
+    const sell = rows.findIndex(
+      (row) =>
+        row.kind === "confirm" &&
+        asObject(row.payload)["tool"] === "set_order" &&
+        asObject(row.payload)["side"] === "sell",
+    );
+    if (sell >= 0) {
+      const photos = saved ?? (await chatPhotos(db, userId, since));
+      const row = rows[sell]!;
+      if (photos) {
+        row.payload = { ...asObject(row.payload), photos } as Json;
+      } else {
+        rows.splice(sell, 1, {
+          role: "mori",
+          kind: "photos",
+          content: "Front and back photos of your card",
+          payload: { for: "sell" } as Json,
+        });
+        photoRequest = true;
+      }
+    }
+
     finalText = stripRowBlocks(answerText(r)).replace(/^\s*role_mismatch\s*/i, "");
+    if (photoRequest)
+      finalText =
+        "Before I list it, send me clear photos of the front and back on a dark, flat background with all four corners in view. I will check the condition and use them for your listing.";
     if (r.status === "failed" || r.status === "cancelled")
       finalText = finalText || "Sorry, I could not answer just now. Please try again.";
     if (r.status === "incomplete" && !finalText)

@@ -3078,7 +3078,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     const from = k.template.indexOf('['); input.setSelectionRange(from, k.template.indexOf(']', from) + 1); input.scrollLeft = 0;
   }
   const priceStart = () => cardStart('price');
-  const PHOTO_SAYS = { price: 'Here are photos of the front and back. What is this card worth?', grade: 'Here are photos of the front and back. Can you pre-grade this card?', add: 'Here are photos of the front and back. Please add this card to my collection.' };
+  const PHOTO_SAYS = { price: 'Here are photos of the front and back. What is this card worth?', grade: 'Here are photos of the front and back. Can you pre-grade this card?', add: 'Here are photos of the front and back. Please add this card to my collection.', sell: 'Here are photos of the front and back for my sell order.' };
   async function cardPhoto(el, kind) {
     lockActions(el); M.pending = null; input.value = '';
     userSays(PHOTO_SAYS[kind]);
@@ -4366,6 +4366,23 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     const t = /^\d{4}-\d{2}-\d{2}$/.test(d) ? new Date(d + "T12:00:00") : null;
     return t && !isNaN(t) ? t.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : d;
   };
+  // Condition rows for a sell order: overall, centering, each corner, edges, surface.
+  function conditionRows(c) {
+    if (!c || !c.overall) return "";
+    const ce = c.centering || {}, co = c.corners || {};
+    const centering = [ce.front && "Front " + ce.front, ce.back && "Back " + ce.back].filter(Boolean).join(" · ");
+    return row("Condition", c.overall + (c.summary ? " · " + c.summary : "")) +
+      (centering ? row("Centering", centering) : "") +
+      [["Top left", co.top_left], ["Top right", co.top_right], ["Bottom left", co.bottom_left], ["Bottom right", co.bottom_right]].filter((x) => x[1]).map((x) => row(x[0] + " corner", x[1])).join("") +
+      (c.edges ? row("Edges", c.edges) : "") + (c.surface ? row("Surface", c.surface) : "");
+  }
+  // The collector's private order photos: short-lived signed links, only for their own files.
+  async function fillPhotos(el) {
+    const imgs = el ? [...el.querySelectorAll("img[data-bd-photo]")] : [];
+    if (!imgs.length) return;
+    const { data } = await sb.storage.from("memory-photos").createSignedUrls(imgs.map((i) => i.dataset.bdPhoto), 3600);
+    (data || []).forEach((d, i) => { if (d && d.signedUrl && imgs[i]) imgs[i].src = d.signedUrl; });
+  }
   function proposalHTML(p, id) {
     proposals.set(id, p.tool);
     const done = p.status !== "pending";
@@ -4383,7 +4400,10 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       if (!done) orders.set(id, o);
       head = orderHead(o);
       art = cardImg(p.card) ? '<div class="cp-mori-ident"><img src="' + esc(cardImg(p.card)) + '" alt=""><div><small>' + esc(p.card.set_name || "") + "</small><b>" + esc(p.card.name) + "</b></div></div>" : "";
-      rows = orderRows(o);
+      // A sell order shows the collector's own photos (kept for the listing) and the condition read from them.
+      if (p.photos && p.photos.front && p.photos.back)
+        art += '<div class="cp-mori-photos"><span><img data-bd-photo="' + esc(p.photos.front) + '" alt="Card front"><i>Front</i></span><span><img data-bd-photo="' + esc(p.photos.back) + '" alt="Card back"><i>Back</i></span></div>';
+      rows = orderRows(o) + conditionRows(p.condition) + (p.photos ? row("Photos", "Front and back, saved for your listing") : "");
     } else if (p.tool === "save_memory") {
       head = "<small>New memory · Private</small><b>" + esc(p.title) + "</b>";
       // A trade shows both cards; otherwise the one card the memory is about.
@@ -4398,8 +4418,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       '<div class="cp-mori-actions"><button class="cp-mori-go" data-bd-confirm="' + id + '"' + (done ? " disabled" : "") + ">" + (p.status === "confirmed" ? "Saved" : "Confirm") + '</button><button data-bd-edit="' + id + '"' + (done ? " disabled" : "") + ">Change details</button></div></div>";
   }
 
-  // A live price check: the real market points (lowest listing, market price, mid price) on one
-  // scale, with where they come from and when they were updated.
+  // A live price check: today's market points (lowest listing, market price, mid price) on one
+  // scale, then recent sold prices raw and graded.
   function priceCardHTML(p) {
     const s = p.scale || {}, c = p.card || {}, sold = p.sold;
     const pts = [["Lowest listing", s.low], ["Market price", s.market], ["Mid price", s.mid]].filter((x) => typeof x[1] === "number");
@@ -4436,7 +4456,13 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
         }
         continue;
       }
-      if (r.kind === "confirm" && r.payload) last = ui.say(stepsHTML + proposalHTML(r.payload, r.id));
+      if (r.kind === "confirm" && r.payload) { last = ui.say(stepsHTML + proposalHTML(r.payload, r.id)); fillPhotos(last); }
+      else if (r.kind === "photos") {
+        // Take a photo / Upload send the front and back for the sell order (the wireframe's own photo step).
+        const btns = '<div class="cp-mori-chips"><button data-mori-act="card-photo" data-mori-arg="sell">Take a photo</button><button data-mori-act="card-photo" data-mori-arg="sell">Upload from my photos</button></div>';
+        if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", btns);
+        else last = ui.say(stepsHTML + btns);
+      }
       else if (r.kind === "people" && r.payload && P.peopleHTML) {
         const cards = P.peopleHTML(r.payload.people || []);
         if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", cards);

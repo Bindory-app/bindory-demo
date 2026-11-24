@@ -2,6 +2,24 @@ import { z } from "zod";
 
 const text = z.string().trim().min(1).max(2000);
 const cardId = z.string().trim().min(1).max(100);
+const short = z.string().trim().min(1).max(160);
+/** A sell order's condition, read from the collector's front and back photos. */
+export const orderCondition = z.object({
+  overall: short,
+  summary: short.optional(),
+  centering: z.object({ front: short.optional(), back: short.optional() }).optional(),
+  corners: z
+    .object({
+      top_left: short.optional(),
+      top_right: short.optional(),
+      bottom_left: short.optional(),
+      bottom_right: short.optional(),
+    })
+    .optional(),
+  edges: short.optional(),
+  surface: short.optional(),
+});
+export type OrderCondition = z.infer<typeof orderCondition>;
 export const writeSchemas = {
   add_card_to_collection: z.object({ card_id: cardId }),
   add_to_wishlist: z.object({ card_id: cardId, note: text.optional() }),
@@ -31,6 +49,7 @@ export const writeSchemas = {
     card_id: cardId,
     price_usd: z.coerce.number().positive().max(1_000_000),
     note: text.optional(),
+    condition: orderCondition.optional(),
   }),
 };
 

@@ -20,8 +20,9 @@ import {
   searchCards,
   usdRange,
 } from "./tcgdex";
-import { validateWriteArgs, ownPhotoPath } from "./mori-validation";
+import { validateWriteArgs, ownPhotoPath, orderCondition } from "./mori-validation";
 import { ebaySoldPrices } from "./silphco.server";
+import { webFetch, webSearch } from "./telem.server";
 import {
   isWriteTool,
   proposalTitle,
@@ -40,11 +41,11 @@ export const SYSTEM = `You are Mori, a warm, concise Pokémon TCG collector agen
 Every answer ends with a concrete next step the collector can take in the app, never a dead end.
 - What to chase next: list_my_cards, pick the set or theme they collect most, get_set_cards for it, choose ONE specific card they are missing (prefer a notable one), get_card_prices for it, and in the same answer always call add_to_wishlist for that card (do not ask first; the collector confirms on the card). Your text: one or two sentences on why it fits, with today's price range.
 - Trendy collections: call market_trends and name the 2-3 cards or sets rising fastest, with the change in % and today's price range. Say which of them the collector already owns (list_my_cards).
-- Card shows: you cannot see live event listings. Say so in one line, suggest the official Pokemon event locator and local game stores, then in the same answer (call the tools before you write, never just promise to look) call list_my_cards and get_card_prices and name 2-3 of their cards worth bringing to trade or sell, with today's price range for each, plus one card to hunt for at the show that is NOT in list_my_cards (look it up with search_catalogue), and offer it as a wishlist card with add_to_wishlist.
+- Card shows and events: call web_search (e.g. "Pokemon TCG card show <city> <month year>") and web_fetch on the best 1-2 pages, then name 2-3 upcoming events with date, city and venue exactly as the pages say; say so when a date could not be confirmed. If you do not know the collector's city, cover the big upcoming events and ask their city for local shows. In the same answer (call the tools before you write, never just promise to look) call list_my_cards and get_card_prices and name 2-3 of their cards worth bringing to trade or sell, with today's price range for each, plus one card to hunt for at the show that is NOT in list_my_cards (look it up with search_catalogue), and offer it as a wishlist card with add_to_wishlist.
 - Refer to other collectors by name, never as he or she.
 - Never suggest getting a card the collector already owns (check list_my_cards).
 "This card", "it" or "that one" means the card most recently discussed in this chat (from photos, a pre-grade report, a price check or an order). Use that card; never ask which card when one was just discussed.
-You act through your tools: search_catalogue, get_card_prices, pre_grade_report, my_price_movers, get_set_cards, list_my_cards, list_my_orders, market_trends, plan_video, show_collectors, find_related_cards, find_collectors, suggest_binder_for_card, add_card_to_collection, add_to_wishlist, create_binder, save_memory, set_order.
+You act through your tools: web_search, web_fetch, search_catalogue, get_card_prices, pre_grade_report, my_price_movers, get_set_cards, list_my_cards, list_my_orders, market_trends, plan_video, show_collectors, find_related_cards, find_collectors, suggest_binder_for_card, add_card_to_collection, add_to_wishlist, create_binder, save_memory, set_order.
 Rules:
 - Be proactive. When a request is open-ended (build a binder, complete my set, what to chase next, collectors who share my taste, trade-ups, value changes), start with list_my_cards and the other tools and come back with a concrete suggestion. Do not hand the work back to the collector; ask at most one short question, after you have suggested something.
 - Only list_my_cards says what the collector owns. Cards in earlier confirmation cards that were not confirmed are not in their collection.
@@ -55,11 +56,12 @@ Rules:
 - Pre-grading (only when the collector asks for a pre-grade or whether to grade; never for a plain price check): only from photos you have seen; if there are no photos, ask for front and back photos. Identify the card, call get_card_prices, then call pre_grade_report exactly once with: the three most likely whole PSA-scale grades (e.g. 10, 9, 8, or 9, 8, 7; no half grades) with probabilities that add up to 100 and a short visible reason each; subgrade scores (0-100) for centering, corners, edges and surface as PSA, CGC, BGS and TAG would see them; the overall grade each company would likely give; your confidence (0-100, lower when glare or angle hides detail); a short notes line (e.g. "60/40 back · light corner whitening"); and Mori's take: start with a clear verdict ("Worth sending." or "Sell it raw." or "Keep it raw."), then one short sentence why, weighing the likely grade against the raw price and a typical grading fee plus shipping (about US$25-150). Be realistic: a PSA 10 is rarely the most likely outcome from photos. After pre_grade_report, reply with one short sentence at most (it already shows the full report).
 - Should I grade it (without new photos): compare the raw price range with the likely graded outcome after a typical grading fee, and recommend clearly.
 - Buy or sell orders: you need buy or sell, the card, and a price in US$. Ask for anything missing. Check get_card_prices so you can say how the price compares with the market, then call set_order. Orders are watch alerts in this demo: Mori notifies the collector when a matching listing appears; nothing is bought or sold automatically. The collector can change buy/sell, the price and how long it stays open (7, 30 or 90 days) on the card before confirming. For their open orders, or to cancel one, call list_my_orders: the orders appear as cards with a Cancel button, so reply in one short line and never claim you cancelled an order yourself.
+- Sell orders need the collector's own front and back photos (they are also used for the marketplace listing). If none were sent in this chat, call request_card_photos and do not call set_order yet. When photos arrive, open both and check the condition: centering front and back (e.g. 55/45), each corner (top left, top right, bottom left, bottom right, front and back: sharp, light whitening, ding), edges, surface (scratches, print lines, dents; say when glare hides detail), and an overall condition (Near mint, Lightly played, Moderately played, Heavily played, Damaged). Then check get_card_prices and call set_order with side sell and that condition. If the price is missing, ask for it first; the photos and your condition notes carry over.
 - Trade-up challenge: list_my_cards, then my_price_movers for their prices. Pick 2-3 cards to give that are NOT their most valuable card. Find one card they would love (search_catalogue, matching their favourite set, Pokemon or artist) and call get_card_prices for it. Its typical price must be 80-110% of the combined value of the cards they give; if not, change the cards you give until it is. Show the maths in one short list (each card and its price, then the total vs the target price), then in the same answer call add_to_wishlist for the target card.
 - Value changes (what went up or down in my collection): call my_price_movers once. Report the biggest risers (and any big fallers) as percentages with today's price range, and say it compares the last 7 days with the last 30 days. Do not name marketplaces.
 - Completing a set: use list_my_cards to find the set they own the most cards from, then get_set_cards for that set, and name a few of the cards they are missing (prefer notable ones).
 - Collectors who share my taste: list_my_cards, then find_collectors, then call show_collectors with the 2-3 best matches and a one-line reason each, based on their bio and binders vs the collector's cards. They appear as profile cards the collector can open, so reply in one short line.
-- Trends and card shows: you have no live event listings or trend data. Say that plainly, then share two or three general, well-known collector trends or tips, labelled as general knowledge, and suggest where to check (local game stores, official Pokémon event locators, collector communities). Never invent specific events, dates or venues.
+- Web lookups: for anything outside Bindory's own data (events, set releases, news, collector trends, grading services and fees, rules) use web_search, and web_fetch on 1-2 of the best links when the summaries are not enough. Only state what the pages say; never invent events, dates, venues or numbers. Never take card prices from the web: prices come only from get_card_prices. Do not name websites unless the collector asks where to read more.
 - Memories: when the story already says who, where or when, call save_memory right away with a short title and what they told you. Ask one short question only if who and where are both missing. For a trade, look up both cards with search_catalogue (name and number) and pass card_id (the card they received) and traded_card_id (the card they gave). Never ask which exact card version; the cards are optional (attach it only if search_catalogue finds one clear match). Photos are optional too. Keep the story in their words, including the card numbers, how they felt and any ratings they gave (e.g. "Felt nostalgic and lucky. Trade 5/5, @minacollects 5/5."); never drop the feelings, they matter more than the facts.
 - Videos: when asked to plan or make a video, call list_my_cards, choose a theme yourself, then call plan_video with a title and 3-5 of their cards in order, each with a short caption. It shows a storyboard the collector can post or save, so reply in one short line and do not repeat the scenes. You cannot render story cards, recaps or binder covers in chat yet; say so in one line and plan them in text.
 - Writing tools (add_card_to_collection, add_to_wishlist, create_binder, save_memory, set_order) show the user a confirmation card with Confirm and Change buttons. Nothing is saved until they confirm. After calling one, do not claim it is saved.
@@ -193,8 +195,73 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
         card_id: str("TCGdex card id"),
         price_usd: { type: "number", description: "Target price in US dollars" },
         note: str("Optional note, e.g. condition or grade wanted"),
+        condition: {
+          type: "object",
+          description:
+            "Sell orders only: the card's condition from the collector's front and back photos (open both first).",
+          properties: {
+            overall: str("Overall condition, e.g. Near mint, Lightly played"),
+            summary: str("One short line, e.g. Sharp corners, light back whitening"),
+            centering: {
+              type: "object",
+              properties: { front: str("e.g. 55/45"), back: str("e.g. 60/40") },
+            },
+            corners: {
+              type: "object",
+              description: "Each corner, front and back, e.g. Sharp or Light whitening (back)",
+              properties: {
+                top_left: str("Top left"),
+                top_right: str("Top right"),
+                bottom_left: str("Bottom left"),
+                bottom_right: str("Bottom right"),
+              },
+            },
+            edges: str("Edges, e.g. Clean, minor back whitening"),
+            surface: str("Surface, e.g. No scratches visible; glare hides part of the holo"),
+          },
+          required: ["overall"],
+        },
       },
       required: ["side", "card_id", "price_usd"],
+    },
+  },
+  {
+    type: "function",
+    name: "web_search",
+    description:
+      "Search the web for things outside Bindory's own data: card shows and events, set releases, news, grading services and fees, rules. Returns titles, links and short summaries. Never use it for card prices.",
+    strict: false,
+    parameters: {
+      type: "object",
+      properties: {
+        query: str("What to search for, e.g. Pokemon TCG card show Sydney December 2026"),
+      },
+      required: ["query"],
+    },
+  },
+  {
+    type: "function",
+    name: "web_fetch",
+    description:
+      "Read up to 3 web pages (links from web_search) as text, to confirm details such as an event's date and venue or a grading company's fees.",
+    strict: false,
+    parameters: {
+      type: "object",
+      properties: {
+        urls: { type: "array", items: { type: "string" }, description: "1-3 http(s) links" },
+      },
+      required: ["urls"],
+    },
+  },
+  {
+    type: "function",
+    name: "request_card_photos",
+    description:
+      "Ask the collector for front and back photos of their own card (shows Take a photo and Upload buttons). Use before a sell order when no photos were sent in this chat.",
+    strict: false,
+    parameters: {
+      type: "object",
+      properties: { purpose: { type: "string", enum: ["sell"] } },
     },
   },
   {
@@ -439,6 +506,20 @@ async function runReadTool(db: DB, name: string, a: Args): Promise<unknown> {
           : {}),
       };
     }
+    case "web_search": {
+      const results = await webSearch(s(a["query"]) ?? "");
+      return results.length
+        ? { results }
+        : {
+            results: [],
+            note: "Nothing found. Try different words, or say you could not find it.",
+          };
+    }
+    case "web_fetch": {
+      const urls = Array.isArray(a["urls"]) ? a["urls"].filter((u) => typeof u === "string") : [];
+      const pages = await webFetch(urls as string[]);
+      return pages.length ? { pages } : { error: "Give 1-3 http(s) links from web_search." };
+    }
     case "find_related_cards": {
       const c = await getCard(s(a["card_id"]) ?? "");
       if (!c) return { results: [], note: "Card not found" };
@@ -671,6 +752,11 @@ async function buildProposal(
       price_usd: Math.round(Number(a["price_usd"]) * 100) / 100,
       market_usd: range?.typical,
       note: s(a["note"]),
+      ...(() => {
+        // Sell orders carry the condition read from the collector's photos.
+        const condition = a["side"] === "sell" ? orderCondition.safeParse(a["condition"]) : null;
+        return condition?.success ? { condition: condition.data } : {};
+      })(),
     };
   }
   if (name === "save_memory") {
@@ -898,6 +984,19 @@ export async function executeMoriTool(
         note: "The profile cards are on screen. Reply in one short line.",
       };
     }
+  } else if (name === "request_card_photos") {
+    // Take a photo / Upload buttons; the photos come back as the collector's next message.
+    rows.push({
+      role: "mori",
+      kind: "photos",
+      content: "Front and back photos of your card",
+      payload: { for: "sell" } as Json,
+    });
+    result = {
+      shown_to_user: true,
+      note: "Take a photo and Upload buttons are on screen. In one short line, ask for the front and back on a dark, flat background with all four corners in view. Do not call set_order until the photos arrive.",
+    };
+    stop = true;
   } else if (name === "plan_video") {
     // Storyboard from the collector's own cards; they post or save it with a button.
     const scenes = (Array.isArray(args["scenes"]) ? (args["scenes"] as Args[]) : []).slice(0, 6);
@@ -1219,7 +1318,7 @@ export async function finishMoriTurn(
     ];
   suggestions = [...new Set(suggestions)].slice(0, 3);
   // A confirmation card is the next step itself; follow-ups come after Confirm instead.
-  if (rows.some((r) => r.kind === "confirm")) suggestions = [];
+  if (rows.some((r) => r.kind === "confirm" || r.kind === "photos")) suggestions = [];
   if (cardsOnly) finalText = "";
 
   if (finalText) {
@@ -1232,7 +1331,8 @@ export async function finishMoriTurn(
         r.kind === "binders" ||
         r.kind === "video" ||
         r.kind === "people" ||
-        r.kind === "price",
+        r.kind === "price" ||
+        r.kind === "photos",
     );
     const reply = { role: "mori" as const, kind: "text", content: finalText };
     if (confirmAt >= 0) rows.splice(confirmAt, 0, reply);
