@@ -34,6 +34,10 @@ PHOTO_SAYS = "const PHOTO_SAYS = { price: 'Here are photos of the front and back
 assert html.count(PHOTO_SAYS) == 1, "wireframe PHOTO_SAYS not found: update the hook in build-wireframe.py"
 # Price checks and adding a card need only the front (every Pokemon card back is the same).
 html = html.replace(PHOTO_SAYS, "const PHOTO_SAYS = { price: 'Here is a photo of my card. What is this card worth?', grade: 'Here are photos of the front and back. Can you pre-grade this card?', add: 'Please add this card to my collection. Here is a photo of it.', sell: 'Here are photos of the front and back for my sell order.' };", 1)
+# The fill-in pop-up replaces the "For example: ..." line under the price check and add card prompts.
+EXAMPLE = "(k.example ? '<p class=\"cp-mori-sample\">For example: ' + esc(k.example) + '</p>' : '') +"
+assert html.count(EXAMPLE) == 1, "wireframe example line not found: update the hook in build-wireframe.py"
+html = html.replace(EXAMPLE, "", 1)
 PRICE_ASK = "or take a photo of the front and back and I will identify it.', template: PRICE_TEMPLATE"
 assert html.count(PRICE_ASK) == 1, "wireframe price ask not found: update the hook in build-wireframe.py"
 html = html.replace(PRICE_ASK, "or take a photo of the front and I will identify it.', template: PRICE_TEMPLATE", 1)

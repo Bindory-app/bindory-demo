@@ -392,7 +392,7 @@
     box.className = "bd-photo-sheet bd-slot";
     box.innerHTML = '<form><p><b>Which card?</b></p>' +
       (/\[card name\]/i.test(tpl) ? '<label>Card name<input name="name" autocomplete="off" autocapitalize="words" placeholder="e.g. Mega Charizard X ex" maxlength="60"></label>' : "") +
-      (/\[card number\]/i.test(tpl) ? '<label>Card number<span class="bd-num"><input name="num" inputmode="numeric" autocomplete="off" placeholder="125" maxlength="7" aria-label="Card number"><b>/</b><input name="of" inputmode="numeric" autocomplete="off" placeholder="094" maxlength="7" aria-label="Cards in the set"></span><small>The number at the bottom of the card, then the set size.</small></label>' : "") +
+      (/\[card number\]/i.test(tpl) ? '<label>Card number<span class="bd-num"><input name="num" inputmode="numeric" autocomplete="off" placeholder="125" maxlength="7" aria-label="Card number"><b>/</b><input name="of" inputmode="numeric" autocomplete="off" placeholder="094" maxlength="7" aria-label="Cards in the set (optional)"></span><small>The number at the bottom of the card. The set size after the "/" is optional: some cards only have one number.</small></label>' : "") +
       '<p class="bd-slot-err" hidden></p><button type="submit">Send to Mori</button><button type="button" data-back-skip>Cancel</button></form>';
     document.body.append(box);
     const f = box.querySelector("form"), err = box.querySelector(".bd-slot-err");
