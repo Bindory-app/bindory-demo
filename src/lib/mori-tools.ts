@@ -46,7 +46,12 @@ export type ProposalCard = {
   reason?: string | undefined;
 };
 export type Proposal =
-  | { tool: "add_card_to_collection"; card: ProposalCard }
+  | {
+      tool: "add_card_to_collection";
+      card: ProposalCard;
+      /** The binder the collector chose: one of theirs (with its id) or a new one to create. */
+      binder?: { id?: string | undefined; name: string; new: boolean } | undefined;
+    }
   | { tool: "add_to_wishlist"; card: ProposalCard; note?: string | undefined }
   | { tool: "create_binder"; name: string; description?: string | undefined; cards: ProposalCard[] }
   | {
@@ -81,7 +86,9 @@ export type ProposalPayload = Proposal & { status: "pending" | "confirmed" | "ed
 export function proposalTitle(p: Proposal): string {
   switch (p.tool) {
     case "add_card_to_collection":
-      return `Add ${p.card.name} to your collection`;
+      return p.binder
+        ? `Add ${p.card.name} to your collection, in “${p.binder.name}”`
+        : `Add ${p.card.name} to your collection`;
     case "add_to_wishlist":
       return `Add ${p.card.name} to your wishlist`;
     case "create_binder":

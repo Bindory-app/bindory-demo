@@ -41,6 +41,14 @@ html = html.replace(EXAMPLE, "", 1)
 ORDER_EXAMPLE = "      '<p class=\"cp-mori-sample\">For example: Buy Umbreon VMAX 215/203 for up to US$450</p>' +\n"
 assert html.count(ORDER_EXAMPLE) == 1, "wireframe order example not found: update the hook in build-wireframe.py"
 html = html.replace(ORDER_EXAMPLE, "", 1)
+# Adding a card names the binder it goes in (the pop-up lists your binders or makes a new one),
+# and offers "Sync from Collectr" next to the photo buttons.
+ADD_TPL = "template: 'Add [card name] [card number] to my collection'"
+assert html.count(ADD_TPL) == 1, "wireframe add template not found: update the hook in build-wireframe.py"
+html = html.replace(ADD_TPL, "template: 'Add [card name] [card number] to my collection, in the binder \"[binder]\"'", 1)
+START_CHIPS = "chips([['Take a photo', act('card-photo', kind)], ['Upload from my photos', act('card-photo', kind)]]));"
+assert html.count(START_CHIPS) == 1, "wireframe card-start chips not found: update the hook in build-wireframe.py"
+html = html.replace(START_CHIPS, "chips([['Take a photo', act('card-photo', kind)], ['Upload from my photos', act('card-photo', kind)]].concat(kind === 'add' ? [['Sync from Collectr', act('collectr')]] : [])));", 1)
 PRICE_ASK = "or take a photo of the front and back and I will identify it.', template: PRICE_TEMPLATE"
 assert html.count(PRICE_ASK) == 1, "wireframe price ask not found: update the hook in build-wireframe.py"
 html = html.replace(PRICE_ASK, "or take a photo of the front and I will identify it.', template: PRICE_TEMPLATE", 1)

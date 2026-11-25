@@ -1,3 +1,4 @@
+import { collectrReply, collectrSyncLink } from "./collectr";
 import type { MoriStreamEvent, MoriRow } from "./mori-tools";
 import {
   streamResponse,
@@ -388,11 +389,17 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
   {
     type: "function",
     name: "add_card_to_collection",
-    description: "Propose adding a card to the user's collection (user confirms).",
+    description:
+      "Propose adding a card to the user's collection (user confirms). When the collector names a binder (one of theirs, or a new binder), pass its name as binder_name and the card goes into that binder on confirm.",
     strict: false,
     parameters: {
       type: "object",
-      properties: { card_id: str("TCGdex card id") },
+      properties: {
+        card_id: str("TCGdex card id"),
+        binder_name: str(
+          "Optional: the binder the collector asked for, exactly as they named it (an existing binder, or the name of a new one)",
+        ),
+      },
       required: ["card_id"],
     },
   },
@@ -731,9 +738,18 @@ async function buildProposal(
   if (name === "add_card_to_collection" || name === "add_to_wishlist") {
     const card = await briefCard(s(a["card_id"]) ?? "");
     if (!card) return { error: "Card not found in the catalogue" };
-    return name === "add_to_wishlist"
-      ? { tool: name, card, note: s(a["note"]) }
-      : { tool: name, card };
+    if (name === "add_to_wishlist") return { tool: name, card, note: s(a["note"]) };
+    // A binder by name: one of the collector's own (RLS), else a new binder made on confirm.
+    const binderName = s(a["binder_name"])?.trim().replace(/^["“”']+|["“”']+$/g, "");
+    if (!binderName) return { tool: name, card };
+    const { data: mine, error } = await db.from("binders").select("id, name");
+    if (error) throw error;
+    const found = (mine ?? []).find((b) => b.name.trim().toLowerCase() === binderName.toLowerCase());
+    return {
+      tool: name,
+      card,
+      binder: found ? { id: found.id, name: found.name, new: false } : { name: binderName, new: true },
+    };
   }
   if (name === "create_binder") {
     const list = Array.isArray(a["cards"]) ? (a["cards"] as Args[]) : [];
@@ -1181,7 +1197,7 @@ export async function runMori(
   const past = onHarness ? [] : await history(db, since);
   // The stored text notes the photos so later turns know they were sent (the images themselves are not stored).
   const stored = images.length
-    ? `${message}\n[Sent ${images.length} card photos: front and back]`
+    ? `${message}\n[Sent ${images.length === 1 ? "a card photo: the front" : `${images.length} card photos: front and back`}]`
     : message;
   const ins = await db
     .from("mori_messages")
@@ -1190,6 +1206,9 @@ export async function runMori(
     .single();
   if (ins.error) throw ins.error;
   const askedAt = Date.parse(ins.data.created_at);
+  // "Sync from Collectr": answered here, without an agent (see collectr.ts).
+  const collectr = collectrSyncLink(message);
+  if (collectr !== null) return finishMoriTurn(db, [], collectrReply(collectr), askedAt, emit);
   if (onHarness && accessToken) {
     const { runMoriHarness } = await import("./mori-harness.server");
     return runMoriHarness(db, userId, accessToken, message, emit, images, since, askedAt, signal);

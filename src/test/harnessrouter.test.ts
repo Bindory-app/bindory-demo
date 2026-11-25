@@ -350,3 +350,17 @@ describe("cardPhotoDataUrls", () => {
     expect(cardPhotoDataUrls(["data:image/jpeg;base64," + "A".repeat(2_000_000)])).toBeNull();
   });
 });
+
+describe("Collectr sync", () => {
+  it("spots the sync message and checks the link", async () => {
+    const { collectrSyncLink, isCollectrLink, collectrReply } = await import("@/lib/collectr");
+    const link = "https://app.getcollectr.com/showcase/profile/6b10e282-6452-49ef-ae2e-e36ff91945e4";
+    expect(collectrSyncLink(`Sync my Collectr collection: ${link}`)).toBe(link);
+    expect(collectrSyncLink("Price check: Pikachu 25/25")).toBeNull();
+    expect(isCollectrLink(link)).toBe(true);
+    expect(isCollectrLink("https://evil.example.com/getcollectr.com")).toBe(false);
+    expect(isCollectrLink("http://app.getcollectr.com/x")).toBe(false);
+    expect(collectrReply("nope")).toMatch(/does not look like a Collectr link/);
+    expect(collectrReply(link)).toMatch(/can't bring your cards across/);
+  });
+});

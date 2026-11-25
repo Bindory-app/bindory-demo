@@ -3065,13 +3065,13 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   const CARD_START = {
     price: { ask: 'Which card should I price? Type the <b>card name and number</b> below, or take a photo of the front and I will identify it.', template: PRICE_TEMPLATE, example: 'Price check: Mega Charizard X ex 125/094' },
     grade: { ask: 'Send me photos of the <b>front and back</b> of your card, on a dark, flat background, and I will pre-grade it.' },
-    add: { ask: 'Which card are you adding? Type the <b>card name and number</b>, or take a photo and I will identify it.', template: 'Add [card name] [card number] to my collection', example: 'Add Umbreon VMAX 215/203 to my collection' }
+    add: { ask: 'Which card are you adding? Type the <b>card name and number</b>, or take a photo and I will identify it.', template: 'Add [card name] [card number] to my collection, in the binder "[binder]"', example: 'Add Umbreon VMAX 215/203 to my collection' }
   };
   function cardStart(kind) {
     const k = CARD_START[kind];
     if (!isEmpty()) thread.insertAdjacentHTML('beforeend', '<hr class="cp-mori-divider">');
     say('<p>' + k.ask + '</p>' + 
-      chips([['Take a photo', act('card-photo', kind)], ['Upload from my photos', act('card-photo', kind)]]));
+      chips([['Take a photo', act('card-photo', kind)], ['Upload from my photos', act('card-photo', kind)]].concat(kind === 'add' ? [['Sync from Collectr', act('collectr')]] : [])));
     if (!k.template) { M.pending = null; input.value = ''; return; }
     M.pending = kind;
     input.value = k.template; input.focus();
@@ -4380,6 +4380,31 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     const { data } = await sb.storage.from("memory-photos").createSignedUrls(imgs.map((i) => i.dataset.bdPhoto), 3600);
     (data || []).forEach((d, i) => { if (d && d.signedUrl && imgs[i]) imgs[i].src = d.signedUrl; });
   }
+  // Cards confirmed with a binder go into it (a new binder is made first), under the collector's own rules (RLS).
+  const binderPlans = new Map();
+  async function placeInBinder(plan) {
+    const uid = session.user.id;
+    const card = await sb.from("cards").select("id").eq("tcgdex_id", plan.tcgdex).limit(1);
+    if (card.error || !card.data.length) throw new Error("card");
+    let binderId = plan.binder.id;
+    if (!binderId) {
+      const mine = await sb.from("binders").select("id, name");
+      const same = (mine.data || []).find((b) => b.name.trim().toLowerCase() === plan.binder.name.trim().toLowerCase());
+      if (same) binderId = same.id;
+      else {
+        const made = await sb.from("binders").insert({ user_id: uid, name: plan.binder.name }).select("id").single();
+        if (made.error) throw made.error;
+        binderId = made.data.id;
+      }
+    }
+    const cardId = card.data[0].id;
+    const have = await sb.from("binder_cards").select("id").eq("binder_id", binderId).eq("card_id", cardId).limit(1);
+    if (have.error) throw have.error;
+    if (have.data.length) return "already";
+    const count = await sb.from("binder_cards").select("id", { count: "exact", head: true }).eq("binder_id", binderId);
+    const ins = await sb.from("binder_cards").insert({ user_id: uid, binder_id: binderId, card_id: cardId, position: count.count || 0 });
+    if (ins.error) throw ins.error;
+  }
   function proposalHTML(p, id) {
     proposals.set(id, p.tool);
     const done = p.status !== "pending";
@@ -4387,7 +4412,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     if (p.tool === "add_card_to_collection" || p.tool === "add_to_wishlist") {
       head = "<small>" + (p.tool === "add_to_wishlist" ? "Wish list" : "New card") + "</small><b>" + esc(p.card.name) + "</b>";
       art = cardImg(p.card) ? '<div class="cp-mori-ident"><img src="' + esc(cardImg(p.card)) + '" alt=""><div><small>Catalogue result</small><b>' + esc(p.card.name) + "</b><span>" + esc(p.card.set_name || "") + "</span></div></div>" : "";
-      rows = row("Card", p.card.name) + row("Set", p.card.set_name || "Not listed", !p.card.set_name) + (p.card.reason ? row("Why", p.card.reason) : "") + (p.note ? row("Note", p.note) : "");
+      rows = row("Card", p.card.name) + row("Set", p.card.set_name || "Not listed", !p.card.set_name) + (p.binder ? row("Binder", p.binder.new ? p.binder.name + " (new binder)" : p.binder.name) : "") + (p.card.reason ? row("Why", p.card.reason) : "") + (p.note ? row("Note", p.note) : "");
+      if (p.binder && p.tool === "add_card_to_collection" && !done) binderPlans.set(id, { binder: p.binder, tcgdex: p.card.tcgdex_id });
     } else if (p.tool === "create_binder") {
       head = "<small>New binder · Private</small><b>" + esc(p.name) + "</b>";
       art = '<div style="display:flex;gap:6px;overflow-x:auto;margin:8px 0">' + (p.cards || []).map((c) => (cardImg(c) ? '<img src="' + esc(cardImg(c)) + '" alt="' + esc(c.name) + '" style="height:84px;border-radius:6px">' : "")).join("") + "</div>";
@@ -4636,18 +4662,21 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   // Fill-in templates ("Price check: [card name] [card number]", "Buy [card + number] for up to
   // US$[price]", ...): tapping the text opens a pop-up to type the card name, its number as
   // "number / set size" (set size optional) and a price, then sends the message.
-  const HAS_SLOT = /\[(card name|card number|card \+ number|price)\]/i;
+  const HAS_SLOT = /\[(card name|card number|card \+ number|price|binder)\]/i;
   function slotPopup(inp, at) {
     if (document.querySelector(".bd-slot")) return;
     const tpl = inp.value;
     const hasName = /\[card name\]|\[card \+ number\]/i.test(tpl);
     const hasNum = /\[card number\]|\[card \+ number\]/i.test(tpl);
     const hasPrice = /\[price\]/i.test(tpl);
+    const hasBinder = /\[binder\]/i.test(tpl);
     const box = document.createElement("div");
     box.className = "bd-photo-sheet bd-slot";
     box.innerHTML = '<form novalidate><p><b>' + (hasName || hasNum ? "Which card?" : "Your price") + '</b></p>' +
       (hasName ? '<label>Card name<input name="name" autocomplete="off" autocapitalize="words" placeholder="e.g. Mega Charizard X ex" maxlength="60"></label>' : "") +
       (hasNum ? '<label>Card number<span class="bd-num"><input name="num" inputmode="numeric" autocomplete="off" placeholder="125" maxlength="7" aria-label="Card number"><b>/</b><input name="of" inputmode="numeric" autocomplete="off" placeholder="094" maxlength="7" aria-label="Cards in the set (optional)"></span><small>The number at the bottom of the card. The set size after the "/" is optional: some cards only have one number.</small></label>' : "") +
+      (hasBinder ? '<label>Binder<select name="binder"><option value="" disabled selected>Choose a binder</option><option value="__new">+ New binder</option></select></label>' +
+        '<label class="bd-newbinder" hidden>New binder name<input name="newbinder" autocomplete="off" autocapitalize="sentences" placeholder="e.g. Fire types" maxlength="60"></label>' : "") +
       (hasPrice ? '<label>Price<span class="bd-price"><b>US$</b><input name="price" inputmode="decimal" autocomplete="off" placeholder="450" maxlength="10" aria-label="Price in US dollars"></span></label>' : "") +
       '<p class="bd-slot-err" hidden></p><button type="submit">Send to Mori</button><button type="button" data-back-skip>Cancel</button></form>';
     document.body.append(box);
@@ -4661,6 +4690,16 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       [el.name, el.num, el.price].find((x) => x && !(x.value || "").trim());
     inp.blur();
     setTimeout(() => first && first.focus(), 30);
+    // Your binders (newest last), then "+ New binder", which shows a name box.
+    if (el.binder) {
+      const sel = el.binder, nb = box.querySelector(".bd-newbinder");
+      sel.addEventListener("change", () => { nb.hidden = sel.value !== "__new"; if (!nb.hidden) el.newbinder.focus(); });
+      fresh().then((s) => s && sb.from("binders").select("name").order("created_at")).then((r) => {
+        const names = [...new Set(((r && r.data) || []).map((b) => b.name).filter(Boolean))];
+        const add = sel.querySelector('option[value="__new"]');
+        names.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; sel.insertBefore(o, add); });
+      }).catch(() => {});
+    }
     // Typing "/" in the first number box jumps to the set size.
     el.num?.addEventListener("input", () => {
       const v = el.num.value;
@@ -4678,18 +4717,57 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       const part = /^[A-Z]{0,4}\d{1,4}[A-Z]?$/;
       if (el.num && (!part.test(num) || (of && !part.test(of)))) return bad("Card numbers look like 125 / 094 (some start with letters, like TG12 / TG30).", el.num);
       if (el.price && !/^\d{1,7}(\.\d{1,2})?$/.test(price)) return bad("Type a price in US dollars, like 450 or 19.99.", el.price);
+      const isNew = el.binder && el.binder.value === "__new";
+      const binder = el.binder ? (isNew ? (el.newbinder.value || "").trim().replace(/["“”]/g, "").replace(/\s+/g, " ") : el.binder.value) : "";
+      if (el.binder && !el.binder.value) return bad("Choose a binder, or make a new one.", el.binder);
+      if (isNew && !binder) return bad("Type a name for the new binder.", el.newbinder);
       const number = of ? num + "/" + of : num;
       inp.value = tpl
         .replace(/\[card \+ number\]/i, name + " " + number)
         .replace(/\[card name\]/i, name)
         .replace(/\[card number\]/i, number)
         .replace(/\[price\]/i, price)
+        .replace(/in the binder "\[binder\]"/i, isNew ? 'in a new binder called "' + binder + '"' : 'in the binder "' + binder + '"')
+        .replace(/\[binder\]/i, binder)
         .replace(/\s+/g, " ").trim();
       box.remove();
       const form = inp.closest("form");
       if (form && form.requestSubmit) form.requestSubmit(); else inp.focus();
     });
   }
+  // "Sync from Collectr": asks for the collector's public Collectr link and sends it to Mori.
+  function collectrPopup() {
+    if (document.querySelector(".bd-slot")) return;
+    const box = document.createElement("div");
+    box.className = "bd-photo-sheet bd-slot";
+    box.innerHTML = '<form novalidate><p><b>Sync from Collectr</b></p>' +
+      '<label>Your public Collectr link<input name="link" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://app.getcollectr.com/showcase/profile/..." maxlength="300"></label>' +
+      '<small>In Collectr: Profile, then Settings, turn on Portfolio Sharing and copy the link.</small>' +
+      '<p class="bd-slot-err" hidden></p><button type="submit">Send to Mori</button><button type="button" data-back-skip>Cancel</button></form>';
+    document.body.append(box);
+    const f = box.querySelector("form"), err = box.querySelector(".bd-slot-err"), link = f.elements.link;
+    setTimeout(() => link.focus(), 30);
+    box.addEventListener("click", (e) => { if (e.target === box || e.target.closest("[data-back-skip]")) box.remove(); });
+    f.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const v = link.value.trim();
+      let ok = false;
+      try { const u = new URL(v); ok = u.protocol === "https:" && (u.hostname === "getcollectr.com" || u.hostname.endsWith(".getcollectr.com")); } catch { ok = false; }
+      if (!ok) { err.textContent = "Paste your Collectr link. It starts with https://app.getcollectr.com/"; err.hidden = false; link.focus(); return; }
+      box.remove();
+      const inp = app.querySelector("[data-mori-input]"), form = inp && inp.closest("form");
+      if (!inp) return;
+      inp.value = "Sync my Collectr collection: " + v;
+      if (form && form.requestSubmit) form.requestSubmit();
+    });
+  }
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest('[data-mori-act="collectr"]');
+    if (!b || !app.contains(b) || b.disabled) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    collectrPopup();
+  }, true);
+
   app.addEventListener("click", (e) => {
     const inp = e.target.closest && e.target.closest("[data-mori-input]");
     if (!inp || !HAS_SLOT.test(inp.value)) return;
@@ -4747,6 +4825,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       ".bd-cam video{width:100%;max-height:52vh;border-radius:14px;background:#111;object-fit:contain}.bd-cam .bd-cam-msg{color:#6b7090;font-size:14px}.bd-photo-sheet button[disabled]{opacity:.5}" +
       ".bd-slot form{background:#fff;width:min(440px,100%);border-radius:22px 22px 0 0;padding:22px 20px calc(22px + env(safe-area-inset-bottom));display:grid;gap:12px;color:#1f2340}" +
       ".bd-slot label{display:grid;gap:6px;font-size:14px;font-weight:700;color:#4a4f6e}.bd-slot small{font-weight:400;color:#6b7090}" +
+      ".bd-slot select{font:inherit;font-size:16px;font-weight:400;padding:12px 14px;border:1px solid #d9d4f5;border-radius:12px;width:100%;background:#fff;color:#1f2340}.bd-slot form>small{color:#6b7090;font-size:13px;margin-top:-6px}" +
       ".bd-slot input{font:inherit;font-size:16px;font-weight:400;padding:12px 14px;border:1px solid #d9d4f5;border-radius:12px;width:100%;box-sizing:border-box;color:#1f2340}" +
       ".bd-slot .bd-num,.bd-slot .bd-price{display:flex;align-items:center;gap:8px}.bd-slot .bd-price b{font-size:16px;color:#4a4f6e}.bd-slot .bd-num b{font-size:20px;color:#6b7090}.bd-slot-err{color:#c0392b;font-size:14px;margin:0}" +
       ".bd-slot button[type=submit]{background:#5b4bd6;color:#fff;border-color:#5b4bd6}" +
@@ -5137,7 +5216,13 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       });
       if (!res.ok) throw new Error("failed");
       const out = await res.json();
-      if (action === "confirm") { b.textContent = "Saved"; P.toast("Saved"); loadMyData(); }
+      const plan = action === "confirm" ? binderPlans.get(id) : null;
+      if (plan) {
+        binderPlans.delete(id);
+        try { P.toast((await placeInBinder(plan)) === "already" ? "It is already in " + plan.binder.name : "Added to " + plan.binder.name); }
+        catch { P.toast("Saved to your collection, but it could not go in " + plan.binder.name); }
+      }
+      if (action === "confirm") { b.textContent = "Saved"; if (!plan) P.toast("Saved"); loadMyData(); }
       const thread = b.closest("[data-mori-thread]");
       if (out.reply && thread) {
         const msg = document.createElement("div");
@@ -5157,7 +5242,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       const tool = proposals.get(id);
       if (action === "confirm" && NEXT[tool] && P.nextUpHTML) {
         const last = thread && [...thread.querySelectorAll(".cp-mori-mori .cp-mori-body")].pop();
-        if (last) last.insertAdjacentHTML("beforeend", P.nextUpHTML(NEXT[tool]));
+        const next = plan ? ["Plan a video of this binder", "Price check this card", "Add another card"] : NEXT[tool];
+        if (last) last.insertAdjacentHTML("beforeend", P.nextUpHTML(next));
       }
       if (action === "confirm" && order) {
         orders.delete(id);

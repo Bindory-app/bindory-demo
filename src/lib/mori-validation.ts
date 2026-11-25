@@ -21,7 +21,7 @@ export const orderCondition = z.object({
 });
 export type OrderCondition = z.infer<typeof orderCondition>;
 export const writeSchemas = {
-  add_card_to_collection: z.object({ card_id: cardId }),
+  add_card_to_collection: z.object({ card_id: cardId, binder_name: text.max(60).optional() }),
   add_to_wishlist: z.object({ card_id: cardId, note: text.optional() }),
   create_binder: z.object({
     name: text,
