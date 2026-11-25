@@ -180,7 +180,21 @@ export type TaskRequest = {
   sessionId?: string | undefined;
   /** Extra headers the harness forwards to its MCP server (listed in additional_headers). */
   headers?: Record<string, string>;
+  /** The collector pressed Stop: the task is cancelled on HarnessRouter and the call throws. */
+  signal?: AbortSignal | undefined;
 };
+
+/** Thrown when the collector stops Mori mid-answer. */
+export class MoriStopped extends Error {
+  constructor() {
+    super("Stopped by the collector");
+  }
+}
+
+/** Best-effort cancel of a running task (its session stays usable). */
+export async function cancelResponse(id: string): Promise<void> {
+  await call(`/v1/responses/${encodeURIComponent(id)}/cancel`, { method: "POST" }).catch(() => {});
+}
 
 /**
  * Starts (or continues) one task on the Ask Mori harness and reads its stream to the end,
@@ -204,18 +218,25 @@ export async function runStreamedTask(
       "Idempotency-Key": randomUUID(),
       ...t.headers,
     },
+    signal: t.signal ?? null,
   });
   if (!res.body) throw new HRError(502, null);
   let responseId = "";
   let terminal: HRResponse | null = null;
   try {
+    // Stop aborts the request itself (passed to fetch), which ends this read at once.
     for await (const ev of parseSSE(res.body)) {
       if (ev.response?.id && !responseId) responseId = ev.response.id;
+      if (t.signal?.aborted) break;
       onEvent(ev);
       if (TERMINAL_EVENTS.has(ev.type) && ev.response) terminal = ev.response;
     }
   } catch (e) {
-    if (!responseId) throw e;
+    if (!responseId && !t.signal?.aborted) throw e;
+  }
+  if (t.signal?.aborted) {
+    if (responseId) await cancelResponse(responseId);
+    throw new MoriStopped();
   }
   if (terminal) return terminal;
   if (!responseId) throw new HRError(502, null);

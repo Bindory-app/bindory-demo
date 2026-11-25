@@ -16,6 +16,7 @@ import {
   HRError,
   runStreamedTask,
   uploadFile,
+  MoriStopped,
   type HRResponse,
   type OutputItem,
 } from "./harnessrouter.server";
@@ -226,11 +227,12 @@ async function buildInput(text: string, images: string[]) {
     const { id } = await uploadFile(img.bytes, names[i] ?? `card-${i + 1}.jpg`, img.type);
     files.push({ type: "input_file", file_id: id });
   }
-  const note = files.length
-    ? `\n[Card photos attached as files in your working directory: ${names
-        .slice(0, files.length)
-        .join(" (front), ")} (back). Open them and look before you answer.]`
-    : "";
+  const note =
+    files.length === 2
+      ? `\n[Card photos attached as files in your working directory: ${names[0]} (front), ${names[1]} (back). Open them and look before you answer.]`
+      : files.length === 1
+        ? `\n[Card photo attached as a file in your working directory: ${names[0]} (the front). Open it and look before you answer.]`
+        : "";
   return [{ role: "user", content: [{ type: "input_text", text: text + note }, ...files] }];
 }
 
@@ -344,6 +346,7 @@ export async function runMoriHarness(
   images: string[],
   since: string | undefined,
   askedAt: number,
+  signal?: AbortSignal,
 ) {
   const rows: MoriRowDraft[] = [];
   let finalText = "";
@@ -405,13 +408,14 @@ export async function runMoriHarness(
             previousResponseId: prior?.responseId,
             sessionId: prior?.sessionId,
             headers,
+            signal,
           },
           onEvent,
         );
       } catch (e) {
         // A retired or missing session starts a fresh task instead.
         if (!(prior && e instanceof HRError && e.status === 404)) throw e;
-        return runStreamedTask({ harnessId, input, user: userId, headers }, onEvent);
+        return runStreamedTask({ harnessId, input, user: userId, headers, signal }, onEvent);
       }
     };
 
@@ -519,6 +523,8 @@ export async function runMoriHarness(
     if (r.status === "incomplete" && !finalText)
       finalText = "That took longer than I can manage in one go. Please try a narrower question.";
   } catch (e) {
+    // Stopped by the collector: nothing more is shown or saved for this turn.
+    if (e instanceof MoriStopped || signal?.aborted) return;
     console.error(
       "Mori HarnessRouter error",
       e instanceof HRError

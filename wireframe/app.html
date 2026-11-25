@@ -3063,7 +3063,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   const range = ([a, b]) => money(a) + ' to ' + money(b);
   /* Price check, pre-grade and add a card all start the same way: type the card, or send photos. */
   const CARD_START = {
-    price: { ask: 'Which card should I price? Type the <b>card name and number</b> below, or take a photo of the front and back and I will identify it.', template: PRICE_TEMPLATE, example: 'Price check: Mega Charizard X ex 125/094' },
+    price: { ask: 'Which card should I price? Type the <b>card name and number</b> below, or take a photo of the front and I will identify it.', template: PRICE_TEMPLATE, example: 'Price check: Mega Charizard X ex 125/094' },
     grade: { ask: 'Send me photos of the <b>front and back</b> of your card, on a dark, flat background, and I will pre-grade it.' },
     add: { ask: 'Which card are you adding? Type the <b>card name and number</b>, or take a photo and I will identify it.', template: 'Add [card name] [card number] to my collection', example: 'Add Umbreon VMAX 215/203 to my collection' }
   };
@@ -3078,7 +3078,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     const from = k.template.indexOf('['); input.setSelectionRange(from, k.template.indexOf(']', from) + 1); input.scrollLeft = 0;
   }
   const priceStart = () => cardStart('price');
-  const PHOTO_SAYS = { price: 'Here are photos of the front and back. What is this card worth?', grade: 'Here are photos of the front and back. Can you pre-grade this card?', add: 'Here are photos of the front and back. Please add this card to my collection.', sell: 'Here are photos of the front and back for my sell order.' };
+  const PHOTO_SAYS = { price: 'Here is a photo of my card. What is this card worth?', grade: 'Here are photos of the front and back. Can you pre-grade this card?', add: 'Please add this card to my collection. Here is a photo of it.', sell: 'Here are photos of the front and back for my sell order.' };
   async function cardPhoto(el, kind) {
     const bdShots = window.bdPickCardPhotos ? await window.bdPickCardPhotos(el, kind) : null;
     if (bdShots === false) return;
@@ -4515,23 +4515,26 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   app.addEventListener("click", (e) => { if (e.target.closest("[data-mori-reset]")) chatSince = new Date(Date.now() - 5000).toISOString(); }, true);
   app.addEventListener("cp:mori-new-chat", () => { chatSince = new Date().toISOString(); });
 
-  // Card photos: "Take a photo" opens the phone's camera, "Upload from my photos" opens its photo
-  // album. Each photo is shrunk to a JPEG (longest side 1600px) before it is shown and sent.
-  // Resolves to the photos (front, then back), or false when the collector cancels.
+  // Card photos: "Take a photo" opens the phone's camera, "Upload from my photos" and the photo
+  // icon in the chat box open its photo album. The picker is opened in the tap itself (a capture
+  // listener, before the wireframe's own handler), because phones only open it during a tap.
+  // Price checks and adding a card need only the front; pre-grades and sell orders need the back too.
+  const picker = document.createElement("input");
+  picker.type = "file"; picker.accept = "image/*"; picker.tabIndex = -1; picker.setAttribute("aria-hidden", "true");
+  picker.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0";
+  document.body.append(picker);
+  let pickDone = null;
   function pickImages(camera, multiple) {
-    return new Promise((resolve) => {
-      const inp = document.createElement("input");
-      inp.type = "file"; inp.accept = "image/*"; inp.hidden = true;
-      if (camera) inp.setAttribute("capture", "environment");
-      if (multiple) inp.multiple = true;
-      document.body.append(inp);
-      let done = false;
-      const finish = (v) => { if (done) return; done = true; inp.remove(); resolve(v); };
-      inp.addEventListener("change", () => finish(inp.files && inp.files.length ? [...inp.files] : null));
-      inp.addEventListener("cancel", () => finish(null));
-      inp.click();
-    });
+    if (pickDone) pickDone(null);
+    picker.value = "";
+    if (camera) picker.setAttribute("capture", "environment"); else picker.removeAttribute("capture");
+    picker.multiple = Boolean(multiple);
+    const p = new Promise((resolve) => { pickDone = (v) => { pickDone = null; resolve(v); }; });
+    picker.click();
+    return p;
   }
+  picker.addEventListener("change", () => pickDone && pickDone(picker.files && picker.files.length ? [...picker.files] : null));
+  picker.addEventListener("cancel", () => pickDone && pickDone(null));
   async function shrinkImage(file) {
     const url = URL.createObjectURL(file);
     try {
@@ -4543,38 +4546,90 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       return c.toDataURL("image/jpeg", 0.85);
     } catch { return null; } finally { URL.revokeObjectURL(url); }
   }
-  // After one photo, a small sheet asks for the back (a tap, so the camera or album can open again).
-  function askForBack(camera, optional) {
+  // After the front, a small sheet asks for the back (a tap, so the camera or album can open again).
+  function askForBack(camera) {
     return new Promise((resolve) => {
       const sheet = document.createElement("div");
       sheet.className = "bd-photo-sheet";
       sheet.innerHTML = '<div><p><b>Front done.</b> Now the back of the card.</p>' +
         '<button data-back-go>' + (camera ? "Take a photo of the back" : "Choose the back photo") + '</button>' +
-        '<button data-back-skip>' + (optional ? "Use the front only" : "Cancel") + '</button></div>';
+        '<button data-back-skip>Cancel</button></div>';
       document.body.append(sheet);
       sheet.addEventListener("click", async (e) => {
-        if (e.target.closest("[data-back-skip]")) { sheet.remove(); resolve(optional ? [] : null); }
+        if (e.target.closest("[data-back-skip]")) { sheet.remove(); resolve(null); }
         else if (e.target.closest("[data-back-go]")) {
           const p = pickImages(camera, false); sheet.remove();
-          const f = await p; resolve(f ? f.slice(0, 1) : optional ? [] : null);
+          const f = await p; resolve(f ? f.slice(0, 1) : null);
         }
       });
     });
   }
+  const needsBack = (kind) => kind === "grade" || kind === "sell";
+  let pendingPick = null;
   window.bdPickCardPhotos = async (el, kind) => {
     const camera = !/upload/i.test(el.textContent || "");
-    let files = await pickImages(camera, !camera);
+    const p = pendingPick && pendingPick.el === el ? pendingPick.promise : pickImages(camera, !camera && needsBack(kind));
+    pendingPick = null;
+    let files = await p;
     if (!files) return false;
-    files = files.slice(0, 2);
-    if (files.length < 2) {
-      const back = await askForBack(camera, kind === "price" || kind === "add");
+    files = files.slice(0, needsBack(kind) ? 2 : 1);
+    if (needsBack(kind) && files.length < 2) {
+      const back = await askForBack(camera);
       if (!back) return false;
       files = files.concat(back);
     }
     const shots = (await Promise.all(files.map(shrinkImage))).filter(Boolean);
-    if (!shots.length) { alert("That photo could not be opened. Please try a JPEG or PNG photo."); return false; }
+    if (shots.length < files.length || !shots.length) { alert("That photo could not be opened. Please try a JPEG or PNG photo."); return false; }
     return shots;
   };
+
+  // The photo icon in the chat box: the collector's own photo is attached to the next message.
+  let attachedShot = null;
+  const attachmentBox = () => app.querySelector("[data-mori-attachment]");
+  async function attachFromAlbum(promise) {
+    const files = await promise;
+    if (!files) return;
+    const shot = await shrinkImage(files[0]);
+    if (!shot) { alert("That photo could not be opened. Please try a JPEG or PNG photo."); return; }
+    attachedShot = shot;
+    const box = attachmentBox();
+    if (box) {
+      box.hidden = false;
+      box.innerHTML = '<img src="' + shot + '" alt=""><span>Card photo attached</span><button type="button" data-mori-clear-attachment aria-label="Remove photo">×</button>';
+    }
+    app.querySelector("[data-mori-input]")?.focus();
+  }
+
+  // Stop: while Mori is answering, the send button becomes a stop button.
+  let liveRun = null;
+  const STOP_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>';
+
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest && e.target.closest("button");
+    if (!el || !app.contains(el) || el.disabled) return;
+    if (el.matches("[data-mori-send]") && liveRun) { e.preventDefault(); e.stopImmediatePropagation(); liveRun.abort(); return; }
+    if (el.matches('[data-mori-act="card-photo"]')) {
+      const kind = el.dataset.moriArg || "price", camera = !/upload/i.test(el.textContent || "");
+      pendingPick = { el, promise: pickImages(camera, !camera && needsBack(kind)) };
+      return;
+    }
+    if (el.matches("[data-mori-image]")) {
+      const box = attachmentBox();
+      if (box && !box.hidden) { attachedShot = null; return; } // the wireframe removes the attachment
+      e.preventDefault(); e.stopImmediatePropagation();
+      attachFromAlbum(pickImages(false, false));
+      return;
+    }
+    if (el.matches("[data-mori-clear-attachment]")) attachedShot = null;
+  }, true);
+  // While Mori answers, Enter does not send; a photo sent with no words goes to Mori as a price check.
+  document.addEventListener("submit", (e) => {
+    if (!e.target.matches || !e.target.matches("[data-mori-form]")) return;
+    if (liveRun) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+    const inp = e.target.querySelector("[data-mori-input]");
+    if (attachedShot && inp && !inp.value.trim()) inp.value = "Here is a photo of my card. What is this card worth?";
+  }, true);
+
   window.bdPhotosHTML = (shots) => '<div class="cp-mori-photos">' + shots.map((src, i) =>
     '<span><img src="' + src + '" alt="Card ' + (i ? "back" : "front") + '"><i>' + (i ? "Back" : "Front") + '</i></span>').join("") + '</div>';
   if (!document.getElementById("bd-photo-sheet-css")) {
@@ -4588,7 +4643,17 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 
   // Called from the wireframe's own route() (patched at build time) for typed and tapped messages.
   window.bdLiveRoute = async (text, ui) => {
+    // A photo attached from the chat box goes with this message and shows in its bubble.
+    const shot = attachedShot; attachedShot = null;
+    if (shot && !ui.photos) {
+      const mine = [...app.querySelectorAll("[data-mori-thread] .cp-mori-body")].pop();
+      if (mine) { mine.insertAdjacentHTML("beforeend", '<div class="cp-mori-photos"><span><img src="' + shot + '" alt="Your card"></span></div>'); ui.scrollDown(); }
+      ui = Object.assign({}, ui, { photos: [shot] });
+    }
     if (!(await fresh())) return false; // guests keep the wireframe's scripted Mori
+    const run = new AbortController(); liveRun = run;
+    const sendBtn = app.querySelector("[data-mori-send]"), sendHTML = sendBtn && sendBtn.innerHTML;
+    if (sendBtn) { sendBtn.innerHTML = STOP_ICON; sendBtn.setAttribute("aria-label", "Stop Mori"); sendBtn.classList.add("is-stop"); }
     const typing = ui.addMsg("mori", '<div class="cp-mori-typing"><i></i><i></i><i></i><span>Thinking</span></div>', "is-typing");
     const steps = [];
     let bubble = null, streamed = "";
@@ -4596,6 +4661,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       const res = await fetch("/api/mori-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
+        signal: run.signal,
         body: JSON.stringify(Object.assign({ message: text, since: chatSince }, ui.photos && ui.photos.length ? { photos: ui.photos } : ui.photo ? { demo_photo: "card" } : {})),
       });
       if (!res.ok || !res.body) throw new Error("unavailable");
@@ -4621,7 +4687,10 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       }
     } catch {
       typing.remove(); bubble?.remove();
-      ui.say("<p>Sorry, I could not answer just now. Please try again.</p>");
+      ui.say(run.signal.aborted ? '<p class="cp-mori-sample">Stopped.</p>' : "<p>Sorry, I could not answer just now. Please try again.</p>");
+    } finally {
+      if (liveRun === run) liveRun = null;
+      if (sendBtn) { sendBtn.innerHTML = sendHTML; sendBtn.setAttribute("aria-label", "Send to Mori"); sendBtn.classList.remove("is-stop"); }
     }
     typing.remove();
     return true;

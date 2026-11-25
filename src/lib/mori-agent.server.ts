@@ -1192,7 +1192,7 @@ export async function runMori(
   const askedAt = Date.parse(ins.data.created_at);
   if (onHarness && accessToken) {
     const { runMoriHarness } = await import("./mori-harness.server");
-    return runMoriHarness(db, userId, accessToken, message, emit, images, since, askedAt);
+    return runMoriHarness(db, userId, accessToken, message, emit, images, since, askedAt, signal);
   }
 
   const input: ResponsesInputItem[] = [
