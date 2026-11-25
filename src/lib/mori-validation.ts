@@ -78,3 +78,17 @@ export function ownMessagePhotos(message: string, userId: string, photoPath?: un
   const matches = [...message.matchAll(/photo_path\s*["']?\s*:\s*["']?([^\]\s"',}]+)/gi)];
   return matches.every((match) => ownPhotoPath(match[1], userId));
 }
+
+/** The collector's own card photos sent with a chat message: one or two JPEG, PNG or WebP data
+ *  URLs (front, then back), each under 2 MB, so the request stays inside the 4.5 MB body limit.
+ *  Null when anything else is sent. */
+export function cardPhotoDataUrls(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 2) return null;
+  const ok = value.every(
+    (v) =>
+      typeof v === "string" &&
+      v.length <= 2_000_000 &&
+      /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(v),
+  );
+  return ok ? (value as string[]) : null;
+}

@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { waitUntil } from "@vercel/functions";
-import { ownMessagePhotos } from "@/lib/mori-validation";
+import { cardPhotoDataUrls, ownMessagePhotos } from "@/lib/mori-validation";
 
 export const Route = createFileRoute("/api/mori-chat")({
   server: {
@@ -34,8 +34,8 @@ export const Route = createFileRoute("/api/mori-chat")({
           return new Response("Invalid message", { status: 400 });
         const message = body.message.trim();
         const userId = auth.user.id;
-        // The demo's "Take a photo" sends the sample card photos (front and back); the server picks
-        // the images, so the browser can never make the model fetch an arbitrary URL.
+        // Photos arrive as image data (never a URL), so the browser can never make the model fetch
+        // an arbitrary address. The older sample-photo option is still accepted.
         // Start of the current chat (ISO time), so New chat gives Mori a fresh context.
         const since =
           "since" in body &&
@@ -44,7 +44,12 @@ export const Route = createFileRoute("/api/mori-chat")({
             ? body.since
             : undefined;
         const images: string[] = [];
-        if ("demo_photo" in body && body.demo_photo === "card") {
+        // "Take a photo" / "Upload from my photos": the collector's own front and back photos.
+        if ("photos" in body) {
+          const photos = cardPhotoDataUrls(body.photos);
+          if (!photos) return new Response("Invalid photos", { status: 400 });
+          images.push(...photos);
+        } else if ("demo_photo" in body && body.demo_photo === "card") {
           const [front, back] = await Promise.all([
             import("@/assets/demo-card-front.jpg?inline"),
             import("@/assets/demo-card-back.jpg?inline"),

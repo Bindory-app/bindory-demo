@@ -73,9 +73,18 @@ HOOKS = [
     ("qsa('[data-greeting]',app).forEach(x=>x.textContent=greeting()+', Wing');",
      "qsa('[data-greeting]',app).forEach(x=>x.textContent=greeting()+', '+(window.bdFirstName||'Wing'));"),
     ("  const L = { wish:", "  const L = window.bdL = { wish:"),
+    # Take a photo opens the phone's camera and Upload opens its photo album (live.html's
+    # bdPickCardPhotos); the collector's own front and back photos are shown and sent to Mori.
+    ("  async function cardPhoto(el, kind) {\n",
+     "  async function cardPhoto(el, kind) {\n"
+     "    const bdShots = window.bdPickCardPhotos ? await window.bdPickCardPhotos(el, kind) : null;\n"
+     "    if (bdShots === false) return;\n"),
+    ("last.insertAdjacentHTML('beforeend', '<div class=\"cp-mori-photos\"><span><img src=\"' + IMG['price-front']",
+     "last.insertAdjacentHTML('beforeend', bdShots ? window.bdPhotosHTML(bdShots) : '<div class=\"cp-mori-photos\"><span><img src=\"' + IMG['price-front']"),
+    ("    return photoResult(kind);\n", "    return photoResult(kind, bdShots);\n"),
     ("  async function photoResult(kind) {\n",
-     "  async function photoResult(kind) {\n"
-     "    if (window.bdLiveRoute && await window.bdLiveRoute(PHOTO_SAYS[kind], { addMsg, say, scrollDown, photo: true })) return;\n"),
+     "  async function photoResult(kind, bdShots) {\n"
+     "    if (window.bdLiveRoute && await window.bdLiveRoute(PHOTO_SAYS[kind], { addMsg, say, scrollDown, photo: true, photos: bdShots })) return;\n"),
     ("const owned = k => !!binderOf(k);", "const owned = k => !!binderOf(k) || (S.loose || []).includes(k);"),
     ("const ownedCards = () => [...new Set(S.binders.flatMap(b => b.cards))]",
      "const ownedCards = () => [...new Set(S.binders.flatMap(b => b.cards).concat(S.loose || []))]"),

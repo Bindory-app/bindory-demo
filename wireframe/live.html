@@ -263,6 +263,77 @@
   app.addEventListener("click", (e) => { if (e.target.closest("[data-mori-reset]")) chatSince = new Date(Date.now() - 5000).toISOString(); }, true);
   app.addEventListener("cp:mori-new-chat", () => { chatSince = new Date().toISOString(); });
 
+  // Card photos: "Take a photo" opens the phone's camera, "Upload from my photos" opens its photo
+  // album. Each photo is shrunk to a JPEG (longest side 1600px) before it is shown and sent.
+  // Resolves to the photos (front, then back), or false when the collector cancels.
+  function pickImages(camera, multiple) {
+    return new Promise((resolve) => {
+      const inp = document.createElement("input");
+      inp.type = "file"; inp.accept = "image/*"; inp.hidden = true;
+      if (camera) inp.setAttribute("capture", "environment");
+      if (multiple) inp.multiple = true;
+      document.body.append(inp);
+      let done = false;
+      const finish = (v) => { if (done) return; done = true; inp.remove(); resolve(v); };
+      inp.addEventListener("change", () => finish(inp.files && inp.files.length ? [...inp.files] : null));
+      inp.addEventListener("cancel", () => finish(null));
+      inp.click();
+    });
+  }
+  async function shrinkImage(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image(); img.src = url; await img.decode();
+      const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      return c.toDataURL("image/jpeg", 0.85);
+    } catch { return null; } finally { URL.revokeObjectURL(url); }
+  }
+  // After one photo, a small sheet asks for the back (a tap, so the camera or album can open again).
+  function askForBack(camera, optional) {
+    return new Promise((resolve) => {
+      const sheet = document.createElement("div");
+      sheet.className = "bd-photo-sheet";
+      sheet.innerHTML = '<div><p><b>Front done.</b> Now the back of the card.</p>' +
+        '<button data-back-go>' + (camera ? "Take a photo of the back" : "Choose the back photo") + '</button>' +
+        '<button data-back-skip>' + (optional ? "Use the front only" : "Cancel") + '</button></div>';
+      document.body.append(sheet);
+      sheet.addEventListener("click", async (e) => {
+        if (e.target.closest("[data-back-skip]")) { sheet.remove(); resolve(optional ? [] : null); }
+        else if (e.target.closest("[data-back-go]")) {
+          const p = pickImages(camera, false); sheet.remove();
+          const f = await p; resolve(f ? f.slice(0, 1) : optional ? [] : null);
+        }
+      });
+    });
+  }
+  window.bdPickCardPhotos = async (el, kind) => {
+    const camera = !/upload/i.test(el.textContent || "");
+    let files = await pickImages(camera, !camera);
+    if (!files) return false;
+    files = files.slice(0, 2);
+    if (files.length < 2) {
+      const back = await askForBack(camera, kind === "price" || kind === "add");
+      if (!back) return false;
+      files = files.concat(back);
+    }
+    const shots = (await Promise.all(files.map(shrinkImage))).filter(Boolean);
+    if (!shots.length) { alert("That photo could not be opened. Please try a JPEG or PNG photo."); return false; }
+    return shots;
+  };
+  window.bdPhotosHTML = (shots) => '<div class="cp-mori-photos">' + shots.map((src, i) =>
+    '<span><img src="' + src + '" alt="Card ' + (i ? "back" : "front") + '"><i>' + (i ? "Back" : "Front") + '</i></span>').join("") + '</div>';
+  if (!document.getElementById("bd-photo-sheet-css")) {
+    const css = document.createElement("style"); css.id = "bd-photo-sheet-css";
+    css.textContent = ".bd-photo-sheet{position:fixed;inset:0;z-index:9999;background:rgba(20,16,40,.45);display:flex;align-items:flex-end;justify-content:center}" +
+      ".bd-photo-sheet>div{background:#fff;width:min(440px,100%);border-radius:22px 22px 0 0;padding:22px 20px calc(22px + env(safe-area-inset-bottom));display:grid;gap:10px;font:inherit;color:#1f2340}" +
+      ".bd-photo-sheet p{margin:0 0 6px;font-size:16px}.bd-photo-sheet button{font:inherit;font-weight:700;font-size:16px;padding:14px;border-radius:999px;border:1px solid #d9d4f5;background:#f1eefc;color:#5b4bd6}" +
+      ".bd-photo-sheet button[data-back-skip]{background:#fff;color:#6b7090}";
+    document.head.append(css);
+  }
+
   // Called from the wireframe's own route() (patched at build time) for typed and tapped messages.
   window.bdLiveRoute = async (text, ui) => {
     if (!(await fresh())) return false; // guests keep the wireframe's scripted Mori
@@ -273,7 +344,7 @@
       const res = await fetch("/api/mori-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
-        body: JSON.stringify(Object.assign({ message: text, since: chatSince }, ui.photo ? { demo_photo: "card" } : {})),
+        body: JSON.stringify(Object.assign({ message: text, since: chatSince }, ui.photos && ui.photos.length ? { photos: ui.photos } : ui.photo ? { demo_photo: "card" } : {})),
       });
       if (!res.ok || !res.body) throw new Error("unavailable");
       const reader = res.body.getReader(), dec = new TextDecoder();

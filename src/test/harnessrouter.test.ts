@@ -332,3 +332,21 @@ describe("Hand-off card in focus", () => {
     expect(cardInFocus([{ kind: "text", payload: null }])).toBeNull();
   });
 });
+
+describe("cardPhotoDataUrls", () => {
+  const jpg = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
+  it("accepts one or two image data URLs", async () => {
+    const { cardPhotoDataUrls } = await import("@/lib/mori-validation");
+    expect(cardPhotoDataUrls([jpg])).toEqual([jpg]);
+    expect(cardPhotoDataUrls([jpg, jpg.replace("jpeg", "png")])).toHaveLength(2);
+  });
+  it("rejects URLs, other types, too many or too large", async () => {
+    const { cardPhotoDataUrls } = await import("@/lib/mori-validation");
+    expect(cardPhotoDataUrls(["https://example.com/a.jpg"])).toBeNull();
+    expect(cardPhotoDataUrls(["data:image/svg+xml;base64,PHN2Zz4="])).toBeNull();
+    expect(cardPhotoDataUrls([jpg, jpg, jpg])).toBeNull();
+    expect(cardPhotoDataUrls([])).toBeNull();
+    expect(cardPhotoDataUrls("x")).toBeNull();
+    expect(cardPhotoDataUrls(["data:image/jpeg;base64," + "A".repeat(2_000_000)])).toBeNull();
+  });
+});
