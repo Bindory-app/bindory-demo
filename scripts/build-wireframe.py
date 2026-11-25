@@ -47,7 +47,7 @@ assert html.count(ROUTE) == 1, "wireframe chat route() not found: update the hoo
 html = html.replace(
     ROUTE,
     ROUTE
-    + "    if (window.bdLiveRoute && !attached && (!M.pending || ['price', 'order', 'grade', 'add'].includes(M.pending))) {\n"
+    + "    if (window.bdLiveRoute && !attached && (!M.pending || ['price', 'order', 'grade', 'add'].includes(M.pending) || (window.bdHasShot && window.bdHasShot()))) {\n"
     + "      const bdPending = M.pending; M.pending = null;\n"
     + "      if (await window.bdLiveRoute(text, { addMsg, say, scrollDown })) return;\n"
     + "      M.pending = bdPending;\n"
@@ -88,7 +88,8 @@ HOOKS = [
     ("    return photoResult(kind);\n", "    return photoResult(kind, bdShots);\n"),
     ("  async function photoResult(kind) {\n",
      "  async function photoResult(kind, bdShots) {\n"
-     "    if (window.bdLiveRoute && await window.bdLiveRoute(PHOTO_SAYS[kind], { addMsg, say, scrollDown, photo: true, photos: bdShots })) return;\n"),
+     "    if (window.bdLiveRoute && await window.bdLiveRoute(PHOTO_SAYS[kind], { addMsg, say, scrollDown, photo: true, photos: bdShots })) return;\n"
+     "    if (bdShots) { say('<p>Log in or sign up and I will read your photo and check this card for real.</p>'); return; }\n"),
     ("const owned = k => !!binderOf(k);", "const owned = k => !!binderOf(k) || (S.loose || []).includes(k);"),
     ("const ownedCards = () => [...new Set(S.binders.flatMap(b => b.cards))]",
      "const ownedCards = () => [...new Set(S.binders.flatMap(b => b.cards).concat(S.loose || []))]"),

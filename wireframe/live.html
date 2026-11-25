@@ -306,17 +306,49 @@
       sheet.addEventListener("click", async (e) => {
         if (e.target.closest("[data-back-skip]")) { sheet.remove(); resolve(null); }
         else if (e.target.closest("[data-back-go]")) {
-          const p = pickImages(camera, false); sheet.remove();
+          const p = openPicker(camera, false); sheet.remove();
           const f = await p; resolve(f ? f.slice(0, 1) : null);
         }
       });
     });
   }
+  // Phones open their own camera from the file input (capture). Laptops ignore that, so there
+  // "Take a photo" opens a live camera view (getUserMedia) with a Capture button instead.
+  const isPhone = () => matchMedia("(pointer: coarse)").matches;
+  function webcamPhoto() {
+    return new Promise((resolve) => {
+      const box = document.createElement("div");
+      box.className = "bd-photo-sheet bd-cam";
+      box.innerHTML = '<div><p><b>Take a photo of the card</b></p><video autoplay playsinline muted></video>' +
+        '<p class="bd-cam-msg" hidden></p><button data-cam-snap disabled>Capture</button>' +
+        '<button data-cam-file>Choose a photo instead</button><button data-back-skip>Cancel</button></div>';
+      document.body.append(box);
+      const video = box.querySelector("video"), snap = box.querySelector("[data-cam-snap]"), msg = box.querySelector(".bd-cam-msg");
+      let stream = null, done = false;
+      const finish = (v) => { if (done) return; done = true; stream && stream.getTracks().forEach((t) => t.stop()); box.remove(); resolve(v); };
+      (navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+        ? navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
+        : Promise.reject(new Error("no camera")))
+        .then((s) => { if (done) { s.getTracks().forEach((t) => t.stop()); return; } stream = s; video.srcObject = s; snap.disabled = false; })
+        .catch(() => { video.hidden = true; snap.hidden = true; msg.hidden = false; msg.textContent = "Your camera is not available here (no camera, or access was blocked). You can choose a photo instead."; });
+      box.addEventListener("click", (e) => {
+        if (e.target.closest("[data-back-skip]")) return finish(null);
+        if (e.target.closest("[data-cam-file]")) { const p = pickImages(false, false); done = true; stream && stream.getTracks().forEach((t) => t.stop()); box.remove(); p.then(resolve); return; }
+        if (e.target.closest("[data-cam-snap]") && stream && video.videoWidth) {
+          const c = document.createElement("canvas"); c.width = video.videoWidth; c.height = video.videoHeight;
+          c.getContext("2d").drawImage(video, 0, 0);
+          c.toBlob((b) => finish(b ? [new File([b], "card.jpg", { type: "image/jpeg" })] : null), "image/jpeg", 0.9);
+        }
+      });
+    });
+  }
+  // The right picker for a tap: camera (phone camera, or the laptop's live view) or the album/files.
+  const openPicker = (camera, multiple) => (camera && !isPhone() ? webcamPhoto() : pickImages(camera, multiple));
   const needsBack = (kind) => kind === "grade" || kind === "sell";
   let pendingPick = null;
   window.bdPickCardPhotos = async (el, kind) => {
     const camera = !/upload/i.test(el.textContent || "");
-    const p = pendingPick && pendingPick.el === el ? pendingPick.promise : pickImages(camera, !camera && needsBack(kind));
+    const p = pendingPick && pendingPick.el === el ? pendingPick.promise : openPicker(camera, !camera && needsBack(kind));
     pendingPick = null;
     let files = await p;
     if (!files) return false;
@@ -332,7 +364,8 @@
   };
 
   // The photo icon in the chat box: the collector's own photo is attached to the next message.
-  let attachedShot = null;
+  let attachedShot = null, shotForAdd = false;
+  window.bdHasShot = () => Boolean(attachedShot);
   const attachmentBox = () => app.querySelector("[data-mori-attachment]");
   async function attachFromAlbum(promise) {
     const files = await promise;
@@ -356,15 +389,23 @@
     const el = e.target.closest && e.target.closest("button");
     if (!el || !app.contains(el) || el.disabled) return;
     if (el.matches("[data-mori-send]") && liveRun) { e.preventDefault(); e.stopImmediatePropagation(); liveRun.abort(); return; }
-    if (el.matches('[data-mori-act="card-photo"]')) {
+    if (el.matches('[data-mori-act="card-photo"], [data-mori-act="price-photo"]')) {
       const kind = el.dataset.moriArg || "price", camera = !/upload/i.test(el.textContent || "");
-      pendingPick = { el, promise: pickImages(camera, !camera && needsBack(kind)) };
+      pendingPick = { el, promise: openPicker(camera, !camera && needsBack(kind)) };
+      return;
+    }
+    // "Scan a card" (adding a card): the collector's own photo from the camera or album, never a sample.
+    if (el.matches('[data-mori-act="scan"]')) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      shotForAdd = true;
+      attachFromAlbum(pickImages(false, false));
       return;
     }
     if (el.matches("[data-mori-image]")) {
       const box = attachmentBox();
       if (box && !box.hidden) { attachedShot = null; return; } // the wireframe removes the attachment
       e.preventDefault(); e.stopImmediatePropagation();
+      shotForAdd = false;
       attachFromAlbum(pickImages(false, false));
       return;
     }
@@ -375,7 +416,9 @@
     if (!e.target.matches || !e.target.matches("[data-mori-form]")) return;
     if (liveRun) { e.preventDefault(); e.stopImmediatePropagation(); return; }
     const inp = e.target.querySelector("[data-mori-input]");
-    if (attachedShot && inp && !inp.value.trim()) inp.value = "Here is a photo of my card. What is this card worth?";
+    if (attachedShot && inp && !inp.value.trim())
+      inp.value = shotForAdd ? "Please add this card to my collection. Here is a photo of it." : "Here is a photo of my card. What is this card worth?";
+    if (attachedShot) shotForAdd = false;
   }, true);
 
   window.bdPhotosHTML = (shots) => '<div class="cp-mori-photos">' + shots.map((src, i) =>
@@ -385,7 +428,9 @@
     css.textContent = ".bd-photo-sheet{position:fixed;inset:0;z-index:9999;background:rgba(20,16,40,.45);display:flex;align-items:flex-end;justify-content:center}" +
       ".bd-photo-sheet>div{background:#fff;width:min(440px,100%);border-radius:22px 22px 0 0;padding:22px 20px calc(22px + env(safe-area-inset-bottom));display:grid;gap:10px;font:inherit;color:#1f2340}" +
       ".bd-photo-sheet p{margin:0 0 6px;font-size:16px}.bd-photo-sheet button{font:inherit;font-weight:700;font-size:16px;padding:14px;border-radius:999px;border:1px solid #d9d4f5;background:#f1eefc;color:#5b4bd6}" +
-      ".bd-photo-sheet button[data-back-skip]{background:#fff;color:#6b7090}";
+      ".bd-photo-sheet button[data-back-skip]{background:#fff;color:#6b7090}" +
+      ".bd-cam video{width:100%;max-height:52vh;border-radius:14px;background:#111;object-fit:contain}.bd-cam .bd-cam-msg{color:#6b7090;font-size:14px}.bd-photo-sheet button[disabled]{opacity:.5}" +
+      "@media (pointer:fine){.bd-photo-sheet{align-items:center}.bd-photo-sheet>div{border-radius:22px}}";
     document.head.append(css);
   }
 
@@ -410,7 +455,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
         signal: run.signal,
-        body: JSON.stringify(Object.assign({ message: text, since: chatSince }, ui.photos && ui.photos.length ? { photos: ui.photos } : ui.photo ? { demo_photo: "card" } : {})),
+        body: JSON.stringify(Object.assign({ message: text, since: chatSince }, ui.photos && ui.photos.length ? { photos: ui.photos } : {})),
       });
       if (!res.ok || !res.body) throw new Error("unavailable");
       const reader = res.body.getReader(), dec = new TextDecoder();
