@@ -52,7 +52,7 @@ export function collectrTaskInput(
     : "(none yet)";
   return [
     `Source URL: ${link}`,
-    "Reading the source: Collectr pages load their cards with JavaScript. First look for Firecrawl among your connected apps (the Apps tools: search for \"firecrawl\", then execute its scrape or crawl action on the source URL, rendering JavaScript, with actions that scroll to load the whole list). Use Browser only if Firecrawl is not available or fails, and say which one you used. Read every card, not just the first screen.",
+    "Reading the source: Collectr pages load their cards with JavaScript. Read it with the firecrawl tools first (firecrawl_scrape on the source URL with JavaScript rendering, waiting for the list and using scroll actions to load every card; crawl or map only within this profile). Use Firecrawl's normal settings: no stealth proxies and no attempts to get around blocking. Use Browser only if Firecrawl fails, and say which one you used. Read every card, not just the first screen.",
     `Destination: the collector's Bindory collection${binder ? `, ${binder.new ? "in a new binder called" : "in their binder"} "${binder.name}"` : ""}. You cannot open or change Bindory: Bindory adds the approved cards itself, so only read the Collectr page and return the proposed change list. Do not ask for Bindory access.`,
     "Synchronization behavior: add missing items only. Never delete, never update quantities in Bindory, never change anything on Collectr. The source collection may not belong to the collector.",
     "Scope: Pokémon trading cards only (raw or graded singles). Skip sealed products and other games, and say how many you skipped.",
