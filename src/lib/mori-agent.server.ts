@@ -1,4 +1,10 @@
-import { collectrReply, collectrSyncLink } from "./collectr";
+import { routeMoriMessage } from "./mori-agents";
+import {
+  COLLECTR_BAD_LINK,
+  collectrSyncBinder,
+  collectrSyncLink,
+  isCollectrLink,
+} from "./collectr";
 import type { MoriStreamEvent, MoriRow } from "./mori-tools";
 import {
   streamResponse,
@@ -740,15 +746,21 @@ async function buildProposal(
     if (!card) return { error: "Card not found in the catalogue" };
     if (name === "add_to_wishlist") return { tool: name, card, note: s(a["note"]) };
     // A binder by name: one of the collector's own (RLS), else a new binder made on confirm.
-    const binderName = s(a["binder_name"])?.trim().replace(/^["“”']+|["“”']+$/g, "");
+    const binderName = s(a["binder_name"])
+      ?.trim()
+      .replace(/^["“”']+|["“”']+$/g, "");
     if (!binderName) return { tool: name, card };
     const { data: mine, error } = await db.from("binders").select("id, name");
     if (error) throw error;
-    const found = (mine ?? []).find((b) => b.name.trim().toLowerCase() === binderName.toLowerCase());
+    const found = (mine ?? []).find(
+      (b) => b.name.trim().toLowerCase() === binderName.toLowerCase(),
+    );
     return {
       tool: name,
       card,
-      binder: found ? { id: found.id, name: found.name, new: false } : { name: binderName, new: true },
+      binder: found
+        ? { id: found.id, name: found.name, new: false }
+        : { name: binderName, new: true },
     };
   }
   if (name === "create_binder") {
@@ -1206,9 +1218,44 @@ export async function runMori(
     .single();
   if (ins.error) throw ins.error;
   const askedAt = Date.parse(ins.data.created_at);
-  // "Sync from Collectr": answered here, without an agent (see collectr.ts).
+  // "Sync from Collectr" runs on its own harness in the background (collectr-sync.server.ts);
+  // a plain follow-up right after a finished sync continues that task.
   const collectr = collectrSyncLink(message);
-  if (collectr !== null) return finishMoriTurn(db, [], collectrReply(collectr), askedAt, emit);
+  const { startSync, latestSync } = await import("./collectr-sync.server");
+  const priorSync =
+    collectr === null && !routeMoriMessage(message, images.length > 0)
+      ? await latestSync(db, userId, since)
+      : null;
+  if (collectr !== null || priorSync) {
+    if (collectr !== null && !isCollectrLink(collectr))
+      return finishMoriTurn(db, [], COLLECTR_BAD_LINK, askedAt, emit);
+    try {
+      const row = await startSync(
+        db,
+        userId,
+        priorSync
+          ? { followUp: message, prior: priorSync }
+          : { link: collectr!, binder: collectrSyncBinder(message) },
+      );
+      const ins = await db
+        .from("mori_messages")
+        .insert(row)
+        .select("id, role, kind, content, payload, created_at")
+        .single();
+      if (ins.error) throw ins.error;
+      emit({ type: "done", rows: [ins.data as unknown as MoriRow] });
+      return;
+    } catch (e) {
+      console.error("Collectr sync failed to start", e instanceof Error ? e.message : e);
+      return finishMoriTurn(
+        db,
+        [],
+        "I could not start the Collectr sync just now. Please try again in a moment.",
+        askedAt,
+        emit,
+      );
+    }
+  }
   if (onHarness && accessToken) {
     const { runMoriHarness } = await import("./mori-harness.server");
     return runMoriHarness(db, userId, accessToken, message, emit, images, since, askedAt, signal);

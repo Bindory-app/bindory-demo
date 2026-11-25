@@ -23,11 +23,23 @@ export function harnessIdFor(agent: MoriAgent): string {
   return id;
 }
 
+/** A harness by its feature key in harnessrouter.json (e.g. "collectr"), set by the server only. */
+export function harnessIdForFeature(feature: string): string {
+  const id = handoff.setups.find((s) => s.feature_key === feature)?.harness_id;
+  if (!id) throw new Error(`No harness configured for feature "${feature}"`);
+  return id;
+}
+
+export interface FileRef {
+  file_id?: string | undefined;
+  filename?: string | undefined;
+  download_url?: string | undefined;
+}
 export interface OutputItem {
   id?: string;
   type: string;
   role?: string;
-  content?: { type: string; text?: string }[];
+  content?: { type: string; text?: string; annotations?: (FileRef & { type?: string })[] }[];
   name?: string;
   arguments?: string;
   call_id?: string;
@@ -250,4 +262,65 @@ export function answerText(r: HRResponse): string {
     .filter((c) => c.type === "output_text")
     .map((c) => c.text ?? "")
     .join("");
+}
+
+/** Starts a long task in the background (the server polls it; nothing is tied to a browser). */
+export async function startBackgroundTask(t: {
+  harnessId: string;
+  input: string;
+  user: string;
+  previousResponseId?: string | undefined;
+  sessionId?: string | undefined;
+}): Promise<HRResponse> {
+  const metadata: Record<string, string> = { harness_id: t.harnessId };
+  if (t.sessionId) metadata["session_id"] = t.sessionId;
+  const body: Record<string, unknown> = {
+    input: t.input,
+    user: t.user,
+    metadata,
+    background: true,
+  };
+  if (t.previousResponseId) body["previous_response_id"] = t.previousResponseId;
+  const res = await call("/v1/responses", {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json", "Idempotency-Key": randomUUID() },
+  });
+  return (await res.json()) as HRResponse;
+}
+
+export const isTerminal = (status: string) => TERMINAL_STATUSES.has(status);
+
+/** Files the agent made: annotations on the answer, plus the session's changed files. */
+export async function responseFiles(r: HRResponse): Promise<FileRef[]> {
+  const out = new Map<string, FileRef>();
+  const add = (f: FileRef) => {
+    if (f.download_url && f.filename && !out.has(f.filename))
+      out.set(f.filename, {
+        file_id: f.file_id,
+        filename: f.filename,
+        download_url: f.download_url,
+      });
+  };
+  for (const item of r.output ?? [])
+    for (const c of item.content ?? []) for (const a of c.annotations ?? []) add(a);
+  const sid = r.metadata?.session_id;
+  if (sid) {
+    try {
+      const res = await call(`/v1/sessions/${encodeURIComponent(sid)}/files?changed=true`);
+      const j = (await res.json()) as { data?: FileRef[]; files?: FileRef[] };
+      for (const f of j.data ?? j.files ?? []) add(f);
+    } catch {
+      // The annotations are enough when the list is unavailable.
+    }
+  }
+  return [...out.values()].slice(0, 20);
+}
+
+/** Downloads one of the agent's files with the key. Only HarnessRouter's own file URLs. */
+export async function downloadFile(url: string): Promise<Response> {
+  const u = new URL(url);
+  if (u.origin !== API_BASE || !u.pathname.startsWith("/v1/"))
+    throw new Error("Not a HarnessRouter file");
+  return call(u.pathname + u.search, { headers: { Accept: "*/*" } });
 }

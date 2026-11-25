@@ -148,10 +148,15 @@ describe("Mori agent routing", () => {
 });
 
 describe("Mori agent harnesses and tool scopes", () => {
+  // Mori's agents, plus "collectr" (Collectr sync, its own harness outside Mori's tool scopes).
+  const moriSetups = handoff.setups.filter((s) => s.feature_key !== "collectr");
   it("has one harness per agent in harnessrouter.json", () => {
-    const keys = handoff.setups.map((s) => s.feature_key).sort();
+    const keys = moriSetups.map((s) => s.feature_key).sort();
     expect(keys).toEqual([...MORI_AGENTS].sort());
-    expect(new Set(handoff.setups.map((s) => s.harness_id)).size).toBe(MORI_AGENTS.length);
+    expect(new Set(handoff.setups.map((s) => s.harness_id)).size).toBe(handoff.setups.length);
+    expect(handoff.setups.find((s) => s.feature_key === "collectr")?.harness_id).toBe(
+      "chrn_fb353c44d67fe5b51f47aa2e2fc72576",
+    );
   });
   it("limits specialists to their own tools", () => {
     expect(agentMayUse("memory", "save_memory")).toBe(true);
@@ -160,7 +165,7 @@ describe("Mori agent harnesses and tool scopes", () => {
     expect(agentMayUse("ask", "set_order")).toBe(true);
   });
   it("tells each specialist exactly the tools it may call", () => {
-    for (const s of handoff.setups) {
+    for (const s of moriSetups) {
       if (s.feature_key === "ask") continue;
       const tools = AGENT_TOOLS[s.feature_key as keyof typeof AGENT_TOOLS];
       expect(s.instructions).toContain(`"mori": ${tools.join(", ")}.`);
@@ -352,15 +357,42 @@ describe("cardPhotoDataUrls", () => {
 });
 
 describe("Collectr sync", () => {
-  it("spots the sync message and checks the link", async () => {
-    const { collectrSyncLink, isCollectrLink, collectrReply } = await import("@/lib/collectr");
-    const link = "https://app.getcollectr.com/showcase/profile/6b10e282-6452-49ef-ae2e-e36ff91945e4";
-    expect(collectrSyncLink(`Sync my Collectr collection: ${link}`)).toBe(link);
+  it("spots the sync message, its binder, and checks the link", async () => {
+    const { collectrSyncLink, collectrSyncBinder, isCollectrLink } = await import("@/lib/collectr");
+    const link =
+      "https://app.getcollectr.com/showcase/profile/6b10e282-6452-49ef-ae2e-e36ff91945e4";
+    expect(collectrSyncLink(`Sync my Collectr collection: ${link} into the binder "Fire"`)).toBe(
+      link,
+    );
+    expect(
+      collectrSyncBinder(`Sync my Collectr collection: ${link} into the binder "Fire"`),
+    ).toEqual({ name: "Fire", new: false });
+    expect(
+      collectrSyncBinder(
+        `Sync my Collectr collection: ${link} into a new binder called "From Collectr"`,
+      ),
+    ).toEqual({ name: "From Collectr", new: true });
     expect(collectrSyncLink("Price check: Pikachu 25/25")).toBeNull();
     expect(isCollectrLink(link)).toBe(true);
     expect(isCollectrLink("https://evil.example.com/getcollectr.com")).toBe(false);
     expect(isCollectrLink("http://app.getcollectr.com/x")).toBe(false);
-    expect(collectrReply("nope")).toMatch(/does not look like a Collectr link/);
-    expect(collectrReply(link)).toMatch(/can't bring your cards across/);
+  });
+  it("reads the proposed cards from the answer and hides the json block", async () => {
+    const { syncItems, syncAnswerText } = await import("@/lib/collectr");
+    const answer =
+      '## Status\nProposed.\n\n```json\n{"bindory_items":[{"name":"Umbreon VMAX","number":"215/203","set":"Evolving Skies","quantity":1},{"bad":1}]}\n```';
+    expect(syncItems(answer)).toEqual([
+      { name: "Umbreon VMAX", number: "215/203", set: "Evolving Skies", quantity: 1 },
+    ]);
+    expect(syncAnswerText(answer)).toBe("## Status\nProposed.");
+    expect(syncItems("no block")).toEqual([]);
+  });
+  it("signs a task for one collector only", async () => {
+    process.env["MORI_MCP_SECRET"] ??= "x".repeat(40);
+    const { signTask, isOwnTask } = await import("@/lib/mori-mcp-auth.server");
+    const sig = signTask("u1", "resp_1", "hsess_1");
+    expect(isOwnTask("u1", "resp_1", "hsess_1", sig)).toBe(true);
+    expect(isOwnTask("u2", "resp_1", "hsess_1", sig)).toBe(false);
+    expect(isOwnTask("u1", "resp_2", "hsess_1", sig)).toBe(false);
   });
 });

@@ -214,6 +214,92 @@
       "</div>";
   }
 
+  // Markdown from the sync agent: headings, tables, lists, bold. Escaped first; links show as text.
+  function mdHTML(t) {
+    const inline = (x) => esc(x).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+    const lines = String(t || "").split("\n"), out = [];
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      if (/^\s*\|.*\|\s*$/.test(l) && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1] || "")) {
+        const cells = (x) => x.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+        let h = "<div class=\"bd-md-table\"><table><thead><tr>" + cells(l).map((c) => "<th>" + inline(c) + "</th>").join("") + "</tr></thead><tbody>";
+        i += 2;
+        for (; i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i]); i++) h += "<tr>" + cells(lines[i]).map((c) => "<td>" + inline(c) + "</td>").join("") + "</tr>";
+        i--; out.push(h + "</tbody></table></div>"); continue;
+      }
+      const hd = /^\s*#{1,4}\s+(.*)$/.exec(l);
+      if (hd) { out.push("<h4>" + inline(hd[1]) + "</h4>"); continue; }
+      const li = /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/.exec(l);
+      if (li) { out.push("<p class=\"bd-md-li\">• " + inline(li[1]) + "</p>"); continue; }
+      if (l.trim()) out.push("<p>" + inline(l) + "</p>");
+    }
+    return out.join("");
+  }
+  // A Collectr sync card asks the server for progress until the agent is done, then shows its
+  // answer, its files and "Add these cards".
+  async function syncCall(id, action, extra) {
+    await fresh();
+    if (!session) throw new Error("signed out");
+    return fetch("/api/mori-sync", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token }, body: JSON.stringify(Object.assign({ id, action }, extra || {})) });
+  }
+  function watchSync(card) {
+    if (!card || card.dataset.watching) return;
+    card.dataset.watching = "1";
+    const id = card.dataset.bdSync, status = card.querySelector(".bd-sync-status"), box = card.querySelector(".bd-sync-result");
+    let misses = 0;
+    const tick = async () => {
+      if (!card.isConnected) return;
+      try {
+        const res = await syncCall(id, "status");
+        if (!res.ok) throw new Error(String(res.status));
+        const s = await res.json();
+        misses = 0;
+        if (!s.done) { status.innerHTML = '<i class="bd-spin"></i>' + esc(s.progress || "Reading your Collectr collection") + "…"; setTimeout(tick, 5000); return; }
+        status.textContent = s.status === "completed" ? "Done" : "Stopped before the end";
+        card.dataset.binder = s.binder || "";
+        box.innerHTML = mdHTML(s.content) +
+          (s.files.length ? '<div class="bd-sync-files"><small>Files</small>' + s.files.map((f) => '<button data-bd-sync-file="' + f.n + '">' + esc(f.filename.split("/").pop()) + "</button>").join("") + "</div>" : "") +
+          (s.applied ? appliedHTML(s.applied, s.binder) : s.items ? '<div class="cp-mori-actions"><button class="cp-mori-go" data-bd-sync-apply>Add ' + s.items + " card" + (s.items === 1 ? "" : "s") + (s.binder ? " to " + esc(s.binder) : "") + "</button></div>" : "");
+        app.querySelector("[data-mori-thread]") && card.scrollIntoView({ block: "nearest" });
+      } catch {
+        if (++misses < 6) setTimeout(tick, 8000);
+        else status.textContent = "Could not reach the sync. Open this chat again to check it.";
+      }
+    };
+    setTimeout(tick, 3000);
+  }
+  function appliedHTML(a, binder) {
+    return '<p class="bd-sync-done"><b>' + a.added + " added</b>" + (binder ? " to " + esc(binder) : "") + (a.already ? ", " + a.already + " you already had" : "") + ".</p>" +
+      (a.unmatched && a.unmatched.length ? '<p class="cp-mori-sample">Not added (no exact catalogue match): ' + a.unmatched.map(esc).join(", ") + "</p>" : "");
+  }
+  app.addEventListener("click", async (e) => {
+    const apply = e.target.closest("[data-bd-sync-apply]"), file = e.target.closest("[data-bd-sync-file]");
+    if (!apply && !file) return;
+    e.stopPropagation();
+    const card = e.target.closest("[data-bd-sync]"), id = card.dataset.bdSync;
+    if (apply) {
+      apply.disabled = true; apply.textContent = "Adding cards…";
+      try {
+        const res = await syncCall(id, "apply");
+        if (!res.ok) throw new Error(String(res.status));
+        const a = await res.json();
+        apply.closest(".cp-mori-actions").outerHTML = appliedHTML(a, card.dataset.binder || "");
+        P.toast(a.added + " card" + (a.added === 1 ? "" : "s") + " added");
+        loadMyData();
+      } catch { apply.disabled = false; apply.textContent = "Try again"; P.toast("Could not add the cards. Please try again."); }
+      return;
+    }
+    file.disabled = true;
+    try {
+      const res = await syncCall(id, "file", { n: Number(file.dataset.bdSyncFile) });
+      if (!res.ok) throw new Error(String(res.status));
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a"); a.href = url; a.download = file.textContent; document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch { P.toast("Could not download that file."); }
+    file.disabled = false;
+  });
+
   function renderRows(rows, ui, steps) {
     steps = [...new Set(steps)];
     // The steps ("Searching the web" ...) show only while Mori works, in the typing bubble; the
@@ -232,6 +318,7 @@
         }
         continue;
       }
+      if (r.kind === "sync") { last = ui.say(stepsHTML + '<div class="bd-sync" data-bd-sync="' + esc(r.id) + '"><small>Collectr sync</small><p class="bd-sync-status"><i class="bd-spin"></i>' + esc(r.content) + '</p><div class="bd-sync-result"></div></div>'); watchSync(last.querySelector("[data-bd-sync]")); lastKind = "sync"; continue; }
       if (r.kind === "confirm" && r.payload) { last = ui.say(stepsHTML + proposalHTML(r.payload, r.id)); fillPhotos(last); }
       else if (r.kind === "photos") {
         // Take a photo / Upload send the front and back for a sell order or a pre-grade (the wireframe's own photo step).
@@ -491,10 +578,18 @@
     box.innerHTML = '<form novalidate><p><b>Sync from Collectr</b></p>' +
       '<label>Your public Collectr link<input name="link" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://app.getcollectr.com/showcase/profile/..." maxlength="300"></label>' +
       '<small>In Collectr: Profile, then Settings, turn on Portfolio Sharing and copy the link.</small>' +
+      '<label>Add the cards to<select name="binder"><option value="" disabled selected>Choose a binder</option><option value="__new">+ New binder</option></select></label>' +
+      '<label class="bd-newbinder" hidden>New binder name<input name="newbinder" autocomplete="off" autocapitalize="sentences" placeholder="e.g. From Collectr" maxlength="60"></label>' +
       '<p class="bd-slot-err" hidden></p><button type="submit">Send to Mori</button><button type="button" data-back-skip>Cancel</button></form>';
     document.body.append(box);
     const f = box.querySelector("form"), err = box.querySelector(".bd-slot-err"), link = f.elements.link;
     setTimeout(() => link.focus(), 30);
+    const sel = f.elements.binder, nb = box.querySelector(".bd-newbinder");
+    sel.addEventListener("change", () => { nb.hidden = sel.value !== "__new"; if (!nb.hidden) f.elements.newbinder.focus(); });
+    fresh().then((s) => s && sb.from("binders").select("name").order("created_at")).then((r) => {
+      const add = sel.querySelector('option[value="__new"]');
+      [...new Set(((r && r.data) || []).map((b) => b.name).filter(Boolean))].forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; sel.insertBefore(o, add); });
+    }).catch(() => {});
     box.addEventListener("click", (e) => { if (e.target === box || e.target.closest("[data-back-skip]")) box.remove(); });
     f.addEventListener("submit", (e) => {
       e.preventDefault();
@@ -502,10 +597,13 @@
       let ok = false;
       try { const u = new URL(v); ok = u.protocol === "https:" && (u.hostname === "getcollectr.com" || u.hostname.endsWith(".getcollectr.com")); } catch { ok = false; }
       if (!ok) { err.textContent = "Paste your Collectr link. It starts with https://app.getcollectr.com/"; err.hidden = false; link.focus(); return; }
+      const isNew = sel.value === "__new", bname = isNew ? (f.elements.newbinder.value || "").trim().replace(/["“”]/g, "").replace(/\s+/g, " ") : sel.value;
+      if (!sel.value) { err.textContent = "Choose a binder for the cards, or make a new one."; err.hidden = false; sel.focus(); return; }
+      if (isNew && !bname) { err.textContent = "Type a name for the new binder."; err.hidden = false; f.elements.newbinder.focus(); return; }
       box.remove();
       const inp = app.querySelector("[data-mori-input]"), form = inp && inp.closest("form");
       if (!inp) return;
-      inp.value = "Sync my Collectr collection: " + v;
+      inp.value = "Sync my Collectr collection: " + v + (isNew ? ' into a new binder called "' + bname + '"' : ' into the binder "' + bname + '"');
       if (form && form.requestSubmit) form.requestSubmit();
     });
   }
@@ -577,6 +675,11 @@
       ".bd-slot input{font:inherit;font-size:16px;font-weight:400;padding:12px 14px;border:1px solid #d9d4f5;border-radius:12px;width:100%;box-sizing:border-box;color:#1f2340}" +
       ".bd-slot .bd-num,.bd-slot .bd-price{display:flex;align-items:center;gap:8px}.bd-slot .bd-price b{font-size:16px;color:#4a4f6e}.bd-slot .bd-num b{font-size:20px;color:#6b7090}.bd-slot-err{color:#c0392b;font-size:14px;margin:0}" +
       ".bd-slot button[type=submit]{background:#5b4bd6;color:#fff;border-color:#5b4bd6}" +
+      ".bd-sync small{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#5b4bd6}.bd-sync-status{display:flex;align-items:center;gap:8px;color:#4a4f6e;margin:6px 0}" +
+      ".bd-spin{width:14px;height:14px;border-radius:50%;border:2px solid #d9d4f5;border-top-color:#5b4bd6;display:inline-block;animation:bdspin .8s linear infinite;flex:none}@keyframes bdspin{to{transform:rotate(360deg)}}" +
+      ".bd-sync-result h4{margin:12px 0 4px;font-size:14px}.bd-sync-result p{margin:4px 0}.bd-md-table{overflow-x:auto;margin:6px 0}.bd-md-table table{border-collapse:collapse;font-size:12px;min-width:100%}" +
+      ".bd-md-table th,.bd-md-table td{border:1px solid #e6e2fa;padding:5px 7px;text-align:left;vertical-align:top}.bd-md-table th{background:#f5f3fe}" +
+      ".bd-sync-files{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0}.bd-sync-files button{font:inherit;font-size:12px;border:1px solid #d9d4f5;background:#f1eefc;color:#5b4bd6;border-radius:999px;padding:6px 10px}" +
       "@media (pointer:fine){.bd-photo-sheet{align-items:center}.bd-photo-sheet>div,.bd-slot form{border-radius:22px}}";
     document.head.append(css);
   }
