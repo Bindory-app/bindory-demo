@@ -35,6 +35,7 @@ export const AGENT_TOOLS: Record<Exclude<MoriAgent, "ask">, readonly string[]> =
     "list_my_cards",
     "web_search",
     "web_fetch",
+    "request_card_photos",
   ],
   add: [
     "search_catalogue",
@@ -70,17 +71,21 @@ export const AGENT_NAMES: Record<MoriAgent, string> = {
   tradeup: "Mori Trade-up",
 };
 
-/** The specialist a message clearly belongs to, or null when it is general (or a follow-up). The
- *  patterns match the shortcut templates' own wording first, then plain requests. */
-export function routeMoriMessage(
-  message: string,
-  hasPhotos = false,
-): Exclude<MoriAgent, "ask"> | null {
+/** The agent a message clearly belongs to, or null for a follow-up (it stays with the chat's
+ *  current agent). The patterns match the shortcut templates' wording, then the hand-off prompts
+ *  each agent offers in its Suggestions (see the team roster in harnessrouter.json). */
+export function routeMoriMessage(message: string, hasPhotos = false): MoriAgent | null {
   const m = message.trim();
   if (/help me save this memory\.?$/i.test(m) || /\b(save|log)\b.{0,20}\bmemor(y|ies)\b/i.test(m))
     return "memory";
   if (
     /\bpre-?grad|\bshould i (send|get) it graded|\bshould i grade\b|\bgrade (it|this|my)\b/i.test(m)
+  )
+    return "grade";
+  if (
+    /\bgrading (cost|costs|fee|fees|service|services|company|companies)\b|\b(send|submit)\b.{0,30}\bgrad/i.test(
+      m,
+    )
   )
     return "grade";
   if (/\btrade-?up\b/i.test(m)) return "tradeup";
@@ -91,9 +96,19 @@ export function routeMoriMessage(
   )
     return "order";
   if (/^(please )?add\b.*\bcollection\b|\badd (this|a|the) card\b/i.test(m)) return "add";
-  if (/\bprice\b|\bworth\b|\bvalue\b|\bhow much\b/i.test(m)) return "price";
+  if (/\b(put|place|move|build|create|make)\b.{0,30}\bbinder\b/i.test(m)) return "add";
+  if (/\bprice\b|\bworth\b|\bvalue\b|\bhow much\b|\bwent (up|down)\b|\btrend(y|ing|s)?\b/i.test(m))
+    return "price";
+  // Ask Mori's own jobs: what to chase, card shows and news, collectors, videos, completing a set.
+  if (
+    /\bchase\b|\bhunt\b|card shows?\b|\bevents?\b|\bconvention|share my taste|\bcollectors?\b|\bvideo\b|complete (my|the|this) set|completes? my set/i.test(
+      m,
+    )
+  )
+    return "ask";
   // Just a card name and its number (e.g. "Mega Charizard X ex 125/094") is a price check.
-  if (/^[\p{L}\p{N}'’.:&\- ]{2,60}\s#?[A-Z]{0,3}\d{1,4}\/[A-Z]{0,3}\d{1,4}$/iu.test(m)) return "price";
+  if (/^[\p{L}\p{N}'’.:&\- ]{2,60}\s#?[A-Z]{0,3}\d{1,4}\/[A-Z]{0,3}\d{1,4}$/iu.test(m))
+    return "price";
   if (hasPhotos) return "price";
   return null;
 }

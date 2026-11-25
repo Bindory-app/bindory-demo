@@ -58,6 +58,9 @@ export type Proposal =
       date?: string | undefined;
       card?: ProposalCard | undefined;
       traded_card?: ProposalCard | undefined;
+      /** A card the catalogue could not match, as the collector named it (e.g. "Pikachu ex 25/25"). */
+      card_name?: string | undefined;
+      traded_card_name?: string | undefined;
       photo_path?: string | undefined;
     }
   | {

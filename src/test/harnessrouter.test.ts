@@ -136,9 +136,10 @@ describe("Mori agent routing", () => {
     expect(routeMoriMessage("Start a trade-up challenge")).toBe("tradeup");
   });
   it("leaves general questions and follow-ups to the chat's current agent", () => {
-    expect(routeMoriMessage("What card should I chase next?")).toBeNull();
-    expect(routeMoriMessage("Which collectors share my taste?")).toBeNull();
+    expect(routeMoriMessage("What card should I chase next?")).toBe("ask");
+    expect(routeMoriMessage("Which collectors share my taste?")).toBe("ask");
     expect(routeMoriMessage("Yes, that one")).toBeNull();
+    expect(routeMoriMessage("US$450 please")).toBeNull();
   });
   it("routes value questions and bare photos to price check", () => {
     expect(routeMoriMessage("Which of my cards went up in value this month?")).toBe("price");
@@ -231,6 +232,103 @@ describe("Bare card names are price checks", () => {
   it("keeps other requests that mention a card number with their own agent", () => {
     expect(routeMoriMessage("Add Umbreon VMAX 215/203 to my collection")).toBe("add");
     expect(routeMoriMessage("Sell Mega Charizard X ex 125/094 for at least US$550")).toBe("order");
-    expect(routeMoriMessage("Is Umbreon VMAX 215/203 a good card to chase?")).toBeNull();
+    expect(routeMoriMessage("Is Umbreon VMAX 215/203 a good card to chase?")).toBe("ask");
+  });
+});
+
+import { replyParts } from "@/lib/mori-agent.server";
+
+describe("Reply bubbles", () => {
+  it("splits a multi-part reply on --- lines, one bubble each", () => {
+    expect(replyParts("Shows in Sydney:\n• A\n---\nYour grading options:\n• PSA\n---\n")).toEqual([
+      "Shows in Sydney:\n• A",
+      "Your grading options:\n• PSA",
+    ]);
+  });
+  it("keeps a single answer whole", () => {
+    expect(replyParts("Here are the shows.\n• A - B")).toEqual(["Here are the shows.\n• A - B"]);
+  });
+});
+
+describe("Team hand-off prompts", () => {
+  // Every prompt an agent offers to hand work to a teammate must reach that teammate.
+  const table: [string, string][] = [
+    ["Price check this card", "price"],
+    ["Which of my cards went up?", "price"],
+    ["What is the next trendy collection?", "price"],
+    ["Pre-grade this card", "grade"],
+    ["Should I grade it?", "grade"],
+    ["What does grading cost?", "grade"],
+    ["Where can I send it for grading?", "grade"],
+    ["Set a sell order for this card", "order"],
+    ["Set a buy order for this card", "order"],
+    ["Show my open orders", "order"],
+    ["Add this card to my collection", "add"],
+    ["Put this card in a binder", "add"],
+    ["Can you build a binder from my collection?", "add"],
+    ["Save a memory about this card", "memory"],
+    ["Start a trade-up challenge", "tradeup"],
+    ["What card should I chase next?", "ask"],
+    ["When is the next card show near me?", "ask"],
+    ["What trendy cards should I hunt?", "price"],
+  ];
+  it.each(table)("%s -> %s", (prompt, agent) => {
+    expect(routeMoriMessage(prompt)).toBe(agent);
+  });
+});
+
+import { cardInFocus } from "@/lib/mori-harness.server";
+
+describe("Hand-off card in focus", () => {
+  it("takes the card from the newest price card, even with no text reply", () => {
+    expect(
+      cardInFocus([
+        { kind: "suggest", payload: { suggestions: ["Pre-grade this card"] } },
+        {
+          kind: "price",
+          payload: {
+            card: {
+              id: "me02-125",
+              name: "Mega Charizard X ex",
+              number: "125",
+              set: "Phantasmal Flames",
+            },
+          },
+        },
+        {
+          kind: "status",
+          payload: { name: "get_card_prices", output: { card: { id: "sv1-1", name: "Old" } } },
+        },
+      ]),
+    ).toEqual({
+      id: "me02-125",
+      name: "Mega Charizard X ex",
+      number: "125",
+      set: "Phantasmal Flames",
+    });
+  });
+  it("reads order cards and price lookups too", () => {
+    expect(
+      cardInFocus([
+        {
+          kind: "confirm",
+          payload: {
+            card: { tcgdex_id: "swsh7-215", name: "Umbreon VMAX", set_name: "Evolving Skies" },
+          },
+        },
+      ]),
+    ).toEqual({ id: "swsh7-215", name: "Umbreon VMAX", set: "Evolving Skies" });
+    expect(
+      cardInFocus([
+        {
+          kind: "status",
+          payload: {
+            name: "get_card_prices",
+            output: { card: { id: "sv1-1", name: "Sprigatito", number: "13" } },
+          },
+        },
+      ]),
+    ).toEqual({ id: "sv1-1", name: "Sprigatito", number: "13" });
+    expect(cardInFocus([{ kind: "text", payload: null }])).toBeNull();
   });
 });

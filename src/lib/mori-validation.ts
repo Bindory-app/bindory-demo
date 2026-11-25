@@ -42,6 +42,8 @@ export const writeSchemas = {
       .optional(),
     card_id: cardId.optional(),
     traded_card_id: cardId.optional(),
+    card_name: short.optional(),
+    traded_card_name: short.optional(),
     photo_path: text.optional(),
   }),
   set_order: z.object({

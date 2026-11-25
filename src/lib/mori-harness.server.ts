@@ -8,7 +8,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { TOOL_STATUS, type MoriStreamEvent } from "./mori-tools";
-import { isMoriAgent, routeMoriMessage, type MoriAgent } from "./mori-agents";
+import { AGENT_NAMES, isMoriAgent, routeMoriMessage, type MoriAgent } from "./mori-agents";
 import {
   answerText,
   harnessIdFor,
@@ -95,25 +95,101 @@ async function chatSessions(db: DB, since?: string): Promise<ChatSession[]> {
   return out;
 }
 
-/** The previous exchange in this chat, for an agent that was not part of it. */
-async function previousExchange(db: DB, since: string | undefined, askedAt: number) {
+/** The card the chat is about, from the newest row that names one: a price card, an order or
+ *  wishlist card, a grade report, or a price lookup. */
+export function cardInFocus(
+  rows: { kind: string; payload: unknown }[],
+): { id?: string; name: string; number?: string; set?: string } | null {
+  for (const row of rows) {
+    const p = asObject(row.payload);
+    const pick = (c: Record<string, unknown>) => {
+      const name = typeof c["name"] === "string" ? c["name"] : "";
+      if (!name) return null;
+      const id =
+        typeof c["id"] === "string"
+          ? c["id"]
+          : typeof c["tcgdex_id"] === "string"
+            ? c["tcgdex_id"]
+            : undefined;
+      const number = typeof c["number"] === "string" ? c["number"] : undefined;
+      const set =
+        typeof c["set"] === "string"
+          ? c["set"]
+          : typeof c["set_name"] === "string"
+            ? c["set_name"]
+            : undefined;
+      return {
+        name,
+        ...(id ? { id } : {}),
+        ...(number ? { number } : {}),
+        ...(set ? { set } : {}),
+      };
+    };
+    if ((row.kind === "price" || row.kind === "confirm") && p["card"]) {
+      const c = pick(asObject(p["card"]));
+      if (c) return c;
+    }
+    if (row.kind === "grade" && typeof p["card"] === "string" && p["card"])
+      return { name: p["card"] };
+    if (row.kind === "status" && p["name"] === "get_card_prices") {
+      const c = pick(asObject(asObject(p["output"])["card"]));
+      if (c) return c;
+    }
+  }
+  return null;
+}
+
+/** What a Mori agent joining this chat needs: the card in focus and the last exchange. */
+async function handoffNote(db: DB, since: string | undefined, askedAt: number) {
   let q = db
     .from("mori_messages")
-    .select("role, kind, content, created_at")
-    .in("kind", ["text"])
+    .select("role, kind, content, payload, created_at")
     .lt("created_at", new Date(askedAt).toISOString());
   if (since) q = q.gt("created_at", since);
-  const { data } = await q.order("created_at", { ascending: false }).limit(6);
-  const rows = (data ?? []).filter((r) => r.content.trim());
-  const lastMori = rows.find((r) => r.role === "mori");
-  const lastUser = rows.find(
-    (r) => r.role === "user" && (!lastMori || r.created_at < lastMori.created_at),
+  const { data } = await q.order("created_at", { ascending: false }).limit(40);
+  const rows = data ?? [];
+  const clip = (t: string) => (t.length > 600 ? `${t.slice(0, 600)}…` : t);
+  const lastUser = rows.find((r) => r.role === "user" && r.content.trim());
+  const shown = rows.find(
+    (r) =>
+      r.role === "mori" &&
+      [
+        "text",
+        "price",
+        "confirm",
+        "grade",
+        "photos",
+        "orders",
+        "people",
+        "video",
+        "binders",
+      ].includes(r.kind),
   );
-  if (!lastMori && !lastUser) return "";
-  const clip = (t: string) => (t.length > 700 ? `${t.slice(0, 700)}…` : t);
-  return `[App note: earlier in this chat, with another Mori agent. Collector: “${clip(
-    lastUser?.content ?? "",
-  )}” Mori: “${clip(lastMori?.content ?? "")}”]\n`;
+  const said = !shown
+    ? ""
+    : shown.kind === "text"
+      ? `“${clip(shown.content)}”`
+      : shown.kind === "price"
+        ? `showed a price card (${shown.content})`
+        : shown.kind === "confirm"
+          ? `showed a card to confirm: ${shown.content}`
+          : shown.kind === "photos"
+            ? "asked for front and back photos"
+            : clip(shown.content);
+  const focus = cardInFocus(rows);
+  if (!focus && !lastUser && !said) return "";
+  const lines = ["[App note: hand-off from another Mori agent."];
+  if (focus)
+    lines.push(
+      `Card in focus: ${focus.name}${focus.number ? ` ${focus.number}` : ""}${focus.set ? ` (${focus.set})` : ""}${
+        focus.id ? `, catalogue id ${focus.id}` : ""
+      }. "This card" or "it" means this card; use it without asking which card.`,
+    );
+  if (lastUser || said)
+    lines.push(
+      `Last exchange: collector “${clip(lastUser?.content ?? "")}”${said ? `; Mori ${said}` : ""}.`,
+    );
+  return `${lines.join("\n")}]\n`;
 }
 
 /** What the collector did with Mori's last cards (Confirm or Change), as an app note. */
@@ -296,7 +372,7 @@ export async function runMoriHarness(
       const prior = sessions.find((x) => x.agent === agent);
       const notes =
         (prior ? await cardOutcomes(db, prior.at) : "") +
-        (current && current.agent !== agent ? await previousExchange(db, since, askedAt) : "") +
+        (current && current.agent !== agent ? await handoffNote(db, since, askedAt) : "") +
         handoff;
       const input = await buildInput(notes + message, images);
       // Hold back streamed text until it is clear this agent is answering (not role_mismatch).
@@ -342,9 +418,18 @@ export async function runMoriHarness(
     let agent = first;
     let r = await run(agent, "");
     // A specialist that gets something outside its job hands the message to Ask Mori.
-    if (agent !== "ask" && /^\s*role_mismatch\b/i.test(answerText(r))) {
-      agent = "ask";
-      r = await run(agent, "[App note: a Mori specialist passed this message to you.]\n");
+    // A specialist that gets a teammate's job names that teammate ("role_mismatch grade"); the
+    // message goes there with the hand-off, or to Ask Mori when no teammate is named.
+    const mismatch = /^\s*role_mismatch\b[ \t]*([a-z]+)?/i.exec(answerText(r));
+    if (agent !== "ask" && mismatch) {
+      const named = mismatch[1]?.toLowerCase();
+      const from = agent;
+      agent = isMoriAgent(named) && named !== from ? named : "ask";
+      r = await run(
+        agent,
+        `[App note: ${AGENT_NAMES[from]} passed this message to you; it is your job.]\n` +
+          (await handoffNote(db, since, askedAt)),
+      );
     }
     const sessionId = String(
       r.metadata?.session_id ?? sessions.find((x) => x.agent === agent)?.sessionId ?? "",
@@ -425,7 +510,7 @@ export async function runMoriHarness(
       }
     }
 
-    finalText = stripRowBlocks(answerText(r)).replace(/^\s*role_mismatch\s*/i, "");
+    finalText = stripRowBlocks(answerText(r)).replace(/^\s*role_mismatch\b[ \t]*[a-z]*\s*/i, "");
     if (photoRequest)
       finalText =
         "Before I list it, send me clear photos of the front and back on a dark, flat background with all four corners in view. I will check the condition and use them for your listing.";

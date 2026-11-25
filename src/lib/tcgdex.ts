@@ -1,6 +1,20 @@
 /** Public TCGdex card service. Images are hotlinked from TCGdex and never stored. */
 const BASE = "https://api.tcgdex.net/v2/en";
 
+/** TCGdex fetch that retries twice on a server error or network failure (TCGdex has brief
+ *  outages), so one bad moment does not turn into "card not found". */
+async function tcgFetch(url: string, init?: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(url, init);
+      if (res.status < 500 || attempt >= 2) return res;
+    } catch (e) {
+      if (attempt >= 2) throw e;
+    }
+    await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+  }
+}
+
 export type CardBrief = { id: string; localId: string; name: string; image?: string | undefined };
 export type CardDetail = CardBrief & {
   rarity?: string | undefined;
@@ -17,7 +31,7 @@ export const cardImage = (image: string | undefined, quality: "high" | "low" = "
 export async function searchCards(name: string, limit = 24): Promise<CardBrief[]> {
   const q = name.trim();
   if (!q) return [];
-  const res = await fetch(
+  const res = await tcgFetch(
     `${BASE}/cards?name=${encodeURIComponent(q)}&pagination:itemsPerPage=${limit}`,
   );
   if (!res.ok) throw new Error(`TCGdex search failed (${res.status})`);
@@ -40,12 +54,16 @@ export async function findCards(
   const [num, total] = (number ?? "").split("/").map((x) => x.trim());
   const params = new URLSearchParams({ name: q, "pagination:itemsPerPage": "60" });
   if (num) params.set("localId", num.replace(/^0+(?=\d)/, ""));
-  const res = await fetch(`${BASE}/cards?${params}`);
+  const res = await tcgFetch(`${BASE}/cards?${params}`);
   if (!res.ok) throw new Error(`TCGdex search failed (${res.status})`);
   let list = (await res.json()) as CardBrief[];
   // A number search matches exactly (TCGdex also returns e.g. 58 for 5), with or without leading zeros.
   if (num)
     list = list.filter((c) => c.localId.replace(/^0+(?=\d)/, "") === num.replace(/^0+(?=\d)/, ""));
+  // "Pikachu ex 25/25" may be a plain "Pikachu" 25/25: with a number and no exact match, try the
+  // name without its ex / V / VMAX / VSTAR / GX suffix.
+  const base = q.replace(/\s+(ex|v|vmax|vstar|gx|break|lv\.?\s?x|prime|star|δ)$/i, "").trim();
+  if (num && !list.length && base && base !== q) return findCards(base, number, set, limit);
   // With a number the list is short: look up each card's set so "/102" or a set name can narrow it.
   if (!num && !set)
     return list
@@ -69,7 +87,7 @@ export async function findCards(
 }
 
 export async function getCard(id: string): Promise<CardDetail | null> {
-  const res = await fetch(`${BASE}/cards/${encodeURIComponent(id)}`);
+  const res = await tcgFetch(`${BASE}/cards/${encodeURIComponent(id)}`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`TCGdex card lookup failed (${res.status})`);
   return (await res.json()) as CardDetail;
@@ -148,7 +166,7 @@ export async function getSetCards(
   id: string,
 ): Promise<{ id: string; name: string; cards: CardBrief[] } | null> {
   if (!id.trim()) return null;
-  const res = await fetch(`${BASE}/sets/${encodeURIComponent(id.trim())}`);
+  const res = await tcgFetch(`${BASE}/sets/${encodeURIComponent(id.trim())}`);
   if (!res.ok) return null;
   const d = (await res.json()) as { id: string; name: string; cards?: CardBrief[] };
   return { id: d.id, name: d.name, cards: d.cards ?? [] };
@@ -157,14 +175,14 @@ export async function getSetCards(
 export type SetDetail = { id: string; name: string; releaseDate?: string | undefined };
 
 export async function getSet(id: string): Promise<SetDetail | null> {
-  const res = await fetch(`${BASE}/sets/${encodeURIComponent(id)}`);
+  const res = await tcgFetch(`${BASE}/sets/${encodeURIComponent(id)}`);
   if (!res.ok) return null;
   return (await res.json()) as SetDetail;
 }
 
 /** Cards by the same illustrator (TCGdex filter). */
 export async function cardsByIllustrator(name: string, limit = 8): Promise<CardBrief[]> {
-  const res = await fetch(
+  const res = await tcgFetch(
     `${BASE}/cards?illustrator=${encodeURIComponent(name)}&pagination:itemsPerPage=${limit}`,
   );
   if (!res.ok) return [];

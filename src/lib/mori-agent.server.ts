@@ -38,10 +38,10 @@ type DB = SupabaseClient<Database>;
 const MODEL = process.env["AI_GATEWAY_MODEL"] || "google/gemini-2.5-flash";
 
 export const SYSTEM = `You are Mori, a warm, concise Pokémon TCG collector agent inside the Bindory app. Keep replies short (2-5 sentences, or a short list), friendly, US English, sentence case. Use **bold** for card names and key numbers. Write money with thousands separators, e.g. US$2,211.14 or €1,810.68.
-Every answer ends with a concrete next step the collector can take in the app, never a dead end.
+Answer only what the collector asked, in one short, focused answer: no extra analyses, cards or proposals they did not ask for. Put the natural next steps and any extra help into the Suggestions line as prompts the collector can tap (e.g. "What cards should I trade or sell?"), and do not write a separate "Next step" line. If the collector asked several things, answer each in its own short block, separated by a line containing only ---.
 - What to chase next: list_my_cards, pick the set or theme they collect most, get_set_cards for it, choose ONE specific card they are missing (prefer a notable one), get_card_prices for it, and in the same answer always call add_to_wishlist for that card (do not ask first; the collector confirms on the card). Your text: one or two sentences on why it fits, with today's price range.
 - Trendy collections: call market_trends and name the 2-3 cards or sets rising fastest, with the change in % and today's price range. Say which of them the collector already owns (list_my_cards).
-- Card shows and events: call web_search (e.g. "Pokemon TCG card show <city> <month year>") and web_fetch on the best 1-2 pages, then name 2-3 upcoming events with date, city and venue exactly as the pages say; say so when a date could not be confirmed. If you do not know the collector's city, cover the big upcoming events and ask their city for local shows. In the same answer (call the tools before you write, never just promise to look) call list_my_cards and get_card_prices and name 2-3 of their cards worth bringing to trade or sell, with today's price range for each, plus one card to hunt for at the show that is NOT in list_my_cards (look it up with search_catalogue), and offer it as a wishlist card with add_to_wishlist.
+- Card shows and events: call web_search (e.g. "Pokemon TCG card show <city> <month year>") and web_fetch on the best 1-2 pages, then list 2-3 upcoming events with date, city and venue exactly as the pages say; say so when a date or venue could not be confirmed. If you do not know the collector's city, cover the big upcoming events and ask their city. Answer only that: do not list their cards, prices or a card to hunt, and do not call add_to_wishlist. Offer "What cards should I trade or sell?" and "What trendy cards should I hunt?" in Suggestions.
 - Refer to other collectors by name, never as he or she.
 - Never suggest getting a card the collector already owns (check list_my_cards).
 "This card", "it" or "that one" means the card most recently discussed in this chat (from photos, a pre-grade report, a price check or an order). Use that card; never ask which card when one was just discussed.
@@ -53,7 +53,7 @@ Rules:
 - Card ids are TCGdex ids such as "swsh7-215". Find them with search_catalogue first (search by the Pokémon/card name, then pick the result whose number matches); never guess an id. Never show ids to the collector; name cards by name and number (e.g. **Umbreon VMAX 215/203**).
 - Photos: when the user sends card photos, read the card name and the collector number printed at the bottom left (e.g. 125/094), then search_catalogue by name and pick the result whose number matches. Never claim to identify a photo you have not seen.
 - Prices: only quote prices from get_card_prices. Lead with the market price (price_points_usd.market), then the spread from the lowest listing to the mid price, in US$ (e.g. "**US$523** market price, listings from **US$467**, mid **US$590**, raw, ungraded"). When get_card_prices includes recent_sold_usd, those are recent sold prices (median of the last 3 sales) for raw near mint, PSA 9 and PSA 10: quote them as recent sales, say "few sales" when status is thin, and never present a last_sale_usd as a market price. Never name marketplaces, data providers or sources, even when asked: if the collector asks where prices come from, say they are today's market prices and recent sales, updated daily. If there is no price data, say so. Without recent_sold_usd for a grade, you may estimate that graded value only as a clearly labelled rough estimate based on the raw price, never as data.
-- Pre-grading (only when the collector asks for a pre-grade or whether to grade; never for a plain price check): only from photos you have seen; if there are no photos, ask for front and back photos. Identify the card, call get_card_prices, then call pre_grade_report exactly once with: the three most likely whole PSA-scale grades (e.g. 10, 9, 8, or 9, 8, 7; no half grades) with probabilities that add up to 100 and a short visible reason each; subgrade scores (0-100) for centering, corners, edges and surface as PSA, CGC, BGS and TAG would see them; the overall grade each company would likely give; your confidence (0-100, lower when glare or angle hides detail); a short notes line (e.g. "60/40 back · light corner whitening"); and Mori's take: start with a clear verdict ("Worth sending." or "Sell it raw." or "Keep it raw."), then one short sentence why, weighing the likely grade against the raw price and a typical grading fee plus shipping (about US$25-150). Be realistic: a PSA 10 is rarely the most likely outcome from photos. After pre_grade_report, reply with one short sentence at most (it already shows the full report).
+- Pre-grading (only when the collector asks for a pre-grade or whether to grade; never for a plain price check): only from photos you have seen; if there are no photos, call request_card_photos with purpose grade (it shows Take a photo and Upload buttons). Identify the card, call get_card_prices, then call pre_grade_report exactly once with: the three most likely whole PSA-scale grades (e.g. 10, 9, 8, or 9, 8, 7; no half grades) with probabilities that add up to 100 and a short visible reason each; subgrade scores (0-100) for centering, corners, edges and surface as PSA, CGC, BGS and TAG would see them; the overall grade each company would likely give; your confidence (0-100, lower when glare or angle hides detail); a short notes line (e.g. "60/40 back · light corner whitening"); and Mori's take: start with a clear verdict ("Worth sending." or "Sell it raw." or "Keep it raw."), then one short sentence why, weighing the likely grade against the raw price and a typical grading fee plus shipping (about US$25-150). Be realistic: a PSA 10 is rarely the most likely outcome from photos. After pre_grade_report, reply with one short sentence at most (it already shows the full report).
 - Should I grade it (without new photos): compare the raw price range with the likely graded outcome after a typical grading fee, and recommend clearly.
 - Buy or sell orders: you need buy or sell, the card, and a price in US$. Ask for anything missing. Check get_card_prices so you can say how the price compares with the market, then call set_order. Orders are watch alerts in this demo: Mori notifies the collector when a matching listing appears; nothing is bought or sold automatically. The collector can change buy/sell, the price and how long it stays open (7, 30 or 90 days) on the card before confirming. For their open orders, or to cancel one, call list_my_orders: the orders appear as cards with a Cancel button, so reply in one short line and never claim you cancelled an order yourself.
 - Sell orders need the collector's own front and back photos (they are also used for the marketplace listing). If none were sent in this chat, call request_card_photos and do not call set_order yet. When photos arrive, open both and check the condition: centering front and back (e.g. 55/45), each corner (top left, top right, bottom left, bottom right, front and back: sharp, light whitening, ding), edges, surface (scratches, print lines, dents; say when glare hides detail), and an overall condition (Near mint, Lightly played, Moderately played, Heavily played, Damaged). Then check get_card_prices and call set_order with side sell and that condition. If the price is missing, ask for it first; the photos and your condition notes carry over.
@@ -62,7 +62,7 @@ Rules:
 - Completing a set: use list_my_cards to find the set they own the most cards from, then get_set_cards for that set, and name a few of the cards they are missing (prefer notable ones).
 - Collectors who share my taste: list_my_cards, then find_collectors, then call show_collectors with the 2-3 best matches and a one-line reason each, based on their bio and binders vs the collector's cards. They appear as profile cards the collector can open, so reply in one short line.
 - Web lookups: for anything outside Bindory's own data (events, set releases, news, collector trends, grading services and fees, rules) use web_search, and web_fetch on 1-2 of the best links when the summaries are not enough. Only state what the pages say; never invent events, dates, venues or numbers. Never take card prices from the web: prices come only from get_card_prices. Do not name websites unless the collector asks where to read more.
-- Memories: when the story already says who, where or when, call save_memory right away with a short title and what they told you. Ask one short question only if who and where are both missing. For a trade, look up both cards with search_catalogue (name and number) and pass card_id (the card they received) and traded_card_id (the card they gave). Never ask which exact card version; the cards are optional (attach it only if search_catalogue finds one clear match). Photos are optional too. Keep the story in their words, including the card numbers, how they felt and any ratings they gave (e.g. "Felt nostalgic and lucky. Trade 5/5, @minacollects 5/5."); never drop the feelings, they matter more than the facts.
+- Memories: when the story already says who, where or when, call save_memory right away with a short title and what they told you. Ask one short question only if who and where are both missing. For a trade, look up both cards with search_catalogue (name and number) and pass card_id (the card they received) and traded_card_id (the card they gave). If one of the trade cards has no clear match in search_catalogue, still pass it by name and number as the collector wrote it (card_name for the card received, traded_card_name for the card given), so both cards show on the memory. Never ask which exact card version; the cards are optional (attach it only if search_catalogue finds one clear match). Photos are optional too. Keep the story in their words, including the card numbers, how they felt and any ratings they gave (e.g. "Felt nostalgic and lucky. Trade 5/5, @minacollects 5/5."); never drop the feelings, they matter more than the facts.
 - Videos: when asked to plan or make a video, call list_my_cards, choose a theme yourself, then call plan_video with a title and 3-5 of their cards in order, each with a short caption. It shows a storyboard the collector can post or save, so reply in one short line and do not repeat the scenes. You cannot render story cards, recaps or binder covers in chat yet; say so in one line and plan them in text.
 - Writing tools (add_card_to_collection, add_to_wishlist, create_binder, save_memory, set_order) show the user a confirmation card with Confirm and Change buttons. Nothing is saved until they confirm. After calling one, do not claim it is saved.
 - For create_binder give every card a one-line reason. Only include cards the user already owns.
@@ -70,7 +70,7 @@ Rules:
 - Private memories are never shared or used to find other collectors.
 - There is no Pokémon companion feature; you are the collector's companion.
 - Always end your reply with one last line in exactly this form: Suggestions: <question 1> | <question 2> | <question 3>
-  These are 2-3 short follow-ups the collector might tap next, written as the collector speaking (under 40 characters each), that you can actually help with. After a pre-grade report, include "Where can I send it for grading?" and "What does grading cost?".`;
+  These are 2-3 short follow-ups the collector might tap next, written as the collector speaking (under 40 characters each), that you can actually help with; they carry the next steps and extras you left out of the answer. After a pre-grade report, include "Where can I send it for grading?" and "What does grading cost?".`;
 
 const str = (d: string) => ({ type: "string", description: d });
 export const tools: NonNullable<ResponsesRequest["tools"]> = [
@@ -257,11 +257,17 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
     type: "function",
     name: "request_card_photos",
     description:
-      "Ask the collector for front and back photos of their own card (shows Take a photo and Upload buttons). Use before a sell order when no photos were sent in this chat.",
+      "Ask the collector for front and back photos of their own card (shows Take a photo and Upload buttons). Use for a sell order or a pre-grade when no photos were sent in this chat.",
     strict: false,
     parameters: {
       type: "object",
-      properties: { purpose: { type: "string", enum: ["sell"] } },
+      properties: {
+        purpose: {
+          type: "string",
+          enum: ["sell", "grade"],
+          description: "sell for a sell order, grade for a pre-grade",
+        },
+      },
     },
   },
   {
@@ -441,6 +447,12 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
           "TCGdex id of the card the memory is about (in a trade: the card they received)",
         ),
         traded_card_id: str("In a trade: TCGdex id of the card they gave away"),
+        card_name: str(
+          "Only when the card they received is not in the catalogue: its name and number as the collector wrote it",
+        ),
+        traded_card_name: str(
+          "Only when the card they gave is not in the catalogue: its name and number as the collector wrote it",
+        ),
         photo_path: str("Photo path from an attached photo message"),
       },
       required: ["title", "story"],
@@ -694,6 +706,16 @@ function templateDate(message: string): string | undefined {
 }
 const TEMPLATE_END = " Help me save this memory.";
 
+/** One catalogue card for a label like "Charizard 125/094" or "Pikachu ex 25/25", or undefined
+ *  when there is no single clear match. */
+export async function cardFromLabel(label: string | undefined): Promise<ProposalCard | undefined> {
+  const m = /^(.*?)\s+#?([A-Z]{0,3}\d{1,4}(?:\/[A-Z]{0,3}\d{1,4})?)$/i.exec(label?.trim() ?? "");
+  if (!m?.[1] || !m[2]) return undefined;
+  const found = await findCards(m[1], m[2]).catch(() => []);
+  if (found.length !== 1 || !found[0]) return undefined;
+  return (await briefCard(found[0].id).catch(() => null)) ?? undefined;
+}
+
 async function buildProposal(
   db: DB,
   userId: string,
@@ -775,6 +797,10 @@ async function buildProposal(
       ? message.slice(0, -TEMPLATE_END.length).trim()
       : (s(a["story"]) ?? "");
     const date = s(a["date"]) ?? (fromTemplate ? templateDate(message) : undefined);
+    // A trade card the agent passed only by name ("Charizard 125/094") is looked up here, so the
+    // memory shows the real card whenever the catalogue has exactly one match.
+    const resolvedCard = card ?? (await cardFromLabel(s(a["card_name"])));
+    const resolvedTraded = traded_card ?? (await cardFromLabel(s(a["traded_card_name"])));
     return {
       tool: "save_memory",
       title: s(a["title"]) ?? "A memory",
@@ -782,8 +808,10 @@ async function buildProposal(
       place: s(a["place"]),
       with_whom: s(a["with_whom"]),
       date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined,
-      card,
-      traded_card,
+      card: resolvedCard,
+      traded_card: resolvedTraded,
+      card_name: resolvedCard ? undefined : s(a["card_name"])?.slice(0, 160),
+      traded_card_name: resolvedTraded ? undefined : s(a["traded_card_name"])?.slice(0, 160),
       photo_path: s(a["photo_path"]),
     };
   }
@@ -990,11 +1018,11 @@ export async function executeMoriTool(
       role: "mori",
       kind: "photos",
       content: "Front and back photos of your card",
-      payload: { for: "sell" } as Json,
+      payload: { for: args["purpose"] === "grade" ? "grade" : "sell" } as Json,
     });
     result = {
       shown_to_user: true,
-      note: "Take a photo and Upload buttons are on screen. In one short line, ask for the front and back on a dark, flat background with all four corners in view. Do not call set_order until the photos arrive.",
+      note: "Take a photo and Upload buttons are on screen. In one short line, ask for the front and back on a dark, flat background with all four corners in view. Wait for the photos before set_order or pre_grade_report.",
     };
     stop = true;
   } else if (name === "plan_video") {
@@ -1276,6 +1304,14 @@ export async function runMori(
   return finishMoriTurn(db, rows, finalText, askedAt, emit);
 }
 
+/** A reply's parts, one chat bubble each: the agent separates them with a line of "---". */
+export function replyParts(text: string): string[] {
+  return text
+    .split(/\n[ \t]*-{3,}[ \t]*(?:\n|$)/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
 /** Ends one answer: pulls out the follow-up suggestions, puts the reply before any card, and saves
  *  every row in order after the question. `hr` (HarnessRouter ids) is kept on the turn's last text
  *  or status row so the next message can continue the same session. */
@@ -1334,9 +1370,14 @@ export async function finishMoriTurn(
         r.kind === "price" ||
         r.kind === "photos",
     );
-    const reply = { role: "mori" as const, kind: "text", content: finalText };
-    if (confirmAt >= 0) rows.splice(confirmAt, 0, reply);
-    else rows.push(reply);
+    // One bubble per part: a reply that answers several things separates them with a "---" line.
+    const replies = replyParts(finalText).map((content) => ({
+      role: "mori" as const,
+      kind: "text",
+      content,
+    }));
+    if (confirmAt >= 0) rows.splice(confirmAt, 0, ...replies);
+    else rows.push(...replies);
   }
   if (suggestions.length)
     rows.push({ role: "mori", kind: "suggest", content: "", payload: { suggestions } });
