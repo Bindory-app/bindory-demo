@@ -89,7 +89,7 @@ function progressOf(r: HRResponse): string {
     (i) => i.type === "function_call" || i.type === "web_search_call",
   );
   const last = steps[steps.length - 1]?.name ?? "";
-  if (!steps.length) return "Starting up";
+  if (!steps.length) return "Reading your Collectr collection";
   if (/browser|navigate|page|click|scroll|snapshot/i.test(last))
     return `Reading the Collectr page (step ${steps.length})`;
   return `Working (step ${steps.length})`;
@@ -204,7 +204,14 @@ export async function applySync(db: DB, userId: string, id: string) {
     : 0;
   for (const it of items) {
     const label = `${it.name}${it.number ? ` ${it.number}` : ""}`;
-    const matches = await findCards(it.name, it.number, it.set).catch(() => []);
+    // Japanese printings are not in the English catalogue: never match them to an English card.
+    if (/\(JP\)|\bjapanese\b/i.test(`${it.name} ${it.set ?? ""}`)) {
+      unmatched.push(label);
+      continue;
+    }
+    // Collectr adds notes in brackets ("Mewtwo EX (163 Secret Full Art)"); the catalogue name has none.
+    const name = it.name.replace(/\s*\([^)]*\)/g, "").trim() || it.name;
+    const matches = await findCards(name, it.number, it.set).catch(() => []);
     if (matches.length !== 1 || !it.number) {
       unmatched.push(label);
       continue;

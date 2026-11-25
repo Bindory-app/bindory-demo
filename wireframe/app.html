@@ -4499,6 +4499,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     card.dataset.watching = "1";
     const id = card.dataset.bdSync, status = card.querySelector(".bd-sync-status"), box = card.querySelector(".bd-sync-result");
     let misses = 0;
+    const started = Date.now();
     const tick = async () => {
       if (!card.isConnected) return;
       try {
@@ -4506,7 +4507,11 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
         if (!res.ok) throw new Error(String(res.status));
         const s = await res.json();
         misses = 0;
-        if (!s.done) { status.innerHTML = '<i class="bd-spin"></i>' + esc(s.progress || "Reading your Collectr collection") + "…"; setTimeout(tick, 5000); return; }
+        if (!s.done) {
+          const mins = Math.floor((Date.now() - started) / 60000);
+          status.innerHTML = '<i class="bd-spin"></i>' + esc(s.progress || "Reading your Collectr collection") + "…" + (mins ? " (" + mins + " min)" : "");
+          setTimeout(tick, 5000); return;
+        }
         status.textContent = s.status === "completed" ? "Done" : "Stopped before the end";
         card.dataset.binder = s.binder || "";
         box.innerHTML = mdHTML(s.content) +
