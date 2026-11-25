@@ -4634,6 +4634,52 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     app.querySelector("[data-mori-input]")?.focus();
   }
 
+  // Fill-in templates ("Price check: [card name] [card number]"): tapping the text opens a small
+  // pop-up to type the card name and its number as "number / set size", then sends the message.
+  const chatInput = () => app.querySelector("[data-mori-input]");
+  const HAS_SLOT = /\[card (name|number)\]/i;
+  function slotPopup(inp, focusNumber) {
+    if (document.querySelector(".bd-slot")) return;
+    const tpl = inp.value;
+    const box = document.createElement("div");
+    box.className = "bd-photo-sheet bd-slot";
+    box.innerHTML = '<form><p><b>Which card?</b></p>' +
+      (/\[card name\]/i.test(tpl) ? '<label>Card name<input name="name" autocomplete="off" autocapitalize="words" placeholder="e.g. Mega Charizard X ex" maxlength="60"></label>' : "") +
+      (/\[card number\]/i.test(tpl) ? '<label>Card number<span class="bd-num"><input name="num" inputmode="numeric" autocomplete="off" placeholder="125" maxlength="7" aria-label="Card number"><b>/</b><input name="of" inputmode="numeric" autocomplete="off" placeholder="094" maxlength="7" aria-label="Cards in the set"></span><small>The number at the bottom of the card, then the set size.</small></label>' : "") +
+      '<p class="bd-slot-err" hidden></p><button type="submit">Send to Mori</button><button type="button" data-back-skip>Cancel</button></form>';
+    document.body.append(box);
+    const f = box.querySelector("form"), err = box.querySelector(".bd-slot-err");
+    const first = (focusNumber && f.elements.num) || f.elements.name || f.elements.num;
+    inp.blur();
+    setTimeout(() => first && first.focus(), 30);
+    // Typing "/" in the first number box jumps to the set size.
+    f.elements.num?.addEventListener("input", () => {
+      const v = f.elements.num.value;
+      if (v.includes("/")) { const [a, b] = v.split("/"); f.elements.num.value = a.trim(); if (b && f.elements.of) f.elements.of.value = b.trim(); f.elements.of?.focus(); }
+    });
+    box.addEventListener("click", (e) => { if (e.target === box || e.target.closest("[data-back-skip]")) box.remove(); });
+    f.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const name = (f.elements.name?.value || "").trim().replace(/\s+/g, " ");
+      const num = (f.elements.num?.value || "").trim().toUpperCase(), of = (f.elements.of?.value || "").trim().toUpperCase();
+      const bad = (m) => { err.textContent = m; err.hidden = false; };
+      if (f.elements.name && !name) return bad("Type the card's name.");
+      if (f.elements.num && !num) return bad("Type the card number (the first part).");
+      const part = /^[A-Z]{0,4}\d{1,4}[A-Z]?$/;
+      if (f.elements.num && (!part.test(num) || (of && !part.test(of)))) return bad("Card numbers look like 125 / 094 (some start with letters, like TG12 / TG30).");
+      inp.value = tpl.replace(/\[card name\]/i, name).replace(/\[card number\]/i, of ? num + "/" + of : num).replace(/\s+/g, " ").trim();
+      box.remove();
+      const form = inp.closest("form");
+      if (form && form.requestSubmit) form.requestSubmit(); else inp.focus();
+    });
+  }
+  app.addEventListener("click", (e) => {
+    const inp = e.target.closest && e.target.closest("[data-mori-input]");
+    if (!inp || !HAS_SLOT.test(inp.value)) return;
+    const at = inp.selectionStart ?? 0, n = inp.value.search(/\[card number\]/i);
+    slotPopup(inp, n >= 0 && at >= n);
+  });
+
   // Stop: while Mori is answering, the send button becomes a stop button.
   let liveRun = null;
   const STOP_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>';
@@ -4683,7 +4729,12 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       ".bd-photo-sheet p{margin:0 0 6px;font-size:16px}.bd-photo-sheet button{font:inherit;font-weight:700;font-size:16px;padding:14px;border-radius:999px;border:1px solid #d9d4f5;background:#f1eefc;color:#5b4bd6}" +
       ".bd-photo-sheet button[data-back-skip]{background:#fff;color:#6b7090}" +
       ".bd-cam video{width:100%;max-height:52vh;border-radius:14px;background:#111;object-fit:contain}.bd-cam .bd-cam-msg{color:#6b7090;font-size:14px}.bd-photo-sheet button[disabled]{opacity:.5}" +
-      "@media (pointer:fine){.bd-photo-sheet{align-items:center}.bd-photo-sheet>div{border-radius:22px}}";
+      ".bd-slot form{background:#fff;width:min(440px,100%);border-radius:22px 22px 0 0;padding:22px 20px calc(22px + env(safe-area-inset-bottom));display:grid;gap:12px;color:#1f2340}" +
+      ".bd-slot label{display:grid;gap:6px;font-size:14px;font-weight:700;color:#4a4f6e}.bd-slot small{font-weight:400;color:#6b7090}" +
+      ".bd-slot input{font:inherit;font-size:16px;font-weight:400;padding:12px 14px;border:1px solid #d9d4f5;border-radius:12px;width:100%;box-sizing:border-box;color:#1f2340}" +
+      ".bd-slot .bd-num{display:flex;align-items:center;gap:8px}.bd-slot .bd-num b{font-size:20px;color:#6b7090}.bd-slot-err{color:#c0392b;font-size:14px;margin:0}" +
+      ".bd-slot button[type=submit]{background:#5b4bd6;color:#fff;border-color:#5b4bd6}" +
+      "@media (pointer:fine){.bd-photo-sheet{align-items:center}.bd-photo-sheet>div,.bd-slot form{border-radius:22px}}";
     document.head.append(css);
   }
 
