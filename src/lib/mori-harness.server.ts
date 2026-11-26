@@ -331,13 +331,20 @@ export async function priceCardRow(
   const pts = tool.price_points ?? null;
   const sold = (tool.recent_sold ?? null) as Record<
     string,
-    { value: number | null; status: string }
+    {
+      avg_last_3?: number | null;
+      avg_last_10?: number | null;
+      value?: number | null;
+      sales?: number | null;
+      status: string;
+    }
   > | null;
   if (!pts && !sold) return null;
   const headline =
     pts?.["market"] ??
     pts?.["mid"] ??
     pts?.["lowest_listing"] ??
+    sold?.["raw_near_mint"]?.avg_last_10 ??
     sold?.["raw_near_mint"]?.value ??
     undefined;
   return {

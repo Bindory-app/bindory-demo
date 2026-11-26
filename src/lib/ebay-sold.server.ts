@@ -1,13 +1,14 @@
 /**
  * Recent eBay sold prices from the collector's own eBay site (ebay.com.au for Australia, and so on),
- * in that site's currency, via the Apify actor "eBay Sold Listings Search" (caffein.dev,
- * oTtB3VgfuE9GtxQt2), server-only. APIFY_TOKEN never reaches the browser. Each lookup reads up to
- * 40 sales from the last 30 days and is cached for 6 hours per card and site (the actor charges
- * per result).
+ * in that site's currency, from the Apify actor "eBay Sold Listings Search" (caffein.dev,
+ * oTtB3VgfuE9GtxQt2). The Price Check agent runs the actor itself on HarnessRouter and passes the
+ * sales to get_card_prices; when no sales are passed, the server runs it (APIFY_TOKEN, never in the
+ * browser). Either way it asks for the 10 newest sales per grade (raw, PSA 10, PSA 9) from the
+ * last 30 days; the server's lookup is cached for 6 hours per card and site.
  *
  * Sales are sorted by their titles: PSA 10, PSA 9, other graders (ignored) and raw. Lots, proxies,
- * non-English printings and titles without the card number are left out. Each value is the median
- * of the newest sales (up to 5).
+ * non-English printings and titles without the card number are left out. For each grade: the
+ * average of the newest 3 sales and of the newest 10.
  */
 import { MARKETS, type Market } from "./market";
 
@@ -15,7 +16,14 @@ const ACTOR = "oTtB3VgfuE9GtxQt2";
 const TTL = 6 * 60 * 60 * 1000;
 const cache = new Map<string, { at: number; value: LocalSold | null }>();
 
-export type SoldStat = { value: number | null; n: number; status: "ok" | "thin" | "none" };
+export type SoldStat = {
+  /** Average of the newest 10 sales (fewer when fewer exist); the headline value. */
+  value: number | null;
+  avg_last_3: number | null;
+  avg_last_10: number | null;
+  n: number;
+  status: "ok" | "thin" | "none";
+};
 export type LocalSold = {
   currency: string;
   site: string;
@@ -23,7 +31,7 @@ export type LocalSold = {
   psa9: SoldStat;
   psa10: SoldStat;
 };
-type Sale = {
+export type Sale = {
   title?: string;
   soldPrice?: string | number;
   soldCurrency?: string;
@@ -51,21 +59,36 @@ export function classifySale(title: string, number: string): "raw" | "psa9" | "p
   return grade === 10 ? "psa10" : grade === 9 ? "psa9" : null;
 }
 
-function stat(values: number[]): SoldStat {
-  const v = values.slice(0, 5).sort((a, b) => a - b);
-  if (!v.length) return { value: null, n: 0, status: "none" };
-  const mid = v.length % 2 ? v[(v.length - 1) / 2]! : (v[v.length / 2 - 1]! + v[v.length / 2]!) / 2;
-  return { value: Math.round(mid * 100) / 100, n: v.length, status: v.length >= 3 ? "ok" : "thin" };
+const avg = (v: number[]) =>
+  v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 100) / 100 : null;
+
+/** Newest first: averages of the last 3 and the last 10 sales. */
+export function stat(newestFirst: number[]): SoldStat {
+  const ten = newestFirst.slice(0, 10);
+  if (!ten.length)
+    return { value: null, avg_last_3: null, avg_last_10: null, n: 0, status: "none" };
+  const a10 = avg(ten);
+  return {
+    value: a10,
+    avg_last_3: avg(ten.slice(0, 3)),
+    avg_last_10: a10,
+    n: ten.length,
+    status: ten.length >= 3 ? "ok" : "thin",
+  };
 }
 
 export function summarise(sales: Sale[], number: string, market: Market): LocalSold {
   const buckets: Record<"raw" | "psa9" | "psa10", number[]> = { raw: [], psa9: [], psa10: [] };
+  const seen = new Set<string>();
   const newest = [...sales].sort((a, b) =>
     String(b.endedAt ?? "").localeCompare(String(a.endedAt ?? "")),
   );
   for (const s of newest) {
     const price = Number(s.soldPrice);
     if (!(price > 0) || (s.soldCurrency && s.soldCurrency !== market.currency)) continue;
+    const key = `${s.title}|${price}|${s.endedAt}`;
+    if (seen.has(key)) continue; // the same sale can come back from more than one search
+    seen.add(key);
     const k = classifySale(String(s.title ?? ""), number);
     if (k) buckets[k].push(price);
   }
@@ -75,6 +98,18 @@ export function summarise(sales: Sale[], number: string, market: Market): LocalS
     raw: stat(buckets.raw),
     psa9: stat(buckets.psa9),
     psa10: stat(buckets.psa10),
+  };
+}
+
+/** The actor's input for one card: the 10 newest sales per grade on the collector's eBay site. */
+export function actorInput(card: { name: string; number: string }, market: Market) {
+  const base = `${card.name} ${card.number.replace(/^0+(?=\d)/, "")}`;
+  return {
+    keywords: [base, `${base} PSA 10`, `${base} PSA 9`],
+    ebaySite: market.ebay,
+    daysToScrape: 30,
+    count: 10,
+    sortOrder: "endedRecently",
   };
 }
 
@@ -95,13 +130,7 @@ export async function localSoldPrices(
       {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          keywords: [`${card.name} ${card.number.replace(/^0+(?=\d)/, "")}`],
-          ebaySite: market.ebay,
-          daysToScrape: 30,
-          count: 40,
-          sortOrder: "endedRecently",
-        }),
+        body: JSON.stringify(actorInput(card, market)),
         signal: AbortSignal.timeout(100_000),
       },
     );

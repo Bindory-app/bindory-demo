@@ -4734,8 +4734,18 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       (pts.length ? '<small style="display:block;margin:9px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Raw, ungraded · today</small>' +
         '<div style="position:relative;height:6px;margin:12px 12px 6px;border-radius:3px;background:linear-gradient(90deg,#e4e0ff,#9a88ef)">' + pts.map(dot).join("") + "</div>" +
         '<div class="cp-val-values">' + pts.map((x) => "<span><small>" + esc(x[0]) + "</small><b>" + usd(x[1]) + "</b></span>").join("") + "</div>" : "") +
-      (sold ? '<small style="display:block;margin:4px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Recent sales</small>' +
-        '<div class="cp-val-values">' + [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]].map((x) => "<span><small>" + x[0] + "</small><b>" + soldText(x[1]) + "</b></span>").join("") + "</div>" : "") +
+      (sold ? '<small style="display:block;margin:4px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Recent sales</small>" +
+        (sold.raw && ("avg_last_3" in sold.raw || "avg_last_10" in sold.raw)
+          // Average of the last 3 and last 10 sales for each grade.
+          ? '<table class="bd-sold"><thead><tr><th></th><th>Last 3 sold</th><th>Last 10 sold</th></tr></thead><tbody>' +
+            [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]].map(([label, x]) => {
+              const has = x && typeof x.avg_last_10 === "number";
+              const n = x && x.sales ? x.sales : 0;
+              return "<tr><th>" + label + "</th>" + (has
+                ? "<td>" + usd(typeof x.avg_last_3 === "number" ? x.avg_last_3 : x.avg_last_10) + (n && n < 3 ? "<small>" + n + " sale" + (n === 1 ? "" : "s") + "</small>" : "") + "</td><td>" + usd(x.avg_last_10) + (n && n < 10 ? "<small>" + n + " sale" + (n === 1 ? "" : "s") + "</small>" : "") + "</td>"
+                : '<td colspan="2" class="is-none">No recent sales</td>') + "</tr>";
+            }).join("") + "</tbody></table>"
+          : '<div class="cp-val-values">' + [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]].map((x) => "<span><small>" + x[0] + "</small><b>" + soldText(x[1]) + "</b></span>").join("") + "</div>") : "") +
       "</div>";
   }
 
@@ -5279,6 +5289,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       ".bd-slot .bd-num,.bd-slot .bd-price{display:flex;align-items:center;gap:8px}.bd-slot .bd-price b{font-size:16px;color:#4a4f6e}.bd-slot .bd-num b{font-size:20px;color:#6b7090}.bd-slot-err{color:#c0392b;font-size:14px;margin:0}" +
       ".bd-slot button[type=submit]{background:#5b4bd6;color:#fff;border-color:#5b4bd6}" +
       ".cp-mori-body a{color:#5b4bd6;font-weight:700;text-decoration:underline}" +
+      ".bd-sold{width:calc(100% - 20px);margin:5px 10px 10px;border-collapse:collapse;font-size:9.5px}.bd-sold th,.bd-sold td{padding:5px 4px;border-bottom:1px solid #ece9fb;text-align:right}.bd-sold thead th{font-size:7.5px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:var(--mori-muted,#6b7090)}" +
+      ".bd-sold tbody th{text-align:left;font-weight:800;color:var(--mori-ink,#1f2340)}.bd-sold td{font-weight:800;color:var(--mori-ink,#1f2340)}.bd-sold td small{display:block;font-size:7px;font-weight:600;color:var(--mori-muted,#6b7090)}.bd-sold td.is-none{text-align:center;font-weight:600;color:var(--mori-muted,#6b7090)}.bd-sold tr:last-child th,.bd-sold tr:last-child td{border-bottom:0}" +
       ".bd-game{display:grid;gap:7px;margin-top:4px}.bd-game p{margin:0}.bd-game-kicker{font-size:8px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mori-primary,#5b4bd6)}.bd-game-kicker b{letter-spacing:.12em}" +
       ".bd-game-join{display:flex;gap:5px}.bd-game-join input{flex:1;min-width:0;font:inherit;font-size:10px;padding:6px 8px;border:1px solid #e2e0ea;border-radius:7px;background:#f1f0f5;letter-spacing:.1em}.bd-game-join button{font:inherit;font-size:10px;font-weight:800;border:1px solid var(--theme-ddd8ec,#ddd8ec);background:var(--mori-soft,#f1eefc);color:var(--mori-primary,#5b4bd6);border-radius:99px;padding:5px 12px}" +
       ".bd-game-err{color:#c0392b;font-size:9px}.bd-game-side{border:1px solid var(--theme-ddd8ec,#ddd8ec);border-radius:10px;padding:7px;background:var(--mori-card,#fff);display:grid;gap:5px}.bd-game-side>p{display:flex;justify-content:space-between;font-size:10px}.bd-game-side em{font-style:normal;font-weight:800}" +
@@ -5418,6 +5430,16 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     const hit = TZ_COUNTRY.find(([re]) => re.test(tz));
     return hit ? hit[1] : "US";
   }
+  // Testing aid: opening the app with ?country=AU (or US, GB, CA, DE, FR, IT, ES) saves that country
+  // as the collector's location on this device.
+  (function () {
+    const q = new URLSearchParams(location.search).get("country");
+    const names = { AU: "Australia", US: "United States", GB: "United Kingdom", CA: "Canada", DE: "Germany", FR: "France", IT: "Italy", ES: "Spain" };
+    const n = q && names[q.toUpperCase()];
+    if (!q) return;
+    if (n) { try { localStorage.setItem(LOC_KEY, JSON.stringify({ place: n, at: Date.now() })); } catch {} }
+    const u = new URL(location.href); u.searchParams.delete("country"); history.replaceState(null, "", u.pathname + u.search + u.hash);
+  })();
   let MKT = { country: "US", currency: "USD", symbol: "US$", ebay: "ebay.com", rate: 1 };
   async function loadMarket() {
     const c = myCountry();

@@ -626,8 +626,33 @@ describe("Local eBay sold prices", () => {
       "125",
       MARKETS["AU"]!,
     );
-    expect(s.raw).toEqual({ value: 700, n: 3, status: "ok" });
-    expect(s.psa10).toEqual({ value: 1700, n: 1, status: "thin" });
+    expect(s.raw).toMatchObject({ avg_last_3: 700, avg_last_10: 700, n: 3, status: "ok" });
+    expect(s.psa10).toMatchObject({ avg_last_3: 1700, avg_last_10: 1700, n: 1, status: "thin" });
     expect(s.psa9.status).toBe("none");
+  });
+});
+
+describe("Last 3 and last 10 sold averages", () => {
+  it("averages the newest 3 and newest 10 sales", async () => {
+    const { stat } = await import("@/lib/ebay-sold.server");
+    const r = stat([10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 999]);
+    expect(r.avg_last_3).toBe(20);
+    expect(r.avg_last_10).toBe(55);
+    expect(r.n).toBe(10);
+  });
+  it("asks the actor for 10 sales per grade on the collector's site", async () => {
+    const { actorInput } = await import("@/lib/ebay-sold.server");
+    const { MARKETS } = await import("@/lib/market");
+    expect(actorInput({ name: "Mega Charizard X ex", number: "125" }, MARKETS["AU"]!)).toEqual({
+      keywords: [
+        "Mega Charizard X ex 125",
+        "Mega Charizard X ex 125 PSA 10",
+        "Mega Charizard X ex 125 PSA 9",
+      ],
+      ebaySite: "ebay.com.au",
+      daysToScrape: 30,
+      count: 10,
+      sortOrder: "endedRecently",
+    });
   });
 });
