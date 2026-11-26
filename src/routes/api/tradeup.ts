@@ -38,7 +38,14 @@ export const Route = createFileRoute("/api/tradeup")({
                     (x): x is string => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x),
                   )
                 : [];
-              return Response.json(await T.setCards(userId, id, ids));
+              return Response.json(
+                await T.setCards(
+                  userId,
+                  id,
+                  ids,
+                  typeof b["option"] === "string" ? b["option"] : undefined,
+                ),
+              );
             }
             case "lock":
               return Response.json(

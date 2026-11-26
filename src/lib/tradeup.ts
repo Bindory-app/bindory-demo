@@ -1,8 +1,9 @@
 /**
- * Trade-up game: two collectors at a card show each put in cards from their collection, Mori
- * values both piles, and one random draw decides who takes everything. The odds are fair: each
- * side's chance of winning equals its share of the combined value, so over many games nobody
- * gains or loses value on average (Bindory takes no cut).
+ * Trade-up game: two collectors at a card show. The starter puts in cards; the other collector
+ * offers two sets, Option A (worth less) and Option B (worth more). The trade always happens: the
+ * starter's cards go to the other collector, and one random draw decides whether the starter gets
+ * A or B. The odds are fair: B's chance is set so the starter's expected value equals what they
+ * put in, (S - A) / (B - A), so over many games nobody gains or loses value (Bindory takes no cut).
  *
  * The draw is commit-reveal: each phone picks a secret, sends only its SHA-256 hash when locking
  * in, and reveals the secret once both are locked. The result comes from both secrets together,
@@ -14,6 +15,27 @@ export const MAX_CARDS_PER_SIDE = 10;
 export const MAX_TOTAL_USD = 5000;
 
 export const cents = (usd: number) => Math.round(usd * 100);
+
+/** Chance the starter gets Option B, so the trade is fair on average: p·B + (1-p)·A = S. Null
+ *  unless A < S < B. */
+export function optionBChance(startUsd: number, aUsd: number, bUsd: number): number | null {
+  if (!(aUsd > 0) || !(startUsd > aUsd) || !(bUsd > startUsd)) return null;
+  return (startUsd - aUsd) / (bUsd - aUsd);
+}
+
+export function decideOption(
+  startUsd: number,
+  aUsd: number,
+  bUsd: number,
+  hostSecret: string,
+  guestSecret: string,
+) {
+  const p = optionBChance(startUsd, aUsd, bUsd);
+  if (p === null)
+    throw new Error("Option A must be worth less, and Option B more, than the starter's cards.");
+  const draw = drawFrom(hostSecret, guestSecret);
+  return { draw, chanceB: p, option: draw < p ? ("b" as const) : ("a" as const) };
+}
 
 /** Each side's chance of winning: its share of the combined value. */
 export function winChances(hostUsd: number, guestUsd: number): { host: number; guest: number } {

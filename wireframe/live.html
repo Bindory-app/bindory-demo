@@ -764,6 +764,7 @@
       ".bd-game-empty{font-size:9px;color:var(--mori-muted,#6b7090)}.bd-game-add,.bd-game-leave{justify-self:start;font:inherit;font-size:9.5px;font-weight:800;border:1px solid var(--theme-ddd8ec,#ddd8ec);background:var(--mori-soft,#f1eefc);color:var(--mori-primary,#5b4bd6);border-radius:99px;padding:5px 10px}.bd-game-leave{background:none;color:var(--mori-muted,#6b7090);border-color:transparent;padding-left:0}" +
       ".bd-game-odds{display:grid;gap:3px}.bd-game-bar{position:relative;height:9px;border-radius:99px;background:#e9e6f6;overflow:visible}.bd-game-bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#6f5ce6,#c08ad6)}.bd-game-mark{position:absolute;top:-4px;width:3px;height:17px;border-radius:2px;background:var(--mori-ink,#1f2340);transform:translateX(-50%);animation:bdmark 1.4s cubic-bezier(.2,.8,.2,1)}@keyframes bdmark{from{left:0}}" +
       ".bd-game-odds p{display:flex;justify-content:space-between;font-size:9px;font-weight:800;color:var(--mori-muted,#6b7090)}.bd-game-agree{display:flex;gap:6px;align-items:flex-start;font-size:9px;color:var(--mori-muted,#6b7090)}.bd-game-wait{font-size:9.5px;color:var(--mori-muted,#6b7090);display:flex;gap:6px;align-items:center}" +
+      ".bd-game-hint{font-size:8.5px;color:var(--mori-muted,#6b7090)}.bd-game-side.is-picked{border:1.5px solid var(--mori-primary,#5b4bd6);background:var(--mori-soft,#f1eefc)}" +
       ".bd-game-result{font-size:12px;font-weight:800}.bd-game-result.is-won{color:var(--mori-primary,#5b4bd6)}.bd-game-proof{font-size:8.5px;color:var(--mori-muted,#6b7090)}.bd-game-proof code{display:block;word-break:break-all;font-size:7.5px;margin-top:3px}" +
       ".bd-pick{max-height:46vh;overflow:auto;display:grid;gap:6px}.bd-pick label{display:flex;align-items:center;gap:10px;border:1px solid #e6e2fa;border-radius:12px;padding:8px}.bd-pick label[hidden]{display:none}.bd-pick img,.bd-pick i{width:34px;height:47px;border-radius:3px;object-fit:cover;background:#eee}.bd-pick span{display:grid;flex:1;min-width:0}.bd-pick small{color:#6b7090;font-size:12px}" +
       ".bd-choices{display:grid;gap:5px;margin-top:7px}.bd-choice{font:inherit;font-weight:700;font-size:10px;text-align:left;padding:8.5px 29px 8.5px 10px;border:1px solid var(--theme-ddd8ec,#ddd8ec);border-radius:8.5px;background:var(--mori-card,#fff);color:var(--mori-ink,#1f2340);position:relative;cursor:pointer}" +
@@ -1099,7 +1100,7 @@
     return v;
   }
   const tradeupStartHTML = () => '<div class="bd-game" data-bd-game-start><small class="bd-game-kicker">Trade-up game</small>' +
-    "<p>Play with another collector here with you. You both put in cards, I value each side at today's prices, and one fair draw decides who takes all. Your chance of winning is your share of the total value.</p>" +
+    "<p>Trade up with another collector here with you. The starter puts in cards; the other collector offers two sets: <b>Option A</b>, worth less, and <b>Option B</b>, worth more. The trade always happens, and one fair draw decides whether the starter gets A or B. I value every card at today's prices and set the odds so the trade is fair on average.</p>" +
     '<div class="cp-mori-actions"><button class="cp-mori-go" data-bd-game-new>Start a game</button></div>' +
     '<form class="bd-game-join" data-bd-game-join novalidate><input name="code" inputmode="numeric" maxlength="6" placeholder="6-digit code" aria-label="Game code"><button type="submit">Join</button></form>' +
     '<p class="bd-game-err" hidden></p>' +
@@ -1111,43 +1112,56 @@
   }
   // "Save it as a memory" names the game's exact cards and result, so Mori never picks another card.
   function memoryAsk(g) {
-    const list = (cards) => cards.map((c) => c.name + (c.number ? " " + c.number : "") + (c.set_name ? " (" + c.set_name + ")" : "")).join(", ");
-    const won = g.result && g.result.winner === "you";
+    const one = (c) => c.name + (c.number ? " " + c.number : "");
+    const list = (cards) => cards.map((c) => one(c) + (c.set_name ? " (" + c.set_name + ")" : "")).join(", ");
     const topOf = (cards) => cards.slice().sort((a, b) => b.usd - a.usd)[0];
-    const mineTop = topOf(g.me.cards), theirTop = topOf(g.them.cards);
-    return "Help me save a memory of this trade-up game. I put in " + list(g.me.cards) + " (" + usdT(g.me.total) + "); the other player put in " + list(g.them.cards) + " (" + usdT(g.them.total) + "). " +
-      "My chance was " + pctT(g.result ? g.result.your_chance : g.chance.me) + " and " + (won ? "I won, so I took all the cards." : "they won, so I handed over my cards.") + " " +
-      "Use only these cards: the card I gave is " + (mineTop ? mineTop.name + (mineTop.number ? " " + mineTop.number : "") : "my cards") +
-      (won && theirTop ? " and the card I got is " + theirTop.name + (theirTop.number ? " " + theirTop.number : "") : "") + ". Do not attach any other card.";
+    const pick = g.result.option, got = g.offers[pick], starter = g.role === "host";
+    const gave = starter ? g.start.cards : got.cards, received = starter ? got.cards : g.start.cards;
+    return "Help me save a memory of this trade-up game. " + (starter ? "I started it and put in " + list(g.start.cards) + " (" + usdT(g.start.total) + "). " : "I offered two sets for their " + list(g.start.cards) + " (" + usdT(g.start.total) + "). ") +
+      "Option A was " + list(g.offers.a.cards) + " (" + usdT(g.offers.a.total) + ") and Option B was " + list(g.offers.b.cards) + " (" + usdT(g.offers.b.total) + "). " +
+      "The draw picked Option " + pick.toUpperCase() + " (B's chance was " + pctT(g.result.chance_b) + "), so I gave " + list(gave) + " and got " + list(received) + ". " +
+      "Use only these cards: the card I gave is " + one(topOf(gave)) + " and the card I got is " + one(topOf(received)) + ". Do not attach any other card.";
+  }
+  function setBox(title, set, opts) {
+    return '<div class="bd-game-side' + (opts.cls ? " " + opts.cls : "") + '"><p><b>' + title + "</b><em>" + usdT(set.total) + "</em></p>" + (opts.hint ? '<p class="bd-game-hint">' + opts.hint + "</p>" : "") +
+      cardsList(set.cards, opts.mine) + (opts.edit ? '<button class="bd-game-add" data-bd-game-cards="' + opts.edit + '">' + (set.cards.length ? "Change cards" : "+ Add cards from my collection") + "</button>" : "") + "</div>";
   }
   function gameHTML(g) {
     if (g.status === "expired" || g.status === "cancelled") return '<small class="bd-game-kicker">Trade-up game</small><p>This game ' + (g.status === "expired" ? "has expired." : "was cancelled.") + "</p>";
-    const both = g.me.cards.length && g.them.cards.length;
-    const bar = both ? '<div class="bd-game-odds"><div class="bd-game-bar"><i style="width:' + (g.chance.me * 100) + '%"></i>' +
-      (g.result ? '<b class="bd-game-mark" style="left:' + ((g.role === "host" ? g.result.draw : 1 - g.result.draw) * 100) + '%"></b>' : "") + "</div>" +
-      '<p><span>You ' + pctT(g.chance.me) + "</span><span>Them " + pctT(g.chance.them) + "</span></p></div>" : "";
+    const starter = g.role === "host", open = !g.result && !g.locked.me;
+    const S = g.start.total, A = g.offers.a, B = g.offers.b;
+    const startBox = setBox(starter ? "Your cards" : "Their cards", g.start, { mine: starter, edit: starter && open ? "start" : "" });
+    const aBox = setBox("Option A, worth less", A, { mine: !starter, edit: !starter && open ? "a" : "", cls: g.result && g.result.option === "a" ? "is-picked" : "", hint: !starter && open && S ? "Under " + usdT(S) : "" });
+    const bBox = setBox("Option B, worth more", B, { mine: !starter, edit: !starter && open ? "b" : "", cls: g.result && g.result.option === "b" ? "is-picked" : "", hint: !starter && open && S ? "Over " + usdT(S) : "" });
+    const ready = S && A.cards.length && B.cards.length;
+    const p = g.result ? g.result.chance_b : g.chance_b;
+    let odds = "";
+    if (ready && p === null) odds = '<p class="bd-game-err">Option A must be worth less than ' + usdT(S) + " and Option B more.</p>";
+    else if (ready) odds = '<div class="bd-game-odds"><div class="bd-game-bar"><i style="width:' + ((1 - p) * 100) + '%"></i>' + (g.result ? '<b class="bd-game-mark" style="left:' + ((1 - g.result.draw) * 100) + '%"></b>' : "") + "</div>" +
+      '<p><span>Option A ' + pctT(1 - p) + "</span><span>Option B " + pctT(p) + "</span></p>" +
+      '<p class="bd-game-hint">Fair on average: ' + pctT(1 - p) + " × " + usdT(A.total) + " + " + pctT(p) + " × " + usdT(B.total) + " = " + usdT(S) + ".</p></div>";
     let foot = "";
     if (g.result) {
-      const won = g.result.winner === "you";
-      foot = '<p class="bd-game-result ' + (won ? "is-won" : "is-lost") + '">' + (won ? "You won! You take all " + (g.me.cards.length + g.them.cards.length) + " cards." : "They won this one. Hand over your cards.") + "</p>" +
-        '<details class="bd-game-proof"><summary>How this was decided</summary><p>Your chance was ' + pctT(g.result.your_chance) + ". The draw " + g.result.draw.toFixed(4) + " came from both phones' secrets: SHA-256 of \"bindory-tradeup:\" + host secret + \":\" + guest secret, first 13 hex digits ÷ 2^52. The host wins below the host's chance.</p>" +
-        "<code>host secret " + esc(g.result.proof.host_secret) + "</code><code>guest secret " + esc(g.result.proof.guest_secret) + "</code><p>You were the " + esc(g.result.proof.you_are) + ".</p></details>" +
+      const got = g.offers[g.result.option];
+      foot = '<p class="bd-game-result is-won">The draw picked Option ' + g.result.option.toUpperCase() + ". " +
+        (starter ? "You get " + got.cards.length + " card" + (got.cards.length === 1 ? "" : "s") + " (" + usdT(got.total) + ") for yours." : "You give Option " + g.result.option.toUpperCase() + " (" + usdT(got.total) + ") for their cards.") + " Swap the cards now.</p>" +
+        '<details class="bd-game-proof"><summary>How this was decided</summary><p>Option B\'s chance was ' + pctT(g.result.chance_b) + ". The draw " + g.result.draw.toFixed(4) + " came from both phones' secrets: SHA-256 of \"bindory-tradeup:\" + starter secret + \":\" + other secret, first 13 hex digits ÷ 2^52. Below B's chance means Option B.</p>" +
+        "<code>starter secret " + esc(g.result.proof.host_secret) + "</code><code>other secret " + esc(g.result.proof.guest_secret) + "</code></details>" +
         '<div class="cp-mori-chips"><button data-mori-ask="' + esc(memoryAsk(g)) + '">Save it as a memory</button><button data-bd-game-again>Play again</button></div>';
     } else if (!g.joined) {
-      foot = '<p class="bd-game-wait">Waiting for the other player to join with code <b>' + esc(g.code) + "</b>…</p>";
-    } else if (g.me.locked && g.them.locked) {
-      foot = '<p class="bd-game-wait"><i class="bd-spin"></i>Rolling…</p>';
-    } else if (g.me.locked) {
-      foot = '<p class="bd-game-wait">You are locked in. Waiting for them…</p><div class="cp-mori-chips"><button data-bd-game-cards>Change my cards</button></div>';
+      foot = '<p class="bd-game-wait">Share code <b>' + esc(g.code) + "</b>. The other collector joins and offers Option A and Option B.</p>";
+    } else if (g.locked.me && g.locked.them) {
+      foot = '<p class="bd-game-wait"><i class="bd-spin"></i>Drawing…</p>';
+    } else if (g.locked.me) {
+      foot = '<p class="bd-game-wait">You are locked in. Waiting for them…</p><div class="cp-mori-chips"><button data-bd-game-unlock>Change my cards</button></div>';
+    } else if (ready && p !== null) {
+      foot = '<label class="bd-game-agree"><input type="checkbox" data-bd-game-adult> I am 18 or over and agree to trade for whichever option the draw picks.</label><div class="cp-mori-actions"><button class="cp-mori-go" data-bd-game-lock>Lock in</button></div>' +
+        (g.locked.them ? '<p class="bd-game-wait">They are locked in.</p>' : "");
     } else {
-      foot = (both ? '<label class="bd-game-agree"><input type="checkbox" data-bd-game-adult> I am 18 or over and agree the winner takes all the cards.</label><div class="cp-mori-actions"><button class="cp-mori-go" data-bd-game-lock>Lock in</button></div>' : "") +
-        (g.them.locked ? '<p class="bd-game-wait">They are locked in.</p>' : "");
+      foot = '<p class="bd-game-wait">' + (starter ? (S ? "Waiting for their Option A and Option B…" : "Add the cards you want to trade up.") : "Add your Option A and Option B.") + "</p>";
     }
-    return '<small class="bd-game-kicker">Trade-up game · code <b>' + esc(g.code) + "</b></small>" +
-      '<div class="bd-game-side"><p><b>Your cards</b><em>' + usdT(g.me.total) + "</em></p>" + cardsList(g.me.cards, true) +
-      (!g.result && !g.me.locked ? '<button class="bd-game-add" data-bd-game-cards>' + (g.me.cards.length ? "Change my cards" : "+ Add cards from my collection") + "</button>" : "") + "</div>" +
-      '<div class="bd-game-side"><p><b>Their cards</b><em>' + usdT(g.them.total) + "</em></p>" + cardsList(g.them.cards, false) + "</div>" +
-      bar + '<p class="bd-game-err" hidden></p>' + foot +
+    return '<small class="bd-game-kicker">Trade-up game · code <b>' + esc(g.code) + "</b>" + (starter ? " · you started" : "") + "</small>" +
+      startBox + aBox + bBox + odds + '<p class="bd-game-err" hidden></p>' + foot +
       (!g.result ? '<button class="bd-game-leave" data-bd-game-leave>Leave game</button>' : "");
   }
   const games = new Map(); // id -> latest state
@@ -1156,7 +1170,7 @@
     box.dataset.bdGame = g.id;
     box.innerHTML = gameHTML(g);
     if (g.status === "open" && !box.dataset.polling) poll(box);
-    if (g.status === "open" && g.me.locked && g.them.locked && !g.me.revealed) revealNow(box, g);
+    if (g.status === "open" && g.locked.me && g.locked.them && !g.revealed.me) revealNow(box, g);
   }
   function poll(box) {
     box.dataset.polling = "1";
@@ -1213,7 +1227,7 @@
     try { paint(box, await tradeupCall({ action: "join", code: f.elements.code.value.trim() })); } catch (err) { showErr(box, err.message); }
   }, true);
   app.addEventListener("click", async (e) => {
-    const b = e.target.closest && e.target.closest("[data-bd-game-new],[data-bd-game-cards],[data-bd-game-lock],[data-bd-game-leave],[data-bd-game-again]");
+    const b = e.target.closest && e.target.closest("[data-bd-game-new],[data-bd-game-cards],[data-bd-game-unlock],[data-bd-game-lock],[data-bd-game-leave],[data-bd-game-again]");
     if (!b || !app.contains(b)) return;
     e.stopPropagation();
     const box = gameBox(b), g = games.get(box.dataset.bdGame);
@@ -1223,17 +1237,24 @@
         return paint(box, await tradeupCall({ action: "create" }));
       }
       if ("bdGameLeave" in b.dataset) return paint(box, await tradeupCall({ action: "cancel", id: g.id }));
+      if ("bdGameUnlock" in b.dataset) {
+        // Saving the same cards again unlocks both players.
+        const set = g.role === "host" ? "start" : "a";
+        return paint(box, await tradeupCall({ action: "cards", id: g.id, card_ids: (set === "start" ? g.start.cards : g.offers.a.cards).map((c) => c.id), option: set === "a" ? "a" : undefined }));
+      }
       if ("bdGameCards" in b.dataset) {
-        const ids = await pickCards(g.me.cards.map((c) => c.id));
+        const which = b.dataset.bdGameCards;
+        const current = which === "start" ? g.start.cards : g.offers[which].cards;
+        const ids = await pickCards(current.map((c) => c.id));
         if (!ids) return;
         const label = b.textContent;
         b.disabled = true; b.textContent = "Pricing your cards…";
-        try { return paint(box, await tradeupCall({ action: "cards", id: g.id, card_ids: ids })); }
+        try { return paint(box, await tradeupCall({ action: "cards", id: g.id, card_ids: ids, option: which === "start" ? undefined : which })); }
         catch (err) { b.disabled = false; b.textContent = label; throw err; }
       }
       if ("bdGameLock" in b.dataset) {
         const adult = box.querySelector("[data-bd-game-adult]");
-        if (!adult || !adult.checked) return showErr(box, "Tick the box to confirm you are 18 or over and agree the winner takes all.");
+        if (!adult || !adult.checked) return showErr(box, "Tick the box to confirm you are 18 or over and agree to trade for whichever option the draw picks.");
         b.disabled = true;
         return paint(box, await tradeupCall({ action: "lock", id: g.id, commit: await sha256hex(mySecret(g.id)), adult: true }));
       }

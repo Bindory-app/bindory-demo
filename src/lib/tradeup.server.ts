@@ -1,19 +1,22 @@
 /**
- * Trade-up games, server side (see tradeup.ts for the fair-odds draw). Every change goes through
- * here with the service role: cards must be the player's own, values come from today's market
- * prices (never from the phone), and the draw uses both players' revealed secrets.
+ * Trade-up games, server side (see tradeup.ts for the fair-odds draw). The starter (host) puts in
+ * cards; the other collector (guest) offers Option A (worth less) and Option B (worth more), stored
+ * as guest_cards = {a: [...], b: [...]}. The trade always happens; the draw decides A or B
+ * (winner "host" = Option B, "guest" = Option A; host_chance = B's chance). Every change goes
+ * through here with the service role: cards must be the player's own, values come from today's
+ * market prices (never from the phone), and the draw uses both players' revealed secrets.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getCardPricing, priceScale, usdRange } from "./tcgdex";
 import {
   MAX_CARDS_PER_SIDE,
   MAX_TOTAL_USD,
-  decide,
+  decideOption,
+  optionBChance,
   isCommit,
   isSecret,
   joinCode,
   sha256,
-  winChances,
 } from "./tradeup";
 
 type Card = {
@@ -31,7 +34,7 @@ type Game = {
   host_id: string;
   guest_id: string | null;
   host_cards: Card[];
-  guest_cards: Card[];
+  guest_cards: Card[] | { a?: Card[]; b?: Card[] };
   host_total: number;
   guest_total: number;
   host_commit: string | null;
@@ -65,36 +68,36 @@ const sideOf = (g: Game, userId: string) =>
 const other = (s: "host" | "guest") => (s === "host" ? "guest" : "host");
 const expired = (g: Game) => g.status === "open" && Date.parse(g.expires_at) < Date.now();
 
-/** The game as one player sees it: their side as "me", the other as "them". */
+const sum = (cards: Card[]) => Math.round(cards.reduce((n, c) => n + c.usd, 0) * 100) / 100;
+function offers(g: Game) {
+  const o = Array.isArray(g.guest_cards) ? {} : g.guest_cards;
+  const a = o.a ?? [];
+  const b = o.b ?? [];
+  return { a: { cards: a, total: sum(a) }, b: { cards: b, total: sum(b) } };
+}
+
+/** The game as one player sees it: the starter's cards, the two offers, B's chance and the result. */
 export function view(g: Game, userId: string) {
-  const me = sideOf(g, userId),
-    them = other(me);
-  const chances = winChances(Number(g[`${me}_total`]), Number(g[`${them}_total`]));
+  const me = sideOf(g, userId);
+  const start = { cards: g.host_cards, total: Number(g.host_total) };
+  const o = offers(g);
   return {
     id: g.id,
     code: g.code,
     status: expired(g) ? "expired" : g.status,
-    role: me,
+    role: me, // "host" = starter, "guest" = makes the two offers
     joined: Boolean(g.guest_id),
-    me: {
-      cards: g[`${me}_cards`],
-      total: Number(g[`${me}_total`]),
-      locked: Boolean(g[`${me}_commit`]),
-      revealed: Boolean(g[`${me}_secret`]),
-    },
-    them: {
-      cards: g[`${them}_cards`],
-      total: Number(g[`${them}_total`]),
-      locked: Boolean(g[`${them}_commit`]),
-      revealed: Boolean(g[`${them}_secret`]),
-    },
-    chance: { me: chances.host, them: chances.guest },
+    start,
+    offers: o,
+    chance_b: optionBChance(start.total, o.a.total, o.b.total),
+    locked: { me: Boolean(g[`${me}_commit`]), them: Boolean(g[`${other(me)}_commit`]) },
+    revealed: { me: Boolean(g[`${me}_secret`]) },
     result:
       g.status === "rolled" && g.winner
         ? {
-            winner: g.winner === me ? "you" : "them",
+            option: g.winner === "host" ? "b" : "a",
             draw: Number(g.draw),
-            your_chance: me === "host" ? Number(g.host_chance) : 1 - Number(g.host_chance),
+            chance_b: Number(g.host_chance),
             // Everything needed to check the draw: both secrets and their hashes.
             proof: {
               host_secret: g.host_secret,
@@ -152,14 +155,16 @@ async function valueOf(tcgdexId: string): Promise<number | null> {
   return typeof v === "number" && v > 0 ? Math.round(v * 100) / 100 : null;
 }
 
-export async function setCards(userId: string, id: string, cardIds: string[]) {
+export async function setCards(userId: string, id: string, cardIds: string[], option?: string) {
   const db = await admin();
   const g = await load(db, userId, id);
   if (g.status !== "open" || expired(g)) throw new TradeupError("This game is closed.");
+  const me = sideOf(g, userId);
+  if (me === "guest" && option !== "a" && option !== "b")
+    throw new TradeupError("Choose Option A or Option B.");
   const ids = [...new Set(cardIds)].slice(0, MAX_CARDS_PER_SIDE + 1);
   if (ids.length > MAX_CARDS_PER_SIDE)
     throw new TradeupError(`Up to ${MAX_CARDS_PER_SIDE} cards each.`);
-  const me = sideOf(g, userId);
   let cards: Card[] = [];
   if (ids.length) {
     const { data, error } = await db
@@ -188,21 +193,24 @@ export async function setCards(userId: string, id: string, cardIds: string[]) {
       usd: usd!,
     }));
   }
-  const total = Math.round(cards.reduce((n, c) => n + c.usd, 0) * 100) / 100;
+  const total = sum(cards);
   if (total > MAX_TOTAL_USD)
-    throw new TradeupError(
-      `Games are limited to US$${MAX_TOTAL_USD.toLocaleString("en-US")} a side.`,
-    );
-  // Changing cards unlocks both players, so nobody is held to odds they did not see.
+    throw new TradeupError(`Each set is limited to US$${MAX_TOTAL_USD.toLocaleString("en-US")}.`);
+  // Changing any cards unlocks both players, so nobody is held to odds they did not see.
+  const patch: Record<string, unknown> = {
+    host_commit: null,
+    guest_commit: null,
+    updated_at: new Date().toISOString(),
+  };
+  if (me === "host") Object.assign(patch, { host_cards: cards, host_total: total });
+  else {
+    const o = offers(g);
+    const next = { a: option === "a" ? cards : o.a.cards, b: option === "b" ? cards : o.b.cards };
+    Object.assign(patch, { guest_cards: next, guest_total: sum(next.a) });
+  }
   const { data, error } = await db
     .from(T)
-    .update({
-      [`${me}_cards`]: cards,
-      [`${me}_total`]: total,
-      host_commit: null,
-      guest_commit: null,
-      updated_at: new Date().toISOString(),
-    })
+    .update(patch)
     .eq("id", id)
     .eq("status", "open")
     .select("*")
@@ -218,8 +226,15 @@ export async function lockIn(userId: string, id: string, commit: string, adult: 
   const g = await load(db, userId, id);
   if (g.status !== "open" || expired(g)) throw new TradeupError("This game is closed.");
   if (!g.guest_id) throw new TradeupError("Wait for the other player to join.");
-  if (!g.host_cards.length || !g.guest_cards.length)
-    throw new TradeupError("Both players need cards in first.");
+  const o = offers(g);
+  if (!g.host_cards.length || !o.a.cards.length || !o.b.cards.length)
+    throw new TradeupError(
+      "The starter needs cards in, and the other player needs both Option A and Option B.",
+    );
+  if (optionBChance(Number(g.host_total), o.a.total, o.b.total) === null)
+    throw new TradeupError(
+      "Option A must be worth less than the starter's cards, and Option B more.",
+    );
   const me = sideOf(g, userId);
   const { data, error } = await db
     .from(T)
@@ -252,16 +267,22 @@ export async function reveal(userId: string, id: string, secret: string) {
   if (error) throw error;
   g = data as Game;
   if (g.host_secret && g.guest_secret) {
-    const host = Number(g.host_total),
-      guest = Number(g.guest_total);
-    const { draw, winner } = decide(host, guest, g.host_secret, g.guest_secret);
+    const o = offers(g);
+    const { draw, option, chanceB } = decideOption(
+      Number(g.host_total),
+      o.a.total,
+      o.b.total,
+      g.host_secret,
+      g.guest_secret,
+    );
+    const winner = option === "b" ? "host" : "guest";
     const { data: done } = await db
       .from(T)
       .update({
         status: "rolled",
         winner,
         draw,
-        host_chance: winChances(host, guest).host,
+        host_chance: chanceB,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)
@@ -293,26 +314,26 @@ export async function cancelGame(userId: string, id: string) {
 /** Both players get the result in their Mori history (and Library). */
 async function saveToHistory(db: SupabaseClient, g: Game) {
   const usd = (n: number) => "US$" + n.toLocaleString("en-US", { maximumFractionDigits: 2 });
-  const rows = (["host", "guest"] as const).map((side) => {
-    const won = g.winner === side,
-      mine = Number(g[`${side}_total`]),
-      theirs = Number(g[`${other(side)}_total`]);
-    return {
-      user_id: side === "host" ? g.host_id : g.guest_id,
+  const o = offers(g);
+  const pick = g.winner === "host" ? "b" : "a";
+  const got = o[pick];
+  const names = (cards: Card[]) => cards.map((c) => c.name).join(", ");
+  const label = pick === "b" ? "Option B" : "Option A";
+  const payload = { tradeup: { id: g.id, option: pick, draw: g.draw, chance_b: g.host_chance } };
+  await db.from("mori_messages").insert([
+    {
+      user_id: g.host_id,
       role: "mori",
       kind: "text",
-      content: won
-        ? `You won the trade-up game: you keep your ${g[`${side}_cards`].length} cards (${usd(mine)}) and take the other player's ${g[`${other(side)}_cards`].length} (${usd(theirs)}). Swap the cards in person now.`
-        : `The other player won the trade-up game this time: hand over your ${g[`${side}_cards`].length} cards (${usd(mine)}) and they keep theirs (${usd(theirs)}).`,
-      payload: {
-        tradeup: {
-          id: g.id,
-          won,
-          draw: g.draw,
-          chance: side === "host" ? g.host_chance : 1 - Number(g.host_chance),
-        },
-      },
-    };
-  });
-  await db.from("mori_messages").insert(rows);
+      content: `Trade-up done: the draw picked ${label}. You give your ${g.host_cards.length} cards (${usd(Number(g.host_total))}) and get ${names(got.cards)} (${usd(got.total)}). Swap the cards in person now.`,
+      payload,
+    },
+    {
+      user_id: g.guest_id,
+      role: "mori",
+      kind: "text",
+      content: `Trade-up done: the draw picked ${label}. You give ${names(got.cards)} (${usd(got.total)}) and get their ${g.host_cards.length} cards (${usd(Number(g.host_total))}). Swap the cards in person now.`,
+      payload,
+    },
+  ]);
 }

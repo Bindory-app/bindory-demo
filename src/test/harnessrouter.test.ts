@@ -528,3 +528,32 @@ describe("Trade-up memory request", () => {
     ).toBe("memory");
   });
 });
+
+describe("Trade-up options A and B", () => {
+  it("sets B's chance so the trade is fair on average", async () => {
+    const { optionBChance } = await import("@/lib/tradeup");
+    expect(optionBChance(1000, 800, 1200)).toBeCloseTo(0.5, 6);
+    expect(optionBChance(1000, 800, 1300)).toBeCloseTo(0.4, 6);
+    expect(optionBChance(1000, 1000, 1200)).toBeNull();
+    expect(optionBChance(1000, 800, 900)).toBeNull();
+  });
+  it("gives the starter B about as often as its chance", async () => {
+    const { decideOption } = await import("@/lib/tradeup");
+    const { randomBytes } = await import("node:crypto");
+    let b = 0;
+    const n = 20000;
+    for (let i = 0; i < n; i++)
+      if (
+        decideOption(
+          1000,
+          800,
+          1300,
+          randomBytes(32).toString("hex"),
+          randomBytes(32).toString("hex"),
+        ).option === "b"
+      )
+        b++;
+    expect(b / n).toBeGreaterThan(0.385);
+    expect(b / n).toBeLessThan(0.415);
+  });
+});
