@@ -766,7 +766,12 @@
       ".bd-game-odds p{display:flex;justify-content:space-between;font-size:9px;font-weight:800;color:var(--mori-muted,#6b7090)}.bd-game-agree{display:flex;gap:6px;align-items:flex-start;font-size:9px;color:var(--mori-muted,#6b7090)}.bd-game-wait{font-size:9.5px;color:var(--mori-muted,#6b7090);display:flex;gap:6px;align-items:center}" +
       ".bd-game-hint{font-size:8.5px;color:var(--mori-muted,#6b7090)}.bd-game-side.is-picked{border:1.5px solid var(--mori-primary,#5b4bd6);background:var(--mori-soft,#f1eefc)}" +
       ".bd-game-result{font-size:12px;font-weight:800}.bd-game-result.is-won{color:var(--mori-primary,#5b4bd6)}.bd-game-proof{font-size:8.5px;color:var(--mori-muted,#6b7090)}.bd-game-proof code{display:block;word-break:break-all;font-size:7.5px;margin-top:3px}" +
-      ".bd-pick{max-height:46vh;overflow:auto;display:grid;gap:6px}.bd-pick label{display:flex;align-items:center;gap:10px;border:1px solid #e6e2fa;border-radius:12px;padding:8px}.bd-pick label[hidden]{display:none}.bd-pick img,.bd-pick i{width:34px;height:47px;border-radius:3px;object-fit:cover;background:#eee}.bd-pick span{display:grid;flex:1;min-width:0}.bd-pick small{color:#6b7090;font-size:12px}" +
+      ".bd-slot .bd-pick{max-height:46vh;overflow:auto;display:grid;gap:6px}" +
+      ".bd-slot .bd-pick label{display:flex;align-items:center;gap:10px;border:1px solid #e6e2fa;border-radius:12px;padding:8px 10px;font-weight:400;cursor:pointer}.bd-slot .bd-pick label[hidden]{display:none}" +
+      ".bd-slot .bd-pick input[type=checkbox]{width:20px;height:20px;flex:none;margin:0;padding:0;accent-color:#5b4bd6}" +
+      ".bd-slot .bd-pick label:has(input:checked){border-color:#5b4bd6;background:#f5f3fe}" +
+      ".bd-slot .bd-pick img,.bd-slot .bd-pick i{width:34px;height:47px;border-radius:3px;object-fit:cover;background:#eee;flex:none}" +
+      ".bd-slot .bd-pick span{display:grid;flex:1;min-width:0}.bd-slot .bd-pick b{font-size:15px;color:#1f2340;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bd-slot .bd-pick small{color:#6b7090;font-size:12px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
       ".bd-choices{display:grid;gap:5px;margin-top:7px}.bd-choice{font:inherit;font-weight:700;font-size:10px;text-align:left;padding:8.5px 29px 8.5px 10px;border:1px solid var(--theme-ddd8ec,#ddd8ec);border-radius:8.5px;background:var(--mori-card,#fff);color:var(--mori-ink,#1f2340);position:relative;cursor:pointer}" +
       ".bd-choice:hover{border-color:var(--mori-primary,#5b4bd6)}.bd-choice.is-own{color:#6b7090}.bd-choices.is-done .bd-choice{opacity:.45;cursor:default}" +
       ".bd-choices.is-done .bd-choice.is-picked{opacity:1;border:1.5px solid var(--mori-primary,#5b4bd6);background:var(--mori-soft,#f1eefc);color:var(--mori-primary,#5b4bd6)}" +
@@ -1139,7 +1144,8 @@
     if (ready && p === null) odds = '<p class="bd-game-err">Option A must be worth less than ' + usdT(S) + " and Option B more.</p>";
     else if (ready) odds = '<div class="bd-game-odds"><div class="bd-game-bar"><i style="width:' + ((1 - p) * 100) + '%"></i>' + (g.result ? '<b class="bd-game-mark" style="left:' + ((1 - g.result.draw) * 100) + '%"></b>' : "") + "</div>" +
       '<p><span>Option A ' + pctT(1 - p) + "</span><span>Option B " + pctT(p) + "</span></p>" +
-      '<p class="bd-game-hint">Fair on average: ' + pctT(1 - p) + " × " + usdT(A.total) + " + " + pctT(p) + " × " + usdT(B.total) + " = " + usdT(S) + ".</p></div>";
+      '<p class="bd-game-hint">Why these odds: B is worth ' + usdT(B.total - S) + " more than the starter's cards and A " + usdT(S - A.total) + " less, so the chances balance out. " +
+      "Played many times, the starter would average " + usdT(S) + ", the same as what they put in (" + pctT(1 - p) + " × " + usdT(A.total) + " + " + pctT(p) + " × " + usdT(B.total) + ").</p></div>";
     let foot = "";
     if (g.result) {
       const got = g.offers[g.result.option];
