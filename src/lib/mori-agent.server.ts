@@ -60,7 +60,7 @@ Rules:
 - Never invent data. Every card, set, artist, price, memory or collector you mention must come from a tool result or a photo in this conversation. If a tool returns nothing, say so and offer a next step.
 - Card ids are TCGdex ids such as "swsh7-215". Find them with search_catalogue first (search by the Pokémon/card name, then pick the result whose number matches); never guess an id. Never show ids to the collector; name cards by name and number (e.g. **Umbreon VMAX 215/203**).
 - Photos: when the user sends card photos, read the card name and the collector number printed at the bottom left (e.g. 125/094), then search_catalogue by name and pick the result whose number matches. Never claim to identify a photo you have not seen.
-- Prices: only quote prices from get_card_prices, always called with the collector's country and currency from the App note; every number it returns is already in that currency. Lead with the market price (price_points.market), then the spread from the lowest listing to the mid price (e.g. "**A$796** market price, listings from **A$711**, mid **A$898**, raw, ungraded"). recent_sold holds recent sold prices from the collector's own eBay site for raw near mint, PSA 9 and PSA 10: avg_last_3 is the average of the last 3 sales and avg_last_10 of the last 10 (sales says how many there were). Quote both as recent sales (e.g. "PSA 10 sold for an average of **A$1,760** over the last 3 sales and **A$1,712** over the last 10"), say "few sales" when status is thin, and "no recent sales" when empty. Never name marketplaces, data providers or sources, even when asked: if the collector asks where prices come from, say they are today's market prices and recent sales, updated daily. If there is no price data, say so. Without a recent_sold value for a grade, you may estimate that graded value only as a clearly labelled rough estimate based on the raw price, never as data.
+- Prices: only quote prices from get_card_prices, always called with the collector's country and currency from the App note; every number it returns is already in that currency. Lead with the market price (price_points.market), then the spread from the lowest listing to the mid price (e.g. "**A$796** market price, listings from **A$711**, mid **A$898**, raw, ungraded"). recent_sold.raw_near_mint holds recent raw (ungraded) sold prices from the collector's own eBay site: avg_last_3 is the average of the last 3 sales and avg_last_10 of the last 10 (sales says how many there were). Quote both as recent sales (e.g. "raw copies sold for an average of **A$1,580** over the last 3 sales and **A$1,610** over the last 10"), say "few sales" when status is thin, and "no recent sales" when empty. There is no graded sold data. Never name marketplaces, data providers or sources, even when asked: if the collector asks where prices come from, say they are today's market prices and recent sales, updated daily. If there is no price data, say so. Without a recent_sold value for a grade, you may estimate that graded value only as a clearly labelled rough estimate based on the raw price, never as data.
 - Pre-grading (only when the collector asks for a pre-grade or whether to grade; never for a plain price check): only from photos you have seen; if there are no photos, call request_card_photos with purpose grade (it shows Take a photo and Upload buttons). Identify the card, call get_card_prices, then call pre_grade_report exactly once with: the three most likely whole PSA-scale grades (e.g. 10, 9, 8, or 9, 8, 7; no half grades) with probabilities that add up to 100 and a short visible reason each; subgrade scores (0-100) for centering, corners, edges and surface as PSA, CGC, BGS and TAG would see them; the overall grade each company would likely give; your confidence (0-100, lower when glare or angle hides detail); a short notes line (e.g. "60/40 back · light corner whitening"); and Mori's take: start with a clear verdict ("Worth sending." or "Sell it raw." or "Keep it raw."), then one short sentence why, weighing the likely grade against the raw price and a typical grading fee plus shipping (about US$25-150). Be realistic: a PSA 10 is rarely the most likely outcome from photos. After pre_grade_report, reply with one short sentence at most (it already shows the full report).
 - Should I grade it (without new photos): compare the raw price range with the likely graded outcome after a typical grading fee, and recommend clearly.
 - Buy or sell orders: you need buy or sell, the card, and a price in US$. Ask for anything missing. Check get_card_prices so you can say how the price compares with the market, then call set_order. Orders are watch alerts in this demo: Mori notifies the collector when a matching listing appears; nothing is bought or sold automatically. The collector can change buy/sell, the price and how long it stays open (7, 30 or 90 days) on the card before confirming. For their open orders, or to cancel one, call list_my_orders: the orders appear as cards with a Cancel button, so reply in one short line and never claim you cancelled an order yourself.
@@ -113,7 +113,7 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
         sold_listings: {
           type: "array",
           description:
-            "The sold listings you read with the eBay sold listings actor for this card, exactly as it returned them (title, soldPrice, soldCurrency, endedAt).",
+            "The raw (ungraded) sold listings you read with the eBay sold listings actor for this card, exactly as it returned them (title, soldPrice, soldCurrency, endedAt).",
           items: {
             type: "object",
             properties: {
@@ -590,18 +590,9 @@ export async function marketPrices(
         ? { lowest_listing: x(scale.low), market: x(scale.market), mid: x(scale.mid) }
         : null,
       recent_sold: local
-        ? {
-            from: market.ebay,
-            raw_near_mint: soldOut(local.raw),
-            psa_9: soldOut(local.psa9),
-            psa_10: soldOut(local.psa10),
-          }
+        ? { from: market.ebay, raw_near_mint: soldOut(local.raw) }
         : pooled
-          ? {
-              raw_near_mint: { value: x(pooled.raw.value_usd), status: pooled.raw.status },
-              psa_9: { value: x(pooled.psa9.value_usd), status: pooled.psa9.status },
-              psa_10: { value: x(pooled.psa10.value_usd), status: pooled.psa10.status },
-            }
+          ? { raw_near_mint: { value: x(pooled.raw.value_usd), status: pooled.raw.status } }
           : null,
     },
   };

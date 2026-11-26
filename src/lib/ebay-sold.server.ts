@@ -3,12 +3,14 @@
  * in that site's currency, from the Apify actor "eBay Sold Listings Search" (caffein.dev,
  * oTtB3VgfuE9GtxQt2). The Price Check agent runs the actor itself on HarnessRouter and passes the
  * sales to get_card_prices; when no sales are passed, the server runs it (APIFY_TOKEN, never in the
- * browser). Either way it asks for the 10 newest sales per grade (raw, PSA 10, PSA 9) from the
- * last 30 days; the server's lookup is cached for 6 hours per card and site.
+ * browser). Either way it is one search for the 10 newest RAW sales from the last 30 days: eBay's
+ * trading-card singles category (183454), condition "Ungraded" (4000), and words like custom,
+ * proxy and PSA excluded. The server's lookup is cached for 6 hours per card and site.
  *
  * Sales are sorted by their titles: PSA 10, PSA 9, other graders (ignored) and raw. Lots, proxies,
- * non-English printings and titles without the card number are left out. For each grade: the
- * average of the newest 3 sales and of the newest 10.
+ * non-English printings and titles without the card number are left out, and so are sales far
+ * below the rest (under 35% of the median, e.g. a custom or metal card that slipped through).
+ * Result: the average of the newest 3 raw sales and of the newest 10.
  */
 import { MARKETS, type Market } from "./market";
 
@@ -92,6 +94,12 @@ export function summarise(sales: Sale[], number: string, market: Market): LocalS
     const k = classifySale(String(s.title ?? ""), number);
     if (k) buckets[k].push(price);
   }
+  // Leave out sales far below the rest (customs, metal cards and other look-alikes).
+  for (const k of ["raw", "psa9", "psa10"] as const) {
+    const sorted = [...buckets[k]].sort((a, b) => a - b);
+    const median = sorted.length ? sorted[Math.floor(sorted.length / 2)]! : 0;
+    if (sorted.length >= 3) buckets[k] = buckets[k].filter((v) => v >= median * 0.35);
+  }
   return {
     currency: market.currency,
     site: market.ebay,
@@ -101,14 +109,34 @@ export function summarise(sales: Sale[], number: string, market: Market): LocalS
   };
 }
 
-/** The actor's input for one card: the 10 newest sales per grade on the collector's eBay site. */
+/** Words eBay leaves out of the search: graded slabs, customs, proxies and look-alikes. */
+export const EXCLUDE = [
+  "custom",
+  "proxy",
+  "orica",
+  "art",
+  "metal",
+  "psa",
+  "bgs",
+  "cgc",
+  "tag",
+  "graded",
+  "slab",
+  "lot",
+  "japanese",
+];
+
+/** The actor's input for one card: one search for the 10 newest raw (ungraded) sales on the
+ *  collector's eBay site, in eBay's trading-card singles category. */
 export function actorInput(card: { name: string; number: string }, market: Market) {
   const base = `${card.name} ${card.number.replace(/^0+(?=\d)/, "")}`;
   return {
-    keywords: [base, `${base} PSA 10`, `${base} PSA 9`],
+    keywords: [`${base} ${EXCLUDE.map((w) => `-${w}`).join(" ")}`],
     ebaySite: market.ebay,
-    daysToScrape: 30,
+    categoryId: "183454",
+    conditionId: 4000,
     count: 10,
+    daysToScrape: 30,
     sortOrder: "endedRecently",
   };
 }

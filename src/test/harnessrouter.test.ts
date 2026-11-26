@@ -640,19 +640,38 @@ describe("Last 3 and last 10 sold averages", () => {
     expect(r.avg_last_10).toBe(55);
     expect(r.n).toBe(10);
   });
-  it("asks the actor for 10 sales per grade on the collector's site", async () => {
+  it("asks the actor for one raw-only search of 10 on the collector's site", async () => {
     const { actorInput } = await import("@/lib/ebay-sold.server");
     const { MARKETS } = await import("@/lib/market");
-    expect(actorInput({ name: "Mega Charizard X ex", number: "125" }, MARKETS["AU"]!)).toEqual({
-      keywords: [
-        "Mega Charizard X ex 125",
-        "Mega Charizard X ex 125 PSA 10",
-        "Mega Charizard X ex 125 PSA 9",
-      ],
+    const input = actorInput({ name: "Umbreon ex", number: "161" }, MARKETS["AU"]!);
+    expect(input.keywords).toHaveLength(1);
+    expect(input.keywords[0]).toMatch(/^Umbreon ex 161 -custom -proxy .*-psa .*-graded/);
+    expect(input).toMatchObject({
       ebaySite: "ebay.com.au",
-      daysToScrape: 30,
+      categoryId: "183454",
+      conditionId: 4000,
       count: 10,
-      sortOrder: "endedRecently",
     });
+  });
+  it("leaves out sales far below the rest, like a custom or metal card", async () => {
+    const { summarise } = await import("@/lib/ebay-sold.server");
+    const { MARKETS } = await import("@/lib/market");
+    const sale = (p: string, d: string, t = "Umbreon ex 161/131 Prismatic Evolutions") => ({
+      title: t,
+      soldPrice: p,
+      soldCurrency: "AUD",
+      endedAt: d,
+    });
+    const r = summarise(
+      [
+        sale("1500", "2026-11-26"),
+        sale("1600", "2026-11-25"),
+        sale("8.95", "2026-11-24", "Umbreon 161/131 holo card"),
+        sale("1400", "2026-11-23"),
+      ],
+      "161",
+      MARKETS["AU"]!,
+    );
+    expect(r.raw).toMatchObject({ n: 3, avg_last_3: 1500 });
   });
 });

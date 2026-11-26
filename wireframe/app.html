@@ -4738,7 +4738,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
         (sold.raw && ("avg_last_3" in sold.raw || "avg_last_10" in sold.raw)
           // Average of the last 3 and last 10 sales for each grade.
           ? '<table class="bd-sold"><thead><tr><th></th><th>Last 3 sold</th><th>Last 10 sold</th></tr></thead><tbody>' +
-            [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]].map(([label, x]) => {
+            [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]].filter(([, x]) => x).map(([label, x]) => {
               const has = x && typeof x.avg_last_10 === "number";
               const n = x && x.sales ? x.sales : 0;
               return "<tr><th>" + label + "</th>" + (has
