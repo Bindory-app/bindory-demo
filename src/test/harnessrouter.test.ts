@@ -557,3 +557,77 @@ describe("Trade-up options A and B", () => {
     expect(b / n).toBeLessThan(0.415);
   });
 });
+
+describe("Local currency", () => {
+  it("routes orders priced in any currency to Mori Orders", async () => {
+    const { routeMoriMessage } = await import("@/lib/mori-agents");
+    expect(routeMoriMessage("Buy Umbreon VMAX 215/203 for up to A$680")).toBe("order");
+    expect(routeMoriMessage("Sell Charizard 4/102 for at least £300")).toBe("order");
+    expect(routeMoriMessage("Buy Pikachu 25 for up to US$20")).toBe("order");
+  });
+  it("maps countries to currency and eBay site, US by default", async () => {
+    const { marketFor, money } = await import("@/lib/market");
+    expect(marketFor("au")).toMatchObject({ currency: "AUD", symbol: "A$", ebay: "ebay.com.au" });
+    expect(marketFor("GB").ebay).toBe("ebay.co.uk");
+    expect(marketFor("ZZ").currency).toBe("USD");
+    expect(money(1234.5, marketFor("AU"))).toBe("A$1,235");
+    expect(money(12.5, marketFor("AU"))).toBe("A$12.50");
+  });
+});
+
+describe("Local eBay sold prices", () => {
+  it("sorts sales by title into raw, PSA 9 and PSA 10, leaving the rest out", async () => {
+    process.env["APIFY_TOKEN"] ??= "";
+    const { classifySale, summarise } = await import("@/lib/ebay-sold.server");
+    const { MARKETS } = await import("@/lib/market");
+    expect(
+      classifySale("Mega Charizard X EX 125/094 Special Illustration Rare PSA 10 GEM MINT", "125"),
+    ).toBe("psa10");
+    expect(classifySale("2025 Pokemon PFL Mega Charizard X ex #125/094 PSA 9", "125")).toBe("psa9");
+    expect(classifySale("Mega Charizard X ex 125/094 - Graded BGS 9", "125")).toBeNull();
+    expect(classifySale("Mega Charizard X ex 125/094 TAG 10", "125")).toBeNull();
+    expect(classifySale("Pikachu & Zekrom GX TAG TEAM 184/181", "184")).toBe("raw");
+    expect(classifySale("Mega Charizard X ex 125/094 lot of 3", "125")).toBeNull();
+    expect(classifySale("Mega Charizard X ex Japanese 125", "125")).toBeNull();
+    expect(classifySale("Mega Charizard X ex 013/094", "125")).toBeNull();
+    const s = summarise(
+      [
+        {
+          title: "Mega Charizard X ex 125/094",
+          soldPrice: "680",
+          soldCurrency: "AUD",
+          endedAt: "2026-11-26",
+        },
+        {
+          title: "Mega Charizard X ex 125/094",
+          soldPrice: "700",
+          soldCurrency: "AUD",
+          endedAt: "2026-11-25",
+        },
+        {
+          title: "Mega Charizard X ex 125/094",
+          soldPrice: "720",
+          soldCurrency: "AUD",
+          endedAt: "2026-11-24",
+        },
+        {
+          title: "Mega Charizard X ex 125 PSA 10",
+          soldPrice: "1700",
+          soldCurrency: "AUD",
+          endedAt: "2026-11-26",
+        },
+        {
+          title: "Mega Charizard X ex 125/094",
+          soldPrice: "500",
+          soldCurrency: "USD",
+          endedAt: "2026-11-26",
+        },
+      ],
+      "125",
+      MARKETS["AU"]!,
+    );
+    expect(s.raw).toEqual({ value: 700, n: 3, status: "ok" });
+    expect(s.psa10).toEqual({ value: 1700, n: 1, status: "thin" });
+    expect(s.psa9.status).toBe("none");
+  });
+});

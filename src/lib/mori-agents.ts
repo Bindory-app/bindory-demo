@@ -90,7 +90,7 @@ export function routeMoriMessage(message: string, hasPhotos = false): MoriAgent 
     return "grade";
   if (/\btrade-?up\b/i.test(m)) return "tradeup";
   if (
-    /^(buy|sell)\b.*\bUS\$/i.test(m) ||
+    /^(buy|sell)\b.*(US\$|A\$|C\$|£|€|\$)\s?\d/i.test(m) ||
     /\b(buy|sell) (order|alert)s?\b/i.test(m) ||
     /\bmy (open )?orders\b|\bcancel\b.{0,30}\border\b/i.test(m)
   )

@@ -68,6 +68,12 @@ export const Route = createFileRoute("/api/mori-chat")({
                 .trim()
                 .slice(0, 100) || undefined
             : undefined;
+        const country =
+          "country" in body &&
+          typeof body.country === "string" &&
+          /^[A-Za-z]{2}$/.test(body.country)
+            ? body.country.toUpperCase()
+            : undefined;
         const encoder = new TextEncoder();
         const abort = new AbortController();
         request.signal.addEventListener("abort", () => abort.abort(), { once: true });
@@ -92,6 +98,7 @@ export const Route = createFileRoute("/api/mori-chat")({
               since,
               token.slice(7),
               location,
+              country,
             )
               .catch((error) => {
                 console.error(

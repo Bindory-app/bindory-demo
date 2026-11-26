@@ -9,6 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { TOOL_STATUS, type MoriStreamEvent } from "./mori-tools";
 import { AGENT_NAMES, isMoriAgent, routeMoriMessage, type MoriAgent } from "./mori-agents";
+import { marketFor, type Market } from "./market";
 import {
   answerText,
   harnessIdFor,
@@ -305,16 +306,44 @@ async function toolCalls(r: HRResponse, sessionId: string) {
 }
 
 /** The price card for one card: TCGplayer's lowest listing, market price and mid price (US$). */
-export async function priceCardRow(cardId: string): Promise<MoriRowDraft | null> {
+export async function priceCardRow(
+  cardId: string,
+  market: Market,
+  fromTool?: Record<string, unknown> | null,
+): Promise<MoriRowDraft | null> {
   const r = await getCardPricing(cardId);
-  const scale = r ? priceScale(r.pricing) : null;
-  const sold = r ? await ebaySoldPrices(r.card.id) : null;
-  if (!r || (!scale && !sold)) return null;
-  const headline = scale?.market ?? scale?.mid ?? scale?.low ?? sold?.raw.value_usd ?? undefined;
+  if (!r) return null;
+  const { marketPrices } = await import("./mori-agent.server");
+  // Reuse the prices the agent just fetched for this market; look them up only if missing.
+  const tool =
+    fromTool && fromTool["currency"] === market.currency
+      ? (fromTool as {
+          price_points?: Record<string, number | null> | null;
+          recent_sold?: Record<string, unknown> | null;
+        })
+      : (
+          await marketPrices(
+            { id: r.card.id, name: r.card.name, number: r.card.localId },
+            r.pricing,
+            market,
+          )
+        ).forTool;
+  const pts = tool.price_points ?? null;
+  const sold = (tool.recent_sold ?? null) as Record<
+    string,
+    { value: number | null; status: string }
+  > | null;
+  if (!pts && !sold) return null;
+  const headline =
+    pts?.["market"] ??
+    pts?.["mid"] ??
+    pts?.["lowest_listing"] ??
+    sold?.["raw_near_mint"]?.value ??
+    undefined;
   return {
     role: "mori",
     kind: "price",
-    content: `Price check: ${r.card.name} ${r.card.localId}${headline ? `, market US$${headline}` : ""}`,
+    content: `Price check: ${r.card.name} ${r.card.localId}${typeof headline === "number" ? `, market ${market.symbol}${headline}` : ""}`,
     payload: {
       card: {
         id: r.card.id,
@@ -324,15 +353,14 @@ export async function priceCardRow(cardId: string): Promise<MoriRowDraft | null>
         rarity: r.card.rarity,
         image: cardImage(r.card.image, "low"),
       },
-      ...(scale
-        ? {
-            scale: { low: scale.low, market: scale.market, mid: scale.mid },
-            variant: scale.variant,
-            currency: "USD",
-            updated: scale.updated,
-          }
+      // Everything here is already in the collector's currency.
+      market: { currency: market.currency, symbol: market.symbol, ebay: market.ebay },
+      ...(pts
+        ? { scale: { low: pts["lowest_listing"], market: pts["market"], mid: pts["mid"] } }
         : {}),
-      ...(sold ? { sold: { raw: sold.raw, psa9: sold.psa9, psa10: sold.psa10 } } : {}),
+      ...(sold
+        ? { sold: { raw: sold["raw_near_mint"], psa9: sold["psa_9"], psa10: sold["psa_10"] } }
+        : {}),
     } as Json,
   };
 }
@@ -348,9 +376,15 @@ export async function runMoriHarness(
   askedAt: number,
   signal?: AbortSignal,
   location?: string,
+  country?: string,
 ) {
   const rows: MoriRowDraft[] = [];
   let finalText = "";
+  // The collector's market: prices in their currency, from their country's eBay site.
+  const market = marketFor(country);
+  const rate =
+    market.currency === "USD" ? 1 : await (await import("./fx.server")).usdTo(market.currency);
+  const marketNote = `[App note: the collector is in ${market.name}. Show every price in ${market.currency} (${market.symbol}), never US$${market.currency === "USD" ? "" : " unless asked"}; their eBay site is ${market.ebay}. Pass currency "${market.currency}" to get_card_prices and quote its \`local\` numbers. Today 1 US$ = ${rate} ${market.currency}; set_order prices are in US$, so convert the collector's ${market.currency} price at that rate.]\n`;
   let hrIds: { response_id: string; session_id: string; agent: MoriAgent } | undefined;
   let cardsOnly = false;
   try {
@@ -375,6 +409,7 @@ export async function runMoriHarness(
     const run = async (agent: MoriAgent, handoff: string) => {
       const prior = sessions.find((x) => x.agent === agent);
       const notes =
+        marketNote +
         (location
           ? `[App note: the collector's location, from their phone: ${location}. Use it for anything near them (card shows, events, stores); never assume another city.]\n`
           : "") +
@@ -446,6 +481,7 @@ export async function runMoriHarness(
 
     let lastCard = "";
     let lastPricedId = "";
+    let lastPricedOutput: Record<string, unknown> | null = null;
     const pricedIds = new Set<string>();
     for (const c of await toolCalls(r, sessionId)) {
       const result = toolResult(c.output);
@@ -466,6 +502,7 @@ export async function runMoriHarness(
         }`;
         if (typeof card["id"] === "string") {
           lastPricedId = card["id"];
+          lastPricedOutput = asObject(result);
           pricedIds.add(card["id"]);
         }
       }
@@ -486,7 +523,7 @@ export async function runMoriHarness(
     const singlePriceCheck =
       pricedIds.size === 1 && !rows.some((row) => row.kind !== "status") && Boolean(lastPricedId);
     if (singlePriceCheck) {
-      const row = await priceCardRow(lastPricedId).catch(() => null);
+      const row = await priceCardRow(lastPricedId, market, lastPricedOutput).catch(() => null);
       if (row) {
         rows.push(row);
         cardsOnly = true;

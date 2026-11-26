@@ -1,4 +1,5 @@
 import { routeMoriMessage } from "./mori-agents";
+import { marketFor, type Market } from "./market";
 import {
   COLLECTR_BAD_LINK,
   collectrSyncBinder,
@@ -44,7 +45,7 @@ type DB = SupabaseClient<Database>;
 // Default is on the AI Gateway free tier; newer models need paid credits.
 const MODEL = process.env["AI_GATEWAY_MODEL"] || "google/gemini-2.5-flash";
 
-export const SYSTEM = `You are Mori, a warm, concise Pokémon TCG collector agent inside the Bindory app. Keep replies short (2-5 sentences, or a short list), friendly, US English, sentence case. Use **bold** for card names and key numbers. Write money with thousands separators, e.g. US$2,211.14 or €1,810.68.
+export const SYSTEM = `You are Mori, a warm, concise Pokémon TCG collector agent inside the Bindory app. Keep replies short (2-5 sentences, or a short list), friendly, US English, sentence case. Use **bold** for card names and key numbers. Write money in the collector's currency from the App note (e.g. A$812 in Australia, £640 in the UK), with thousands separators; never US$ unless the collector is in the US or asks.
 Answer only what the collector asked, in one short, focused answer: no extra analyses, cards or proposals they did not ask for. Lead them to what they are trying to achieve, one step at a time: when you need a decision or a detail from them (which day, how many, which card, which binder, what price, buy or sell), ask ONE short question and give the likely answers as Choices they can tap instead of typing. Write each choice as their reply, with the detail that helps them decide (e.g. "Both days: US$30 with Early Bird", "Just me: 1 ticket", "Moonlight Pokémon binder"). Put the next steps toward their goal (not unrelated features) in Suggestions, and do not write a separate "Next step" line. If the collector asked several things, answer each in its own short block, separated by a line containing only ---.
 - What to chase next: list_my_cards, pick the set or theme they collect most, get_set_cards for it, choose ONE specific card they are missing (prefer a notable one), get_card_prices for it, and in the same answer always call add_to_wishlist for that card (do not ask first; the collector confirms on the card). Your text: one or two sentences on why it fits, with today's price range.
 - Trendy collections: call market_trends and name the 2-3 cards or sets rising fastest, with the change in % and today's price range. Say which of them the collector already owns (list_my_cards).
@@ -59,7 +60,7 @@ Rules:
 - Never invent data. Every card, set, artist, price, memory or collector you mention must come from a tool result or a photo in this conversation. If a tool returns nothing, say so and offer a next step.
 - Card ids are TCGdex ids such as "swsh7-215". Find them with search_catalogue first (search by the Pokémon/card name, then pick the result whose number matches); never guess an id. Never show ids to the collector; name cards by name and number (e.g. **Umbreon VMAX 215/203**).
 - Photos: when the user sends card photos, read the card name and the collector number printed at the bottom left (e.g. 125/094), then search_catalogue by name and pick the result whose number matches. Never claim to identify a photo you have not seen.
-- Prices: only quote prices from get_card_prices. Lead with the market price (price_points_usd.market), then the spread from the lowest listing to the mid price, in US$ (e.g. "**US$523** market price, listings from **US$467**, mid **US$590**, raw, ungraded"). When get_card_prices includes recent_sold_usd, those are recent sold prices (median of the last 3 sales) for raw near mint, PSA 9 and PSA 10: quote them as recent sales, say "few sales" when status is thin, and never present a last_sale_usd as a market price. Never name marketplaces, data providers or sources, even when asked: if the collector asks where prices come from, say they are today's market prices and recent sales, updated daily. If there is no price data, say so. Without recent_sold_usd for a grade, you may estimate that graded value only as a clearly labelled rough estimate based on the raw price, never as data.
+- Prices: only quote prices from get_card_prices, always called with the collector's country and currency from the App note; every number it returns is already in that currency. Lead with the market price (price_points.market), then the spread from the lowest listing to the mid price (e.g. "**A$796** market price, listings from **A$711**, mid **A$898**, raw, ungraded"). recent_sold holds recent sold prices from the collector's own eBay site (median of the newest sales) for raw near mint, PSA 9 and PSA 10: quote them as recent sales, say "few sales" when status is thin, and "no recent sales" when the value is empty. Never name marketplaces, data providers or sources, even when asked: if the collector asks where prices come from, say they are today's market prices and recent sales, updated daily. If there is no price data, say so. Without a recent_sold value for a grade, you may estimate that graded value only as a clearly labelled rough estimate based on the raw price, never as data.
 - Pre-grading (only when the collector asks for a pre-grade or whether to grade; never for a plain price check): only from photos you have seen; if there are no photos, call request_card_photos with purpose grade (it shows Take a photo and Upload buttons). Identify the card, call get_card_prices, then call pre_grade_report exactly once with: the three most likely whole PSA-scale grades (e.g. 10, 9, 8, or 9, 8, 7; no half grades) with probabilities that add up to 100 and a short visible reason each; subgrade scores (0-100) for centering, corners, edges and surface as PSA, CGC, BGS and TAG would see them; the overall grade each company would likely give; your confidence (0-100, lower when glare or angle hides detail); a short notes line (e.g. "60/40 back · light corner whitening"); and Mori's take: start with a clear verdict ("Worth sending." or "Sell it raw." or "Keep it raw."), then one short sentence why, weighing the likely grade against the raw price and a typical grading fee plus shipping (about US$25-150). Be realistic: a PSA 10 is rarely the most likely outcome from photos. After pre_grade_report, reply with one short sentence at most (it already shows the full report).
 - Should I grade it (without new photos): compare the raw price range with the likely graded outcome after a typical grading fee, and recommend clearly.
 - Buy or sell orders: you need buy or sell, the card, and a price in US$. Ask for anything missing. Check get_card_prices so you can say how the price compares with the market, then call set_order. Orders are watch alerts in this demo: Mori notifies the collector when a matching listing appears; nothing is bought or sold automatically. The collector can change buy/sell, the price and how long it stays open (7, 30 or 90 days) on the card before confirming. For their open orders, or to cancel one, call list_my_orders: the orders appear as cards with a Cancel button, so reply in one short line and never claim you cancelled an order yourself.
@@ -101,11 +102,15 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
     type: "function",
     name: "get_card_prices",
     description:
-      "Today's raw (ungraded) market price range in US$ for a TCGdex card, updated daily.",
+      "A card's prices for the collector's market, all in their currency: today's raw market points (lowest listing, market, mid) and recent sold prices (raw near mint, PSA 9, PSA 10) from their own eBay site. Pass the country and currency from the App note.",
     strict: false,
     parameters: {
       type: "object",
-      properties: { card_id: str("TCGdex card id") },
+      properties: {
+        card_id: str("TCGdex card id"),
+        country: str("The collector's country code from the App note, e.g. AU, GB, US"),
+        currency: str("The collector's currency code from the App note, e.g. AUD"),
+      },
       required: ["card_id"],
     },
   },
@@ -505,6 +510,68 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
 export type Args = Record<string, unknown>;
 const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
+/** The collector's market from the tool's country (or currency) argument; US by default. */
+function marketFromArgs(a: Args) {
+  const byCurrency: Record<string, string> = {
+    AUD: "AU",
+    GBP: "GB",
+    CAD: "CA",
+    EUR: "DE",
+    USD: "US",
+  };
+  const c = s(a["country"]) ?? byCurrency[(s(a["currency"]) ?? "").toUpperCase()];
+  return marketFor(c);
+}
+
+/** A card's prices for the collector's market: today's market points converted into their currency,
+ *  and recent sold prices from their own eBay site (Apify), else pooled eBay sales converted. */
+export async function marketPrices(
+  card: { id: string; name: string; number: string },
+  pricing: Parameters<typeof priceScale>[0],
+  market: Market,
+) {
+  const { usdTo } = await import("./fx.server");
+  const { localSoldPrices } = await import("./ebay-sold.server");
+  const rate = market.currency === "USD" ? 1 : await usdTo(market.currency);
+  const x = (v: number | null | undefined) =>
+    typeof v === "number" ? Math.round(v * rate * 100) / 100 : null;
+  const scale = priceScale(pricing);
+  const local = await localSoldPrices(card, market);
+  const pooled = local ? null : await ebaySoldPrices(card.id);
+  const soldOut = (v: { value: number | null; status: string; n?: number }) => ({
+    value: v.value,
+    status: v.status,
+    ...(typeof v.n === "number" ? { sales: v.n } : {}),
+  });
+  return {
+    rate,
+    scale,
+    local,
+    pooled,
+    forTool: {
+      currency: market.currency,
+      ebay_site: market.ebay,
+      price_points: scale
+        ? { lowest_listing: x(scale.low), market: x(scale.market), mid: x(scale.mid) }
+        : null,
+      recent_sold: local
+        ? {
+            from: market.ebay,
+            raw_near_mint: soldOut(local.raw),
+            psa_9: soldOut(local.psa9),
+            psa_10: soldOut(local.psa10),
+          }
+        : pooled
+          ? {
+              raw_near_mint: { value: x(pooled.raw.value_usd), status: pooled.raw.status },
+              psa_9: { value: x(pooled.psa9.value_usd), status: pooled.psa9.status },
+              psa_10: { value: x(pooled.psa10.value_usd), status: pooled.psa10.status },
+            }
+          : null,
+    },
+  };
+}
+
 async function briefCard(id: string, reason?: string): Promise<ProposalCard | null> {
   const c = await getCard(id);
   if (!c) return null;
@@ -531,33 +598,15 @@ async function runReadTool(db: DB, name: string, a: Args): Promise<unknown> {
     case "get_card_prices": {
       const r = await getCardPricing(s(a["card_id"]) ?? "");
       if (!r) return { error: "Card not found" };
-      const sold = await ebaySoldPrices(r.card.id);
+      const card = { id: r.card.id, name: r.card.name, number: r.card.localId };
+      const m = await marketPrices(card, r.pricing, marketFromArgs(a));
       return {
-        card: {
-          id: r.card.id,
-          name: r.card.name,
-          number: r.card.localId,
-          set: r.card.set.name,
-          rarity: r.card.rarity,
-        },
-        raw_price_usd: usdRange(r.pricing) ?? { note: "No market price data for this card" },
-        ...(() => {
-          const p = priceScale(r.pricing);
-          return p
-            ? {
-                price_points_usd: { lowest_listing: p.low, market: p.market, mid: p.mid },
-              }
-            : {};
-        })(),
-        ...(sold
-          ? {
-              recent_sold_usd: {
-                raw_near_mint: sold.raw,
-                psa_9: sold.psa9,
-                psa_10: sold.psa10,
-              },
-            }
-          : {}),
+        card: { ...card, set: r.card.set.name, rarity: r.card.rarity },
+        // Every price below is in this currency, for the collector's market.
+        ...m.forTool,
+        ...(m.forTool.price_points || m.forTool.recent_sold
+          ? {}
+          : { note: "No price data for this card" }),
       };
     }
     case "web_search": {
@@ -1274,6 +1323,7 @@ export async function runMori(
   since?: string,
   accessToken?: string,
   location?: string,
+  country?: string,
 ) {
   // HarnessRouter runs Mori when MORI_RUNTIME=harnessrouter; it needs the collector's session for
   // the tool endpoint, so callers without one (the plain RPC) stay on AI Gateway.
@@ -1343,6 +1393,7 @@ export async function runMori(
       askedAt,
       signal,
       location,
+      country,
     );
   }
 

@@ -3195,7 +3195,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       '<p class="cp-fill-err" hidden></p></form>';
     return '<form class="cp-fill" data-fill="order" data-side="' + side + '" novalidate>' +
       '<div class="cp-fill-row"><span class="cp-fill-tabs"><button type="button" data-fill-side="buy"' + (side === 'buy' ? ' class="is-on"' : '') + '>Buy</button><button type="button" data-fill-side="sell"' + (side === 'sell' ? ' class="is-on"' : '') + '>Sell</button></span>' + nameSlot() + '</div>' +
-      '<div class="cp-fill-row">' + numSlots() + '<span data-fill-price-word>' + (side === 'sell' ? 'at least' : 'up to') + '</span><span>US$</span>' + fillSlot('price', 'price', 'is-price', ' inputmode="decimal" maxlength="10"') + '</div>' +
+      '<div class="cp-fill-row">' + numSlots() + '<span data-fill-price-word>' + (side === 'sell' ? 'at least' : 'up to') + '</span><span>' + esc(P.moneySymbol ? P.moneySymbol() : 'US$') + '</span>' + fillSlot('price', 'price', 'is-price', ' inputmode="decimal" maxlength="10"') + '</div>' +
       '<div class="cp-fill-row"><button type="submit" class="cp-fill-go">Set order</button></div>' +
       '<p class="cp-fill-err" hidden></p></form>';
   }
@@ -3239,9 +3239,10 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       text = 'Add ' + card + ' to my collection, ' + (isNew ? 'in a new binder called "' + b + '"' : 'in the binder "' + b + '"');
     }
     if (kind === 'order') {
-      const price = f.price.value.replace(/[\s,$]|US/gi, '');
-      if (!/^\d{1,7}(\.\d{1,2})?$/.test(price)) return bad('Type your price in US dollars, like 450.', f.price);
-      text = (form.dataset.side === 'sell' ? 'Sell ' : 'Buy ') + card + (form.dataset.side === 'sell' ? ' for at least US$' : ' for up to US$') + price;
+      const price = f.price.value.replace(/[\s,$£€]|US|A|C/gi, '');
+      if (!/^\d{1,7}(\.\d{1,2})?$/.test(price)) return bad('Type your price, like 450.', f.price);
+      const sym = P.moneySymbol ? P.moneySymbol() : 'US$';
+      text = (form.dataset.side === 'sell' ? 'Sell ' : 'Buy ') + card + (form.dataset.side === 'sell' ? ' for at least ' : ' for up to ') + sym + price;
     }
     if (M.busy) return;
     form.classList.add('is-done'); qsa('input,select,button', form).forEach(x => { x.disabled = true; });
@@ -4623,7 +4624,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 
   // Order cards the collector can still change before confirming: id -> { side, price, days, ... }.
   const orders = new Map();
-  const usdx = (n) => "US$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
+  const usdx = (n) => localMoney(n);
   const orderRows = (o) =>
     row(o.side === "buy" ? "Buy for up to" : "Sell for at least", usdx(o.price)) +
     (o.market ? row("Market price now", "About " + usdx(o.market)) : "") +
@@ -4720,12 +4721,14 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     const s = p.scale || {}, c = p.card || {}, sold = p.sold;
     const pts = [["Lowest listing", s.low], ["Market price", s.market], ["Mid price", s.mid]].filter((x) => typeof x[1] === "number");
     if (!pts.length && !sold) return "";
-    const usd = (n) => "US$" + n.toLocaleString("en-US", { minimumFractionDigits: n < 100 ? 2 : 0, maximumFractionDigits: n < 100 ? 2 : 0 });
+    // New cards carry prices already in the collector's currency (p.market); older ones are US$.
+    const usd = (n) => localMoney(n, p.market ? { symbol: p.market.symbol, rate: 1 } : MKT);
     const vals = pts.map((x) => x[1]), lo = Math.min(...vals), hi = Math.max(...vals), span = hi - lo || 1;
     const at = (v) => 4 + Math.round(((v - lo) / span) * 92);
     const dot = (x) => '<i style="position:absolute;top:50%;left:' + at(x[1]) + '%;width:' + (x[0] === "Market price" ? 12 : 8) + "px;height:" + (x[0] === "Market price" ? 12 : 8) + 'px;border-radius:50%;transform:translate(-50%,-50%);background:' + (x[0] === "Market price" ? "#674fd0" : "#fff") + ';border:2px solid #674fd0;box-sizing:border-box"></i>';
-    const soldText = (x) => !x ? "No recent sales" : typeof x.value_usd === "number" ? usd(x.value_usd) + (x.status === "thin" ? "<small>few sales</small>" : "") : typeof x.last_sale_usd === "number" ? "<small>Last sale</small>" + usd(x.last_sale_usd) : "No recent sales";
-    const headline = typeof s.market === "number" ? s.market : vals.length ? vals[0] : sold && typeof sold.raw.value_usd === "number" ? sold.raw.value_usd : null;
+    const soldVal = (x) => (x ? (typeof x.value === "number" ? x.value : typeof x.value_usd === "number" ? x.value_usd : null) : null);
+    const soldText = (x) => !x ? "No recent sales" : soldVal(x) !== null ? usd(soldVal(x)) + (x.status === "thin" ? "<small>few sales</small>" : "") : typeof x.last_sale_usd === "number" ? "<small>Last sale</small>" + usd(x.last_sale_usd) : "No recent sales";
+    const headline = typeof s.market === "number" ? s.market : vals.length ? vals[0] : sold && soldVal(sold.raw) !== null ? soldVal(sold.raw) : null;
     return '<div class="cp-val"><div class="cp-val-head"><small>Mori market check</small><b>' +
       esc((c.name || "") + (c.number ? " " + c.number : "")) + (headline !== null ? " · " + usd(headline) : "") + "</b><span>" + esc([c.set, c.rarity].filter(Boolean).join(" · ")) + "</span></div>" +
       (pts.length ? '<small style="display:block;margin:9px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Raw, ungraded · today</small>' +
@@ -5403,6 +5406,36 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   };
   setTimeout(() => P.binderNamesAsync().catch(() => {}), 1500);
 
+  /* ---------------- The collector's market: country, currency, eBay site ---------------- */
+  const COUNTRY_NAMES = { "united states": "US", "united states of america": "US", usa: "US", "united kingdom": "GB", uk: "GB", england: "GB", scotland: "GB", wales: "GB", germany: "DE", france: "FR", italy: "IT", spain: "ES", canada: "CA", australia: "AU" };
+  const TZ_COUNTRY = [[/^Australia\//, "AU"], [/^Europe\/London$/, "GB"], [/^Europe\/(Berlin|Busingen)$/, "DE"], [/^Europe\/Paris$/, "FR"], [/^Europe\/Rome$/, "IT"], [/^(Europe\/Madrid|Atlantic\/Canary|Africa\/Ceuta)$/, "ES"],
+    [/^America\/(Toronto|Vancouver|Edmonton|Winnipeg|Halifax|St_Johns|Regina|Montreal|Moncton|Whitehorse|Yellowknife|Iqaluit)$/, "CA"], [/^(America\/|Pacific\/Honolulu)/, "US"]];
+  function myCountry() {
+    const loc = getLoc && getLoc();
+    const last = loc && String(loc.place).split(",").pop().trim().toLowerCase();
+    if (last && COUNTRY_NAMES[last]) return COUNTRY_NAMES[last];
+    let tz = ""; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch {}
+    const hit = TZ_COUNTRY.find(([re]) => re.test(tz));
+    return hit ? hit[1] : "US";
+  }
+  let MKT = { country: "US", currency: "USD", symbol: "US$", ebay: "ebay.com", rate: 1 };
+  async function loadMarket() {
+    const c = myCountry();
+    if (c === MKT.country && MKT.rate) return MKT;
+    try { const r = await fetch("/api/fx?country=" + c); if (r.ok) MKT = await r.json(); } catch {}
+    return MKT;
+  }
+  loadMarket();
+  // Money in the collector's currency from a US$ amount (A$1,234 or A$12.50).
+  const localMoney = (usdAmount, m) => {
+    m = m || MKT;
+    const v = Math.round(Number(usdAmount || 0) * (m.rate || 1) * 100) / 100;
+    const cents = v < 100 && v % 1 !== 0;
+    return m.symbol + v.toLocaleString("en-US", { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 });
+  };
+  P.moneySymbol = () => MKT.symbol;
+  P.usdRate = () => MKT.rate || 1;
+
   /* ---------------- Sidebar tabs with the collector's own data (Muse-style) ---------------- */
   // The prototype draws the sidebar and sample panels; signed in, each tab shows real data.
   const PM = (P.moriPanelLive = P.moriPanelLive || {});
@@ -5609,7 +5642,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   /* ---------------- Trade-up game (two collectors in person, fair odds) ---------------- */
   // Each side's chance is its share of the combined value. Both phones lock in with a hash of a
   // secret and reveal it after; the server draws from both secrets, so nobody can steer the result.
-  const usdT = (n) => { const v = Math.round(Number(n || 0) * 100) / 100; return "US$" + v.toLocaleString("en-US", { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 }); };
+  const usdT = (n) => { const m = MKT, v = Math.round(Number(n || 0) * (m.rate || 1) * 100) / 100; return m.symbol + v.toLocaleString("en-US", { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 }); };
   const pctT = (x) => (Math.round(x * 1000) / 10).toFixed(1) + "%";
   async function tradeupCall(body) {
     await fresh();
@@ -5811,6 +5844,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       if (!place) return true; // waiting for the collector to allow location or type a city
       loc = { place };
     }
+    loadMarket();
     const run = new AbortController(); liveRun = run;
     const sendBtn = app.querySelector("[data-mori-send]"), sendHTML = sendBtn && sendBtn.innerHTML;
     if (sendBtn) { sendBtn.innerHTML = STOP_ICON; sendBtn.setAttribute("aria-label", "Stop Mori"); sendBtn.classList.add("is-stop"); }
@@ -5822,7 +5856,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
         signal: run.signal,
-        body: JSON.stringify(Object.assign({ message: text, since: chatSince }, loc ? { location: loc.place } : {}, ui.photos && ui.photos.length ? { photos: ui.photos } : {})),
+        body: JSON.stringify(Object.assign({ message: text, since: chatSince, country: myCountry() }, loc ? { location: loc.place } : {}, ui.photos && ui.photos.length ? { photos: ui.photos } : {})),
       });
       if (!res.ok || !res.body) throw new Error("unavailable");
       const reader = res.body.getReader(), dec = new TextDecoder();
