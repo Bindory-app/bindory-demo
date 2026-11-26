@@ -517,3 +517,14 @@ describe("Trade-up game", () => {
     expect(joinCode()).toMatch(/^\d{6}$/);
   });
 });
+
+describe("Trade-up memory request", () => {
+  it("goes to Mori Memories even though it mentions a trade-up and prices", async () => {
+    const { routeMoriMessage } = await import("@/lib/mori-agents");
+    expect(
+      routeMoriMessage(
+        "Help me save a memory of this trade-up game. I put in Sylveon V 74 (Evolving Skies), Espeon VMAX 65 (Evolving Skies), Lunatone 062 (Crown Zenith) (US$21.25); the other player put in Mega Charizard X ex 125 (Phantasmal Flames) (US$504.71). My chance was 4.0% and they won, so I handed over my cards. Use only these cards: the card I gave is Espeon VMAX 65. Do not attach any other card.",
+      ),
+    ).toBe("memory");
+  });
+});

@@ -185,7 +185,10 @@
         art = P.tradePairHTML(gave, got);
       else if (p.card && cardImg(p.card))
         art = '<div class="cp-mori-ident"><img src="' + esc(cardImg(p.card)) + '" alt=""><div><small>' + esc(p.card.set_name || "") + "</small><b>" + esc(p.card.name) + "</b></div></div>";
-      rows = row("Story", p.story) + row("With", p.with_whom || "Not added", !p.with_whom) + row("Where", p.place || "Not added", !p.place) + row("When", p.date ? niceDate(p.date) : "Not added", !p.date) + (gave && got ? "" : p.card ? row("Card", p.card.name) : "");
+      // Only the card they gave (e.g. a trade-up game they lost).
+      else if (gave && !got)
+        art = '<div class="cp-mori-ident">' + (gave.image ? '<img src="' + esc(gave.image) + '" alt="">' : "") + "<div><small>Card you gave</small><b>" + esc(gave.name) + "</b></div></div>";
+      rows = row("Story", p.story) + row("With", p.with_whom || "Not added", !p.with_whom) + row("Where", p.place || "Not added", !p.place) + row("When", p.date ? niceDate(p.date) : "Not added", !p.date) + (gave && got ? "" : p.card ? row("Card", p.card.name) : gave ? row("Card you gave", gave.name) : "");
     }
     return '<p>Here it is. Nothing is saved until you confirm.</p>' + art +
       '<div class="cp-mori-confirm"><div class="cp-mori-confirm-head">' + head + "</div><ul>" + rows + "</ul>" +
@@ -1106,6 +1109,17 @@
     return '<ul class="bd-game-cards">' + cards.map((c) => "<li>" + (c.image ? '<img src="' + esc(/\/(low|high)\.(webp|png|jpg)$/.test(c.image) ? c.image : c.image + "/low.webp") + '" alt="">' : "<i></i>") +
       "<span><b>" + esc(c.name) + "</b><small>" + esc([c.number, c.set_name].filter(Boolean).join(" · ")) + "</small></span><em>" + usdT(c.usd) + "</em></li>").join("") + "</ul>";
   }
+  // "Save it as a memory" names the game's exact cards and result, so Mori never picks another card.
+  function memoryAsk(g) {
+    const list = (cards) => cards.map((c) => c.name + (c.number ? " " + c.number : "") + (c.set_name ? " (" + c.set_name + ")" : "")).join(", ");
+    const won = g.result && g.result.winner === "you";
+    const topOf = (cards) => cards.slice().sort((a, b) => b.usd - a.usd)[0];
+    const mineTop = topOf(g.me.cards), theirTop = topOf(g.them.cards);
+    return "Help me save a memory of this trade-up game. I put in " + list(g.me.cards) + " (" + usdT(g.me.total) + "); the other player put in " + list(g.them.cards) + " (" + usdT(g.them.total) + "). " +
+      "My chance was " + pctT(g.result ? g.result.your_chance : g.chance.me) + " and " + (won ? "I won, so I took all the cards." : "they won, so I handed over my cards.") + " " +
+      "Use only these cards: the card I gave is " + (mineTop ? mineTop.name + (mineTop.number ? " " + mineTop.number : "") : "my cards") +
+      (won && theirTop ? " and the card I got is " + theirTop.name + (theirTop.number ? " " + theirTop.number : "") : "") + ". Do not attach any other card.";
+  }
   function gameHTML(g) {
     if (g.status === "expired" || g.status === "cancelled") return '<small class="bd-game-kicker">Trade-up game</small><p>This game ' + (g.status === "expired" ? "has expired." : "was cancelled.") + "</p>";
     const both = g.me.cards.length && g.them.cards.length;
@@ -1118,7 +1132,7 @@
       foot = '<p class="bd-game-result ' + (won ? "is-won" : "is-lost") + '">' + (won ? "You won! You take all " + (g.me.cards.length + g.them.cards.length) + " cards." : "They won this one. Hand over your cards.") + "</p>" +
         '<details class="bd-game-proof"><summary>How this was decided</summary><p>Your chance was ' + pctT(g.result.your_chance) + ". The draw " + g.result.draw.toFixed(4) + " came from both phones' secrets: SHA-256 of \"bindory-tradeup:\" + host secret + \":\" + guest secret, first 13 hex digits ÷ 2^52. The host wins below the host's chance.</p>" +
         "<code>host secret " + esc(g.result.proof.host_secret) + "</code><code>guest secret " + esc(g.result.proof.guest_secret) + "</code><p>You were the " + esc(g.result.proof.you_are) + ".</p></details>" +
-        '<div class="cp-mori-chips"><button data-mori-ask="Help me save a memory of this trade-up game">Save it as a memory</button><button data-bd-game-again>Play again</button></div>';
+        '<div class="cp-mori-chips"><button data-mori-ask="' + esc(memoryAsk(g)) + '">Save it as a memory</button><button data-bd-game-again>Play again</button></div>';
     } else if (!g.joined) {
       foot = '<p class="bd-game-wait">Waiting for the other player to join with code <b>' + esc(g.code) + "</b>…</p>";
     } else if (g.me.locked && g.them.locked) {
