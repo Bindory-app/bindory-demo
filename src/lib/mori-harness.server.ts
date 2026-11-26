@@ -310,6 +310,7 @@ export async function priceCardRow(
   cardId: string,
   market: Market,
   fromTool?: Record<string, unknown> | null,
+  condition: import("./ebay-sold.server").Condition = "nm",
 ): Promise<MoriRowDraft | null> {
   const r = await getCardPricing(cardId);
   if (!r) return null;
@@ -326,10 +327,13 @@ export async function priceCardRow(
             { id: r.card.id, name: r.card.name, number: r.card.localId },
             r.pricing,
             market,
+            undefined,
+            condition,
           )
         ).forTool;
   const pts = tool.price_points ?? null;
-  const sold = (tool.recent_sold ?? null) as Record<
+  const soldAll = (tool.recent_sold ?? null) as Record<string, unknown> | null;
+  const sold = soldAll as Record<
     string,
     {
       avg_last_3?: number | null;
@@ -344,8 +348,8 @@ export async function priceCardRow(
     pts?.["market"] ??
     pts?.["mid"] ??
     pts?.["lowest_listing"] ??
-    sold?.["raw_near_mint"]?.avg_last_10 ??
-    sold?.["raw_near_mint"]?.value ??
+    sold?.["raw"]?.avg_last_10 ??
+    sold?.["raw"]?.value ??
     undefined;
   return {
     role: "mori",
@@ -366,7 +370,12 @@ export async function priceCardRow(
         ? { scale: { low: pts["lowest_listing"], market: pts["market"], mid: pts["mid"] } }
         : {}),
       ...(sold
-        ? { sold: { raw: sold["raw_near_mint"], psa9: sold["psa_9"], psa10: sold["psa_10"] } }
+        ? {
+            sold: {
+              raw: sold["raw"],
+              condition: typeof soldAll?.["condition"] === "string" ? soldAll["condition"] : null,
+            },
+          }
         : {}),
     } as Json,
   };
@@ -489,6 +498,7 @@ export async function runMoriHarness(
     let lastCard = "";
     let lastPricedId = "";
     let lastPricedOutput: Record<string, unknown> | null = null;
+    let lastPricedCondition: import("./ebay-sold.server").Condition = "nm";
     const pricedIds = new Set<string>();
     for (const c of await toolCalls(r, sessionId)) {
       const result = toolResult(c.output);
@@ -510,6 +520,8 @@ export async function runMoriHarness(
         if (typeof card["id"] === "string") {
           lastPricedId = card["id"];
           lastPricedOutput = asObject(result);
+          const { toCondition } = await import("./ebay-sold.server");
+          lastPricedCondition = toCondition(asObject(parseJson(c.args))["condition"]) ?? "nm";
           pricedIds.add(card["id"]);
         }
       }
@@ -530,7 +542,12 @@ export async function runMoriHarness(
     const singlePriceCheck =
       pricedIds.size === 1 && !rows.some((row) => row.kind !== "status") && Boolean(lastPricedId);
     if (singlePriceCheck) {
-      const row = await priceCardRow(lastPricedId, market, lastPricedOutput).catch(() => null);
+      const row = await priceCardRow(
+        lastPricedId,
+        market,
+        lastPricedOutput,
+        lastPricedCondition,
+      ).catch(() => null);
       if (row) {
         rows.push(row);
         cardsOnly = true;

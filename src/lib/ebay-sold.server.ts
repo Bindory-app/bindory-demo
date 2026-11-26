@@ -11,6 +11,10 @@
  * non-English printings and titles without the card number are left out, and so are sales far
  * below the rest (under 35% of the median, e.g. a custom or metal card that slipped through).
  * Result: the average of the newest 3 raw sales and of the newest 10.
+ *
+ * Condition: the collector picks near mint or better, lightly, moderately or heavily played. The
+ * search uses eBay's own "Card Condition" filter for ungraded cards, and titles that name a
+ * different condition (e.g. "LP" in a near mint search) are left out too.
  */
 import { MARKETS, type Market } from "./market";
 
@@ -26,8 +30,43 @@ export type SoldStat = {
   n: number;
   status: "ok" | "thin" | "none";
 };
+/** Raw card conditions, with eBay's "Card Condition" filter value for each. */
+export const CONDITIONS = {
+  nm: { label: "Near mint or better", ebay: "Near Mint or Better" },
+  lp: { label: "Lightly played", ebay: "Lightly Played (Excellent)" },
+  mp: { label: "Moderately played", ebay: "Moderately Played (Very Good)" },
+  hp: { label: "Heavily played", ebay: "Heavily Played (Poor)" },
+} as const;
+export type Condition = keyof typeof CONDITIONS;
+
+/** "LP", "lightly played", "heavily_played" and the like into a condition; null if unknown. */
+export function toCondition(v: unknown): Condition | null {
+  const t = String(v ?? "")
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .trim();
+  if (!t) return null;
+  if (/^(nm|m|mint|near mint( or better)?|nm or better|nm\/m)$/.test(t)) return "nm";
+  if (/^(lp|ex|excellent|light(ly)? played)$/.test(t) || /lightly played/.test(t)) return "lp";
+  if (/^(mp|vg|very good|moderate(ly)? played)$/.test(t) || /moderately played/.test(t))
+    return "mp";
+  if (/^(hp|poor|dmg|damaged|heav(il)?y played)$/.test(t) || /heavily played/.test(t)) return "hp";
+  return /near mint/.test(t) ? "nm" : null;
+}
+
+/** The condition a title names, if any (e.g. "LP Umbreon ex" is lightly played). */
+export function titleCondition(title: string): Condition | null {
+  const t = ` ${title} `;
+  if (/\b(heavily\s*played|heavy\s*play|damaged|dmg|creased?)\b/i.test(t)) return "hp";
+  if (/\b(moderately\s*played|MP)\b/.test(t) || /\bmoderately\s*played\b/i.test(t)) return "mp";
+  if (/\b(lightly\s*played|LP)\b/.test(t) || /\blightly\s*played\b/i.test(t)) return "lp";
+  if (/\b(near\s*mint|NM|mint)\b/i.test(t)) return "nm";
+  return null;
+}
+
 export type LocalSold = {
   currency: string;
+  condition: Condition;
   site: string;
   raw: SoldStat;
   psa9: SoldStat;
@@ -79,7 +118,12 @@ export function stat(newestFirst: number[]): SoldStat {
   };
 }
 
-export function summarise(sales: Sale[], number: string, market: Market): LocalSold {
+export function summarise(
+  sales: Sale[],
+  number: string,
+  market: Market,
+  condition: Condition = "nm",
+): LocalSold {
   const buckets: Record<"raw" | "psa9" | "psa10", number[]> = { raw: [], psa9: [], psa10: [] };
   const seen = new Set<string>();
   const newest = [...sales].sort((a, b) =>
@@ -91,7 +135,11 @@ export function summarise(sales: Sale[], number: string, market: Market): LocalS
     const key = `${s.title}|${price}|${s.endedAt}`;
     if (seen.has(key)) continue; // the same sale can come back from more than one search
     seen.add(key);
-    const k = classifySale(String(s.title ?? ""), number);
+    const title = String(s.title ?? "");
+    // A title that names another condition is not this condition's sale.
+    const named = titleCondition(title);
+    if (named && named !== condition) continue;
+    const k = classifySale(title, number);
     if (k) buckets[k].push(price);
   }
   // Leave out sales far below the rest (customs, metal cards and other look-alikes).
@@ -102,6 +150,7 @@ export function summarise(sales: Sale[], number: string, market: Market): LocalS
   }
   return {
     currency: market.currency,
+    condition,
     site: market.ebay,
     raw: stat(buckets.raw),
     psa9: stat(buckets.psa9),
@@ -126,9 +175,13 @@ export const EXCLUDE = [
   "japanese",
 ];
 
-/** The actor's input for one card: one search for the 10 newest raw (ungraded) sales on the
- *  collector's eBay site, in eBay's trading-card singles category. */
-export function actorInput(card: { name: string; number: string }, market: Market) {
+/** The actor's input for one card: one search for the 10 newest raw (ungraded) sales in one
+ *  condition on the collector's eBay site, in eBay's trading-card singles category. */
+export function actorInput(
+  card: { name: string; number: string },
+  market: Market,
+  condition: Condition = "nm",
+) {
   const base = `${card.name} ${card.number.replace(/^0+(?=\d)/, "")}`;
   return {
     keywords: [`${base} ${EXCLUDE.map((w) => `-${w}`).join(" ")}`],
@@ -138,6 +191,7 @@ export function actorInput(card: { name: string; number: string }, market: Marke
     count: 10,
     daysToScrape: 30,
     sortOrder: "endedRecently",
+    aspectFilter: { "Card Condition": CONDITIONS[condition].ebay },
   };
 }
 
@@ -145,10 +199,11 @@ export function actorInput(card: { name: string; number: string }, market: Marke
 export async function localSoldPrices(
   card: { id: string; name: string; number: string },
   market: Market = MARKETS["US"]!,
+  condition: Condition = "nm",
 ): Promise<LocalSold | null> {
   const token = process.env["APIFY_TOKEN"]?.trim();
   if (!token) return null;
-  const key = `${card.id}@${market.ebay}`;
+  const key = `${card.id}@${market.ebay}#${condition}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL) return hit.value;
   let value: LocalSold | null = null;
@@ -158,13 +213,13 @@ export async function localSoldPrices(
       {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(actorInput(card, market)),
+        body: JSON.stringify(actorInput(card, market, condition)),
         signal: AbortSignal.timeout(100_000),
       },
     );
     if (res.ok) {
       const items = (await res.json()) as Sale[];
-      if (Array.isArray(items)) value = summarise(items, card.number, market);
+      if (Array.isArray(items)) value = summarise(items, card.number, market, condition);
     } else console.error("Apify sold prices failed", res.status);
   } catch (e) {
     console.error("Apify sold prices failed", e instanceof Error ? e.message : e);

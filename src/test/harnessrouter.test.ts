@@ -651,6 +651,42 @@ describe("Last 3 and last 10 sold averages", () => {
       categoryId: "183454",
       conditionId: 4000,
       count: 10,
+      aspectFilter: { "Card Condition": "Near Mint or Better" },
+    });
+    expect(
+      actorInput({ name: "Umbreon ex", number: "161" }, MARKETS["AU"]!, "lp").aspectFilter,
+    ).toEqual({ "Card Condition": "Lightly Played (Excellent)" });
+  });
+  it("reads the collector's condition and keeps only that condition's sales", async () => {
+    const { toCondition, titleCondition, summarise } = await import("@/lib/ebay-sold.server");
+    const { MARKETS } = await import("@/lib/market");
+    expect(toCondition("lightly_played")).toBe("lp");
+    expect(toCondition("LP")).toBe("lp");
+    expect(toCondition("Near mint or better")).toBe("nm");
+    expect(toCondition("heavily_played")).toBe("hp");
+    expect(toCondition("moderately played")).toBe("mp");
+    expect(toCondition("whatever")).toBeNull();
+    expect(titleCondition("LP Umbreon EX 161/131")).toBe("lp");
+    expect(titleCondition("Umbreon ex 161/131 NM Near Mint SIR")).toBe("nm");
+    expect(titleCondition("Umbreon ex 161/131 Prismatic Evolutions")).toBeNull();
+    const sale = (p: string, d: string, t: string) => ({
+      title: t,
+      soldPrice: p,
+      soldCurrency: "AUD",
+      endedAt: d,
+    });
+    const sales = [
+      sale("1500", "2026-11-26", "Umbreon ex 161/131 Prismatic"),
+      sale("1300", "2026-11-25", "LP Umbreon ex 161/131"),
+      sale("1700", "2026-11-24", "Umbreon ex 161/131 NM"),
+    ];
+    expect(summarise(sales, "161", MARKETS["AU"]!, "lp").raw).toMatchObject({
+      n: 2,
+      avg_last_10: 1400,
+    });
+    expect(summarise(sales, "161", MARKETS["AU"]!, "nm").raw).toMatchObject({
+      n: 2,
+      avg_last_10: 1600,
     });
   });
   it("leaves out sales far below the rest, like a custom or metal card", async () => {

@@ -108,8 +108,12 @@ export function routeMoriMessage(message: string, hasPhotos = false): MoriAgent 
     )
   )
     return "ask";
-  // Just a card name and its number (e.g. "Mega Charizard X ex 125/094") is a price check.
-  if (/^[\p{L}\p{N}'’.:&\- ]{2,60}\s#?[A-Z]{0,3}\d{1,4}\/[A-Z]{0,3}\d{1,4}$/iu.test(m))
+  // Just a card name and its number (e.g. "Mega Charizard X ex 125/094", maybe "LP") is a price check.
+  if (
+    /^[\p{L}\p{N}'’.:&\- ]{2,60}\s#?[A-Z]{0,3}\d{1,4}\/[A-Z]{0,3}\d{1,4}(\s*,?\s*(NM|LP|MP|HP|near mint( or better)?|(lightly|moderately|heavily) played))?$/iu.test(
+      m,
+    )
+  )
     return "price";
   if (hasPhotos) return "price";
   return null;

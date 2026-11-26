@@ -1649,6 +1649,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 #clickable-prototype .cp-fill-slot.is-name{width:104px}
 #clickable-prototype .cp-fill-slot.is-num{width:52px}
 #clickable-prototype .cp-fill-slot.is-binder{width:auto;max-width:130px;appearance:auto}
+#clickable-prototype .cp-fill-slot.is-cond{width:auto;appearance:auto}
 #clickable-prototype .cp-fill-slash{margin:0 3px;color:var(--mori-muted);font-weight:700}
 #clickable-prototype .cp-fill-tabs{display:flex;gap:6px}
 #clickable-prototype .cp-fill-tabs button{font:inherit;font-size:9.5px;font-weight:800;border:1px solid #dad5ff;background:#fff;color:var(--mori-muted);border-radius:99px;padding:4px 11px;cursor:pointer}
@@ -1661,7 +1662,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 #clickable-prototype .cp-fill{gap:7px}
 #clickable-prototype .cp-fill-row{display:flex;align-items:center;gap:5px;flex-wrap:nowrap;font-size:10.5px;color:var(--mori-ink);white-space:nowrap}
 #clickable-prototype .cp-fill-row .cp-fill-slot{margin:0;min-width:0}
-#clickable-prototype .cp-fill-row .cp-fill-slot.is-name,#clickable-prototype .cp-fill-row .cp-fill-slot.is-binder,#clickable-prototype .cp-fill-row .cp-fill-slot.is-price{flex:1 1 auto;width:auto;max-width:none}
+#clickable-prototype .cp-fill-row .cp-fill-slot.is-name,#clickable-prototype .cp-fill-row .cp-fill-slot.is-binder,#clickable-prototype .cp-fill-row .cp-fill-slot.is-cond,#clickable-prototype .cp-fill-row .cp-fill-slot.is-price{flex:1 1 auto;width:auto;max-width:none}
 #clickable-prototype .cp-fill-row .cp-fill-slot.is-num{flex:0 0 58px;width:58px;padding-left:6px;padding-right:6px}
 #clickable-prototype .cp-fill-row .cp-fill-slash{margin:0}
 #clickable-prototype .cp-fill-row .cp-fill-go{margin-left:auto;flex:none;padding:7px 12px}
@@ -1675,7 +1676,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 #clickable-prototype .cp-mori-body{min-width:0}
 #clickable-prototype .cp-fill{min-width:0;max-width:100%;box-sizing:border-box}
 #clickable-prototype .cp-fill-row{min-width:0;max-width:100%}
-#clickable-prototype .cp-fill-row .cp-fill-slot.is-name,#clickable-prototype .cp-fill-row .cp-fill-slot.is-binder,#clickable-prototype .cp-fill-row .cp-fill-slot.is-price{flex:1 1 0;width:0;min-width:0}
+#clickable-prototype .cp-fill-row .cp-fill-slot.is-name,#clickable-prototype .cp-fill-row .cp-fill-slot.is-binder,#clickable-prototype .cp-fill-row .cp-fill-slot.is-cond,#clickable-prototype .cp-fill-row .cp-fill-slot.is-price{flex:1 1 0;width:0;min-width:0}
 #clickable-prototype .cp-fill-row .cp-fill-slot.is-num{flex:0 1 54px;width:54px;min-width:38px}
 </style>
 <section id="clickable-prototype" aria-label="Clickable Bindory prototype">
@@ -3170,7 +3171,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   /* Price check, pre-grade and add a card all start the same way: fill in the card, or send photos.
      Nothing is pre-typed in the chat box: a fill-in box (like the memory card) sits above the photo buttons. */
   const CARD_START = {
-    price: { ask: 'Which card should I price? Fill in the <b>card name and number</b>, or take a photo of the front and I will identify it.' },
+    price: { ask: 'Which card should I price? Fill in the <b>card name, number and condition</b>, or take a photo of the front and I will identify it.' },
     grade: { ask: 'Send me photos of the <b>front and back</b> of your card, on a dark, flat background, and I will pre-grade it.' },
     add: { ask: 'Which card are you adding? Fill in the <b>card name and number</b> and pick a binder, or take a photo and I will identify it.' }
   };
@@ -3182,9 +3183,14 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   /* Short layouts: price check in 2 lines (name; number / set + button), add and orders in 3. */
   const numSlots = () => fillSlot('num', 'number', 'is-num', ' inputmode="numeric" maxlength="7"') + '<span class="cp-fill-slash">/</span>' + fillSlot('of', 'set size', 'is-num', ' inputmode="numeric" maxlength="7"');
   const nameSlot = () => fillSlot('name', 'card name', 'is-name', ' autocapitalize="words" maxlength="60"');
+  /* Raw card condition: recent sales are shown for this condition only. */
+  const CONDITIONS = ['Near mint or better', 'Lightly played', 'Moderately played', 'Heavily played'];
+  const conditionSelect = () => '<select class="cp-fill-slot is-cond" name="condition" aria-label="Condition">' +
+    CONDITIONS.map((c, i) => '<option' + (i ? '' : ' selected') + '>' + c + '</option>').join('') + '</select>';
   function fillForm(kind, side = 'buy') {
     if (kind === 'price') return '<form class="cp-fill" data-fill="price" novalidate>' +
       '<div class="cp-fill-row"><span>Price check</span>' + nameSlot() + '</div>' +
+      '<div class="cp-fill-row"><span>Condition</span>' + conditionSelect() + '</div>' +
       '<div class="cp-fill-row">' + numSlots() + '<button type="submit" class="cp-fill-go">Check price</button></div>' +
       '<p class="cp-fill-err" hidden></p></form>';
     if (kind === 'add') return '<form class="cp-fill" data-fill="add" novalidate>' +
@@ -3231,7 +3237,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     if (!num || !partOk(num) || (of && !partOk(of))) return bad('Type the card number, like 125, or 125 / 094.', f.num);
     const card = name + ' ' + num + (of ? '/' + of : '');
     let text = '';
-    if (kind === 'price') text = 'Price check: ' + card;
+    if (kind === 'price') text = 'Price check: ' + card + ', ' + (CONDITIONS.includes(f.condition.value) ? f.condition.value : CONDITIONS[0]);
     if (kind === 'add') {
       const isNew = f.binder.value === '__new', b = isNew ? f.newbinder.value.trim().replace(/["“”]/g, '') : f.binder.value;
       if (!f.binder.value) return bad('Pick a binder, or make a new one.', f.binder);
@@ -4737,8 +4743,9 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       (sold ? '<small style="display:block;margin:4px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Recent sales</small>' +
         (sold.raw && ("avg_last_3" in sold.raw || "avg_last_10" in sold.raw)
           // Average of the last 3 and last 10 sales for each grade.
-          ? '<table class="bd-sold"><thead><tr><th></th><th>Last 3 sold</th><th>Last 10 sold</th></tr></thead><tbody>' +
-            [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]].filter(([, x]) => x).map(([label, x]) => {
+          ? '<table class="bd-sold"><thead><tr><th>' + (sold.condition ? "Condition" : "") + '</th><th>Last 3 sold</th><th>Last 10 sold</th></tr></thead><tbody>' +
+            // One row per condition: the one the collector picked (older cards: raw NM and graded).
+            (sold.condition ? [[esc(sold.condition), sold.raw]] : [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]]).filter(([, x]) => x).map(([label, x]) => {
               const has = x && typeof x.avg_last_10 === "number";
               const n = x && x.sales ? x.sales : 0;
               return "<tr><th>" + label + "</th>" + (has

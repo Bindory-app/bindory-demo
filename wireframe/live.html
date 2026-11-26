@@ -217,8 +217,9 @@
       (sold ? '<small style="display:block;margin:4px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Recent sales</small>' +
         (sold.raw && ("avg_last_3" in sold.raw || "avg_last_10" in sold.raw)
           // Average of the last 3 and last 10 sales for each grade.
-          ? '<table class="bd-sold"><thead><tr><th></th><th>Last 3 sold</th><th>Last 10 sold</th></tr></thead><tbody>' +
-            [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]].filter(([, x]) => x).map(([label, x]) => {
+          ? '<table class="bd-sold"><thead><tr><th>' + (sold.condition ? "Condition" : "") + '</th><th>Last 3 sold</th><th>Last 10 sold</th></tr></thead><tbody>' +
+            // One row per condition: the one the collector picked (older cards: raw NM and graded).
+            (sold.condition ? [[esc(sold.condition), sold.raw]] : [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]]).filter(([, x]) => x).map(([label, x]) => {
               const has = x && typeof x.avg_last_10 === "number";
               const n = x && x.sales ? x.sales : 0;
               return "<tr><th>" + label + "</th>" + (has
