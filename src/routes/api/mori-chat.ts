@@ -58,6 +58,13 @@ export const Route = createFileRoute("/api/mori-chat")({
         }
         if (!ownMessagePhotos(message, userId, "photo_path" in body ? body.photo_path : undefined))
           return new Response("Photo must belong to you", { status: 403 });
+        // Where the collector is (a place name their phone gave), for "near me" questions.
+        const location =
+          "location" in body &&
+          typeof body.location === "string" &&
+          /^[\p{L}\p{N} ,.'’()-]{2,100}$/u.test(body.location.trim())
+            ? body.location.trim()
+            : undefined;
         const encoder = new TextEncoder();
         const abort = new AbortController();
         request.signal.addEventListener("abort", () => abort.abort(), { once: true });
@@ -81,6 +88,7 @@ export const Route = createFileRoute("/api/mori-chat")({
               images,
               since,
               token.slice(7),
+              location,
             )
               .catch((error) => {
                 console.error(

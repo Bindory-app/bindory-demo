@@ -347,6 +347,7 @@ export async function runMoriHarness(
   since: string | undefined,
   askedAt: number,
   signal?: AbortSignal,
+  location?: string,
 ) {
   const rows: MoriRowDraft[] = [];
   let finalText = "";
@@ -374,6 +375,9 @@ export async function runMoriHarness(
     const run = async (agent: MoriAgent, handoff: string) => {
       const prior = sessions.find((x) => x.agent === agent);
       const notes =
+        (location
+          ? `[App note: the collector's location, from their phone: ${location}. Use it for anything near them (card shows, events, stores); never assume another city.]\n`
+          : "") +
         (prior ? await cardOutcomes(db, prior.at) : "") +
         (current && current.agent !== agent ? await handoffNote(db, since, askedAt) : "") +
         handoff;

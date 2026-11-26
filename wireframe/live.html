@@ -98,7 +98,7 @@
 
   /* ---------------- Ask Mori ---------------- */
   // Mori's text may use **bold** and [label](link); show it as plain wireframe text.
-  const fmt = (t) => esc(t).replace(/(^|\n)[ \t]*[*-][ \t]+/g, "$1• ").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/(^|[^*\w])\*([^*\n]+?)\*(?!\*)/g, "$1$2").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/\n+/g, "<br>");
+  const fmt = (t) => esc(t).replace(/(^|\n)[ \t]*[*-][ \t]+/g, "$1• ").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/(^|[^*\w])\*([^*\n]+?)\*(?!\*)/g, "$1$2").replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>').replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/\n+/g, "<br>");
   const row = (k, v, muted) => "<li><small>" + esc(k) + "</small><b" + (muted ? ' class="is-muted"' : "") + ">" + esc(v) + "</b></li>";
   const cardImg = (c) => (c && /^https:\/\/assets\.tcgdex\.net\//.test(c.image || "") ? c.image : "");
 
@@ -680,6 +680,7 @@
       ".bd-slot input{font:inherit;font-size:16px;font-weight:400;padding:12px 14px;border:1px solid #d9d4f5;border-radius:12px;width:100%;box-sizing:border-box;color:#1f2340}" +
       ".bd-slot .bd-num,.bd-slot .bd-price{display:flex;align-items:center;gap:8px}.bd-slot .bd-price b{font-size:16px;color:#4a4f6e}.bd-slot .bd-num b{font-size:20px;color:#6b7090}.bd-slot-err{color:#c0392b;font-size:14px;margin:0}" +
       ".bd-slot button[type=submit]{background:#5b4bd6;color:#fff;border-color:#5b4bd6}" +
+      ".cp-mori-body a{color:#5b4bd6;font-weight:700;text-decoration:underline}" +
       ".bd-sync small{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#5b4bd6}.bd-sync-status{display:flex;align-items:center;gap:8px;color:#4a4f6e;margin:6px 0}" +
       ".bd-spin{width:14px;height:14px;border-radius:50%;border:2px solid #d9d4f5;border-top-color:#5b4bd6;display:inline-block;animation:bdspin .8s linear infinite;flex:none}@keyframes bdspin{to{transform:rotate(360deg)}}" +
       ".bd-sync-result h4{margin:12px 0 4px;font-size:14px}.bd-sync-result p{margin:4px 0}.bd-md-table{overflow-x:auto;margin:6px 0}.bd-md-table table{border-collapse:collapse;font-size:12px;min-width:100%}" +
@@ -688,6 +689,85 @@
       "@media (pointer:fine){.bd-photo-sheet{align-items:center}.bd-photo-sheet>div,.bd-slot form{border-radius:22px}}";
     document.head.append(css);
   }
+
+  // Location for "near me" questions (card shows, events, stores). The first time, the phone's own
+  // location prompt appears; the place name ("Sydney, New South Wales, Australia") is kept on this
+  // device for 30 days and sent with each question. Coordinates are rounded and never stored.
+  const NEEDS_LOC = /near me|nearby|around me|close to me|in my (area|city|town)|\blocal (card )?(shops?|stores?|events?)|card shows?|conventions?|meet-?ups?|tournaments?/i;
+  const LOC_KEY = "bd_location";
+  const getLoc = () => { try { const v = JSON.parse(localStorage.getItem(LOC_KEY) || "null"); return v && v.place && Date.now() - v.at < 30 * 864e5 ? v : null; } catch { return null; } };
+  const setLoc = (place) => { try { localStorage.setItem(LOC_KEY, JSON.stringify({ place, at: Date.now() })); } catch {} };
+  let pendingLocQ = "";
+  const LOC_HELP = /iPhone|iPad|iPod/.test(navigator.userAgent)
+    ? "On your iPhone: Settings, then Privacy &amp; Security, then Location Services: turn it on and set your browser (Safari Websites or Chrome) to <b>While Using the App</b>. In Safari you can also tap <b>aA</b>, then Website Settings, then Location: <b>Allow</b>."
+    : /Android/.test(navigator.userAgent)
+      ? "On your Android phone: tap the icon next to the web address, then Permissions, then Location: <b>Allow</b>. Also check that Location is on in your phone's quick settings."
+      : "Click the icon next to the web address, then Location: <b>Allow</b>.";
+  function phonePosition() {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) return resolve({ error: "unsupported" });
+      navigator.geolocation.getCurrentPosition(
+        (p) => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+        (e) => resolve({ error: e.code === 1 ? "denied" : "unavailable" }),
+        { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 },
+      );
+    });
+  }
+  async function askLocation(ui, question) {
+    const bubble = ui.say("<p>To find what is near you, I need your location. Your phone will ask: tap <b>Allow</b>.</p>");
+    const body = bubble.querySelector(".cp-mori-body") || bubble;
+    ui.scrollDown();
+    const pos = await phonePosition();
+    if (!pos.error) {
+      try {
+        const res = await fetch("/api/mori-locate", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token }, body: JSON.stringify({ lat: Math.round(pos.lat * 100) / 100, lon: Math.round(pos.lon * 100) / 100 }) });
+        if (res.ok) {
+          const { place } = await res.json();
+          setLoc(place);
+          body.innerHTML = "<p>Got it, you are near <b>" + esc(place) + "</b>.</p>" + '<div class="cp-mori-chips"><button data-bd-loc-city>Change my location</button></div>';
+          return place;
+        }
+      } catch {}
+    }
+    pendingLocQ = question;
+    body.innerHTML = (pos.error === "denied"
+      ? "<p>Location is turned off for this site, so I can't see where you are yet.</p><p class=\"cp-mori-sample\">" + LOC_HELP + "</p>"
+      : "<p>I couldn't get your location just now.</p>") +
+      '<div class="cp-mori-chips"><button data-bd-loc-retry>Try again</button><button data-bd-loc-city>Type my city</button></div>';
+    ui.scrollDown();
+    return null;
+  }
+  function resendPending() {
+    const inp = app.querySelector("[data-mori-input]"), form = inp && inp.closest("form");
+    if (!pendingLocQ || !inp) return;
+    inp.value = pendingLocQ; pendingLocQ = "";
+    if (form && form.requestSubmit) form.requestSubmit();
+  }
+  function cityPopup() {
+    if (document.querySelector(".bd-slot")) return;
+    const box = document.createElement("div");
+    box.className = "bd-photo-sheet bd-slot";
+    box.innerHTML = '<form novalidate><p><b>Where are you?</b></p><label>Your city<input name="city" autocomplete="address-level2" autocapitalize="words" placeholder="e.g. Sydney, Australia" maxlength="80"></label>' +
+      '<p class="bd-slot-err" hidden></p><button type="submit">Save</button><button type="button" data-back-skip>Cancel</button></form>';
+    document.body.append(box);
+    const f = box.querySelector("form"), err = box.querySelector(".bd-slot-err");
+    setTimeout(() => f.elements.city.focus(), 30);
+    box.addEventListener("click", (e) => { if (e.target === box || e.target.closest("[data-back-skip]")) box.remove(); });
+    f.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const v = f.elements.city.value.trim().replace(/\s+/g, " ");
+      if (!/^[\p{L}\p{N} ,.'’()-]{2,80}$/u.test(v)) { err.textContent = "Type your city, like Sydney, Australia."; err.hidden = false; return; }
+      setLoc(v); box.remove(); P.toast("Location set to " + v);
+      resendPending();
+    });
+  }
+  app.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest("[data-bd-loc-retry],[data-bd-loc-city]");
+    if (!b || !app.contains(b)) return;
+    e.stopPropagation();
+    if ("bdLocRetry" in b.dataset) { b.closest(".cp-mori-chips")?.remove(); resendPending(); }
+    else cityPopup();
+  });
 
   // Called from the wireframe's own route() (patched at build time) for typed and tapped messages.
   window.bdLiveRoute = async (text, ui) => {
@@ -699,6 +779,13 @@
       ui = Object.assign({}, ui, { photos: [shot] });
     }
     if (!(await fresh())) return false; // guests keep the wireframe's scripted Mori
+    // "Near me" questions need the collector's location first (the phone asks once).
+    let loc = getLoc();
+    if (!loc && NEEDS_LOC.test(text)) {
+      const place = await askLocation(ui, text);
+      if (!place) return true; // waiting for the collector to allow location or type a city
+      loc = { place };
+    }
     const run = new AbortController(); liveRun = run;
     const sendBtn = app.querySelector("[data-mori-send]"), sendHTML = sendBtn && sendBtn.innerHTML;
     if (sendBtn) { sendBtn.innerHTML = STOP_ICON; sendBtn.setAttribute("aria-label", "Stop Mori"); sendBtn.classList.add("is-stop"); }
@@ -710,7 +797,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
         signal: run.signal,
-        body: JSON.stringify(Object.assign({ message: text, since: chatSince }, ui.photos && ui.photos.length ? { photos: ui.photos } : {})),
+        body: JSON.stringify(Object.assign({ message: text, since: chatSince }, loc ? { location: loc.place } : {}, ui.photos && ui.photos.length ? { photos: ui.photos } : {})),
       });
       if (!res.ok || !res.body) throw new Error("unavailable");
       const reader = res.body.getReader(), dec = new TextDecoder();
