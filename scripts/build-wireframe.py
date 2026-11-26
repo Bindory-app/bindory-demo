@@ -29,30 +29,6 @@ for name in ("app-mode.html", "live.html"):
 
 html = html.replace("<title>Bindory</title>", "<title>Bindory · Ask Mori</title>", 1)
 
-# Sell orders ask for the card's front and back photos: the wireframe's photo step gets a "sell" message.
-PHOTO_SAYS = "const PHOTO_SAYS = { price: 'Here are photos of the front and back. What is this card worth?', grade: 'Here are photos of the front and back. Can you pre-grade this card?', add: 'Here are photos of the front and back. Please add this card to my collection.' };"
-assert html.count(PHOTO_SAYS) == 1, "wireframe PHOTO_SAYS not found: update the hook in build-wireframe.py"
-# Price checks and adding a card need only the front (every Pokemon card back is the same).
-html = html.replace(PHOTO_SAYS, "const PHOTO_SAYS = { price: 'Here is a photo of my card. What is this card worth?', grade: 'Here are photos of the front and back. Can you pre-grade this card?', add: 'Please add this card to my collection. Here is a photo of it.', sell: 'Here are photos of the front and back for my sell order.' };", 1)
-# The fill-in pop-up replaces the "For example: ..." lines (price check, add card, buy or sell order).
-EXAMPLE = "(k.example ? '<p class=\"cp-mori-sample\">For example: ' + esc(k.example) + '</p>' : '') +"
-assert html.count(EXAMPLE) == 1, "wireframe example line not found: update the hook in build-wireframe.py"
-html = html.replace(EXAMPLE, "", 1)
-ORDER_EXAMPLE = "      '<p class=\"cp-mori-sample\">For example: Buy Umbreon VMAX 215/203 for up to US$450</p>' +\n"
-assert html.count(ORDER_EXAMPLE) == 1, "wireframe order example not found: update the hook in build-wireframe.py"
-html = html.replace(ORDER_EXAMPLE, "", 1)
-# Adding a card names the binder it goes in (the pop-up lists your binders or makes a new one),
-# and offers "Sync from Collectr" next to the photo buttons.
-ADD_TPL = "template: 'Add [card name] [card number] to my collection'"
-assert html.count(ADD_TPL) == 1, "wireframe add template not found: update the hook in build-wireframe.py"
-html = html.replace(ADD_TPL, "template: 'Add [card name] [card number] to my collection, in the binder \"[binder]\"'", 1)
-START_CHIPS = "chips([['Take a photo', act('card-photo', kind)], ['Upload from my photos', act('card-photo', kind)]]));"
-assert html.count(START_CHIPS) == 1, "wireframe card-start chips not found: update the hook in build-wireframe.py"
-html = html.replace(START_CHIPS, "chips([['Take a photo', act('card-photo', kind)], ['Upload from my photos', act('card-photo', kind)]].concat(kind === 'add' ? [['Sync from Collectr', act('collectr')]] : [])));", 1)
-PRICE_ASK = "or take a photo of the front and back and I will identify it.', template: PRICE_TEMPLATE"
-assert html.count(PRICE_ASK) == 1, "wireframe price ask not found: update the hook in build-wireframe.py"
-html = html.replace(PRICE_ASK, "or take a photo of the front and I will identify it.', template: PRICE_TEMPLATE", 1)
-
 # Hooks so the live layer answers with the real Mori when signed in: free-typed messages, shortcut
 # and suggestion taps, the fill-in templates (price, buy/sell order, pre-grade, add card) and the
 # "Take a photo" option (sent with the sample card photos). Onboarding, memory follow-ups and renaming

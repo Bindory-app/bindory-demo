@@ -1639,6 +1639,25 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 #clickable-prototype .cp-mp-segs button{flex:none;border:1px solid var(--mori-line);background:var(--mori-card);border-radius:99px;padding:6px 11px;font:inherit;font-size:11.5px;font-weight:700;color:var(--mori-muted);cursor:pointer}
 #clickable-prototype .cp-mp-segs button.is-on{background:var(--mori-ink);border-color:var(--mori-ink);color:#fff}
 #clickable-prototype .cp-mp-acts{display:flex;gap:6px;flex-wrap:wrap}
+
+/* ---- Fill-in boxes (price check, add a card, buy or sell order): nothing pre-typed in the chat box ---- */
+#clickable-prototype .cp-fill{margin:6px 0 4px;padding:10px;border-radius:13px;border:1px solid #dad5ff;background:linear-gradient(145deg,#f0edff,#fff);display:grid;gap:8px}
+#clickable-prototype .cp-fill-line{margin:0;line-height:2.3;font-size:10.5px;color:var(--mori-ink)}
+#clickable-prototype .cp-fill-slot{font:inherit;font-size:10px;color:var(--mori-ink);background:#f1f0f5;border:1px solid #e2e0ea;border-radius:7px;padding:3px 7px;margin:0 1px;vertical-align:middle;box-sizing:border-box;outline:none}
+#clickable-prototype .cp-fill-slot::placeholder{color:#a3a1b3}
+#clickable-prototype .cp-fill-slot:focus{border-color:#8f7ff0;background:#fff;box-shadow:0 0 0 3px #8f7ff024}
+#clickable-prototype .cp-fill-slot.is-name{width:104px}
+#clickable-prototype .cp-fill-slot.is-num{width:52px}
+#clickable-prototype .cp-fill-slot.is-binder{width:auto;max-width:130px;appearance:auto}
+#clickable-prototype .cp-fill-slash{margin:0 3px;color:var(--mori-muted);font-weight:700}
+#clickable-prototype .cp-fill-tabs{display:flex;gap:6px}
+#clickable-prototype .cp-fill-tabs button{font:inherit;font-size:9.5px;font-weight:800;border:1px solid #dad5ff;background:#fff;color:var(--mori-muted);border-radius:99px;padding:4px 11px;cursor:pointer}
+#clickable-prototype .cp-fill-tabs button.is-on{background:linear-gradient(90deg,#6f5ce6,#c08ad6);border-color:transparent;color:#fff}
+#clickable-prototype .cp-fill-err{margin:0;color:#c0392b;font-size:9.5px}
+#clickable-prototype .cp-fill-acts{display:flex;gap:8px}
+#clickable-prototype .cp-fill-go{font:inherit;font-size:10px;font-weight:800;border:0;border-radius:10px;padding:8px 14px;background:var(--mori-primary);color:#fff;cursor:pointer}
+#clickable-prototype .cp-fill.is-done{opacity:.6}
+#clickable-prototype .cp-fill.is-done .cp-fill-go{background:#b9b0f0;cursor:default}
 </style>
 <section id="clickable-prototype" aria-label="Clickable Bindory prototype">
   <div class="cp-shell">
@@ -1704,7 +1723,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
           <nav class="cp-bottom" aria-label="Main app navigation"><button data-go="home" aria-label="Home"></button><button data-go="explore" aria-label="Search"></button><button data-go="story" aria-label="My Journey"></button><button data-go="binder" aria-label="My Binder"></button><button data-go="profile" aria-label="My Profile"></button></nav>
         </section>
         <section class="cp-screen cp-mori-screen" data-screen="mori">
-          <div class="cp-top cp-mori-top"><button type="button" class="cp-mori-menu" data-mori-menu aria-label="Open menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M5 15h14"/></svg></button><div class="cp-mori-id"><button class="cp-mori-room-link" data-go="mori-room" aria-label="Open Mori Studio"><span class="cp-mori-face"><img data-img="mori-face" alt=""></span><i data-mori-level-chip hidden>Lv 3</i></button><span class="cp-mori-name" data-mori-panel-title>Mori</span></div><div class="cp-mori-auth"><button data-mori-auth="login">Log in</button><button class="cp-mori-go" data-mori-auth="signup">Sign up</button></div><span class="cp-mori-top-spacer" aria-hidden="true"></span></div>
+          <div class="cp-top cp-mori-top"><button type="button" class="cp-mori-menu" data-mori-menu aria-label="Open menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M5 15h14"/></svg></button><div class="cp-mori-id"><button class="cp-mori-room-link" data-go="mori-room" aria-label="Open Mori Studio"><span class="cp-mori-face"><img data-img="mori-face" alt=""></span><i data-mori-level-chip hidden>Lv 3</i></button><span class="cp-mori-name" data-mori-panel-title>Mori</span></div><div class="cp-mori-auth"><button data-mori-auth="login">Log in</button><button class="cp-mori-go" data-mori-auth="signup">Sign up</button></div><button class="cp-mori-reset" data-mori-reset aria-label="Start a new conversation">New chat</button></div>
           <div class="cp-mori-panel" data-mori-panel hidden></div>
           <div class="cp-mori-thread" data-mori-thread aria-live="polite"></div>
           <form class="cp-mori-composer" data-mori-form autocomplete="off">
@@ -3126,26 +3145,99 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   }
 
   /* ---- Price check: type the card or take a photo (the prototype always "sees" Mega Charizard X ex) ---- */
-  const PRICE_TEMPLATE = 'Price check: [card name] [card number]';
   const CHARX = { name: 'Mega Charizard X ex', number: '125/094', set: 'Phantasmal Flames', rarity: 'Special Illustration Rare', raw: [600, 680], psa9: [620, 730], psa10: [1350, 1500], fee: 125 };
   const money = n => 'US$' + n.toLocaleString('en-US');
   const range = ([a, b]) => money(a) + ' to ' + money(b);
-  /* Price check, pre-grade and add a card all start the same way: type the card, or send photos. */
+  /* Price check, pre-grade and add a card all start the same way: fill in the card, or send photos.
+     Nothing is pre-typed in the chat box: a fill-in box (like the memory card) sits above the photo buttons. */
   const CARD_START = {
-    price: { ask: 'Which card should I price? Type the <b>card name and number</b> below, or take a photo of the front and I will identify it.', template: PRICE_TEMPLATE, example: 'Price check: Mega Charizard X ex 125/094' },
+    price: { ask: 'Which card should I price? Fill in the <b>card name and number</b>, or take a photo of the front and I will identify it.' },
     grade: { ask: 'Send me photos of the <b>front and back</b> of your card, on a dark, flat background, and I will pre-grade it.' },
-    add: { ask: 'Which card are you adding? Type the <b>card name and number</b>, or take a photo and I will identify it.', template: 'Add [card name] [card number] to my collection, in the binder "[binder]"', example: 'Add Umbreon VMAX 215/203 to my collection' }
+    add: { ask: 'Which card are you adding? Fill in the <b>card name and number</b> and pick a binder, or take a photo and I will identify it.' }
   };
+  const fillSlot = (name, ph, cls = '', extra = '') => '<input class="cp-fill-slot ' + cls + '" name="' + name + '" placeholder="' + ph + '" autocomplete="off"' + extra + '>';
+  const cardSlots = () => fillSlot('name', 'card name', 'is-name', ' autocapitalize="words" maxlength="60"') + ' ' +
+    fillSlot('num', 'number', 'is-num', ' inputmode="numeric" maxlength="7"') + '<span class="cp-fill-slash">/</span>' + fillSlot('of', 'set size', 'is-num', ' inputmode="numeric" maxlength="7"');
+  const binderNames = () => ((P.binderNames && P.binderNames().length) ? P.binderNames() : S.binders.map(b => b.name)).filter(Boolean);
+  const binderSelect = () => '<select class="cp-fill-slot is-binder" name="binder"><option value="" disabled selected>binder</option>' +
+    [...new Set(binderNames())].map(n => '<option>' + esc(n) + '</option>').join('') + '<option value="__new">+ New binder</option></select>' +
+    '<span class="cp-fill-new" hidden> called ' + fillSlot('newbinder', 'binder name', 'is-name', ' maxlength="60"') + '</span>';
+  function fillForm(kind, side = 'buy') {
+    if (kind === 'price') return '<form class="cp-fill" data-fill="price" novalidate><p class="cp-fill-line">Price check ' + cardSlots() + '</p>' +
+      '<p class="cp-fill-err" hidden></p><div class="cp-fill-acts"><button type="submit" class="cp-fill-go">Check price</button></div></form>';
+    if (kind === 'add') return '<form class="cp-fill" data-fill="add" novalidate><p class="cp-fill-line">Add ' + cardSlots() + ' to my collection, in ' + binderSelect() + '</p>' +
+      '<p class="cp-fill-err" hidden></p><div class="cp-fill-acts"><button type="submit" class="cp-fill-go">Add card</button></div></form>';
+    return '<form class="cp-fill" data-fill="order" data-side="' + side + '" novalidate><div class="cp-fill-tabs"><button type="button" data-fill-side="buy"' + (side === 'buy' ? ' class="is-on"' : '') + '>Buy</button><button type="button" data-fill-side="sell"' + (side === 'sell' ? ' class="is-on"' : '') + '>Sell</button></div>' +
+      '<p class="cp-fill-line"><span data-fill-verb>' + (side === 'sell' ? 'Sell' : 'Buy') + '</span> ' + cardSlots() + ' for <span data-fill-price-word>' + (side === 'sell' ? 'at least' : 'up to') + '</span> US$' + fillSlot('price', 'price', 'is-num', ' inputmode="decimal" maxlength="10"') + '</p>' +
+      '<p class="cp-fill-err" hidden></p><div class="cp-fill-acts"><button type="submit" class="cp-fill-go">Set order</button></div></form>';
+  }
+  /* A typed card ("Mega Charizard X ex 125/094") into the name and number boxes. */
+  function prefillCard(form, card) {
+    if (!form || !card) return;
+    const m = /^(.*?)\s+#?([A-Z]{0,4}\d{1,4}[a-z]?)(?:\/([A-Z]{0,4}\d{1,4}))?$/i.exec(String(card).trim());
+    form.elements.name.value = m ? m[1] : card;
+    if (m) { form.elements.num.value = m[2]; if (m[3]) form.elements.of.value = m[3]; }
+  }
   function cardStart(kind) {
     const k = CARD_START[kind];
     if (!isEmpty()) thread.insertAdjacentHTML('beforeend', '<hr class="cp-mori-divider">');
-    say('<p>' + k.ask + '</p>' + 
+    say('<p>' + k.ask + '</p>' + (kind === 'grade' ? '' : fillForm(kind)) +
       chips([['Take a photo', act('card-photo', kind)], ['Upload from my photos', act('card-photo', kind)]].concat(kind === 'add' ? [['Sync from Collectr', act('collectr')]] : [])));
-    if (!k.template) { M.pending = null; input.value = ''; return; }
-    M.pending = kind;
-    input.value = k.template; input.focus();
-    const from = k.template.indexOf('['); input.setSelectionRange(from, k.template.indexOf(']', from) + 1); input.scrollLeft = 0;
+    M.pending = null; input.value = '';
+    if (kind === 'add' && P.binderNamesAsync) {
+      const sel = qsa('[data-fill="add"] select[name="binder"]', thread).pop();
+      P.binderNamesAsync().then(names => {
+        if (!sel || !names) return;
+        const keep = sel.querySelector('option[value="__new"]');
+        qsa('option:not([value=""]):not([value="__new"])', sel).forEach(o => o.remove());
+        [...new Set(names)].forEach(n => { const o = document.createElement('option'); o.textContent = n; sel.insertBefore(o, keep); });
+      }).catch(() => {});
+    }
   }
+  /* Sending a fill-in box: checks the boxes, then sends the finished sentence as the collector's message. */
+  const partOk = v => /^[A-Z]{0,4}\d{1,4}[A-Z]?$/i.test(v);
+  function fillSubmit(form) {
+    const f = form.elements, err = qs('.cp-fill-err', form), kind = form.dataset.fill;
+    const bad = (msg, el) => { err.textContent = msg; err.hidden = false; if (el) el.focus(); };
+    const name = f.name.value.trim().replace(/\s+/g, ' '), num = f.num.value.trim().toUpperCase(), of = f.of.value.trim().toUpperCase();
+    if (!name) return bad('Type the card name.', f.name);
+    if (!num || !partOk(num) || (of && !partOk(of))) return bad('Type the card number, like 125, or 125 / 094.', f.num);
+    const card = name + ' ' + num + (of ? '/' + of : '');
+    let text = '';
+    if (kind === 'price') text = 'Price check: ' + card;
+    if (kind === 'add') {
+      const isNew = f.binder.value === '__new', b = isNew ? f.newbinder.value.trim().replace(/["“”]/g, '') : f.binder.value;
+      if (!f.binder.value) return bad('Pick a binder, or make a new one.', f.binder);
+      if (!b) return bad('Name the new binder.', f.newbinder);
+      text = 'Add ' + card + ' to my collection, ' + (isNew ? 'in a new binder called "' + b + '"' : 'in the binder "' + b + '"');
+    }
+    if (kind === 'order') {
+      const price = f.price.value.replace(/[\s,$]|US/gi, '');
+      if (!/^\d{1,7}(\.\d{1,2})?$/.test(price)) return bad('Type your price in US dollars, like 450.', f.price);
+      text = (form.dataset.side === 'sell' ? 'Sell ' : 'Buy ') + card + (form.dataset.side === 'sell' ? ' for at least US$' : ' for up to US$') + price;
+    }
+    if (M.busy) return;
+    form.classList.add('is-done'); qsa('input,select,button', form).forEach(x => { x.disabled = true; });
+    M.pending = kind === 'order' ? 'order' : kind;
+    send(text);
+  }
+  app.addEventListener('submit', e => {
+    const form = e.target.closest && e.target.closest('form.cp-fill'); if (!form) return;
+    e.preventDefault(); e.stopImmediatePropagation(); fillSubmit(form);
+  }, true);
+  app.addEventListener('click', e => {
+    const t = e.target.closest && e.target.closest('[data-fill-side]'); if (!t) return;
+    const form = t.closest('form.cp-fill'); if (!form || form.classList.contains('is-done')) return;
+    const side = t.dataset.fillSide; form.dataset.side = side;
+    qsa('[data-fill-side]', form).forEach(b => b.classList.toggle('is-on', b === t));
+    qs('[data-fill-verb]', form).textContent = side === 'sell' ? 'Sell' : 'Buy';
+    qs('[data-fill-price-word]', form).textContent = side === 'sell' ? 'at least' : 'up to';
+  });
+  app.addEventListener('change', e => {
+    const sel = e.target.closest && e.target.closest('form.cp-fill select[name="binder"]'); if (!sel) return;
+    const extra = qs('.cp-fill-new', sel.closest('form')); extra.hidden = sel.value !== '__new';
+    if (!extra.hidden) qs('input', extra).focus();
+  });
   const priceStart = () => cardStart('price');
   const PHOTO_SAYS = { price: 'Here is a photo of my card. What is this card worth?', grade: 'Here are photos of the front and back. Can you pre-grade this card?', add: 'Please add this card to my collection. Here is a photo of it.', sell: 'Here are photos of the front and back for my sell order.' };
   async function cardPhoto(el, kind) {
@@ -3251,22 +3343,17 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       chips([['Pre-grade it first', ask('Pre-grade my Mega Charizard X ex')], ['Set a sell order', act('order-prefill', 'sell|' + c.name + ' ' + c.number + '|680')]]));
   }
 
-  /* ---- Buy or sell order: the collector types the card, buy or sell, and a price ---- */
-  const ORDER_TEMPLATE = { buy: 'Buy [card + number] for up to US$[price]', sell: 'Sell [card + number] for at least US$[price]' };
+  /* ---- Buy or sell order: a fill-in box for buy or sell, the card and the price ---- */
   function orderStart(side = 'buy', card = '', price = '') {
     if (!isEmpty()) thread.insertAdjacentHTML('beforeend', '<hr class="cp-mori-divider">');
-    say('<p>Tell me the <b>card</b>, whether you want to <b>buy or sell</b>, and your <b>price</b>. I will watch listings and let you know when one matches.</p>' +
-      chips([['Buy order', act('order-fill', 'buy')], ['Sell order', act('order-fill', 'sell')]]));
-    M.pending = 'order';
-    fillOrder(side, card, price);
+    say('<p>Pick <b>buy or sell</b>, fill in the <b>card</b> and your <b>price</b>. I will watch listings and let you know when one matches.</p>' + fillForm('order', side === 'sell' ? 'sell' : 'buy'));
+    M.pending = null; input.value = '';
+    const form = qsa('[data-fill="order"]', thread).pop();
+    prefillCard(form, card);
+    if (form && price) form.elements.price.value = price;
+    if (form) (card ? form.elements.price : form.elements.name).focus();
   }
-  function fillOrder(side, card, price) {
-    let t = ORDER_TEMPLATE[side];
-    if (card) t = t.replace('[card + number]', card);
-    if (price) t = t.replace('[price]', price);
-    input.value = t; input.focus(); input.scrollLeft = 0;
-    const from = t.indexOf('['); if (from >= 0) input.setSelectionRange(from, t.indexOf(']', from) + 1);
-  }
+  function fillOrder(side, card, price) { orderStart(side, card, price); }
   async function orderTyped(text) {
     const side = /\bsell/i.test(text) ? 'sell' : /\bbuy/i.test(text) ? 'buy' : null;
     const priceM = text.replace(/,/g, '').match(/(?:US)?\$\s?(\d+(?:\.\d+)?)/i) || text.replace(/,/g, '').match(/\b(\d{2,6})(?:\s?(?:usd|dollars))\b/i);
@@ -5260,6 +5347,17 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     if ("bdLocRetry" in b.dataset) { b.closest(".cp-mori-chips")?.remove(); resendPending(); }
     else cityPopup();
   });
+
+  // The add-card fill-in box lists the collector's real binders.
+  let binderCache = [];
+  P.binderNames = () => binderCache;
+  P.binderNamesAsync = async () => {
+    if (!(await fresh())) return null;
+    const r = await sb.from("binders").select("name").order("created_at");
+    binderCache = (r.data || []).map((b) => b.name).filter(Boolean);
+    return binderCache;
+  };
+  setTimeout(() => P.binderNamesAsync().catch(() => {}), 1500);
 
   /* ---------------- Sidebar tabs with the collector's own data (Muse-style) ---------------- */
   // The prototype draws the sidebar and sample panels; signed in, each tab shows real data.

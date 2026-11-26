@@ -855,6 +855,17 @@
     else cityPopup();
   });
 
+  // The add-card fill-in box lists the collector's real binders.
+  let binderCache = [];
+  P.binderNames = () => binderCache;
+  P.binderNamesAsync = async () => {
+    if (!(await fresh())) return null;
+    const r = await sb.from("binders").select("name").order("created_at");
+    binderCache = (r.data || []).map((b) => b.name).filter(Boolean);
+    return binderCache;
+  };
+  setTimeout(() => P.binderNamesAsync().catch(() => {}), 1500);
+
   /* ---------------- Sidebar tabs with the collector's own data (Muse-style) ---------------- */
   // The prototype draws the sidebar and sample panels; signed in, each tab shows real data.
   const PM = (P.moriPanelLive = P.moriPanelLive || {});
