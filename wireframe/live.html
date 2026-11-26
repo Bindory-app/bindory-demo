@@ -993,28 +993,86 @@
     U.scrollDown();
   });
 
-  // Ideas: next steps picked from the collector's own binders, wish list, prices and location.
+  // Ideas: a moodboard picked from how this collector actually collects: their binders, cards,
+  // favourite artist, Pokémon and set, memories, wish list, price checks and location.
+  const cardPic = (u) => (u ? (/\.(webp|png|jpe?g)$/i.test(u) ? u : u + "/low.webp") : null);
+  const topOf = (list) => {
+    const n = {};
+    for (const x of list) if (x) n[x] = (n[x] || 0) + 1;
+    return Object.entries(n).sort((a, c) => c[1] - a[1])[0] || null;
+  };
+  const artistCache = {};
+  async function illustrator(tcgdexId) {
+    if (tcgdexId in artistCache) return artistCache[tcgdexId];
+    let a = null;
+    try {
+      const r = await fetch("https://api.tcgdex.net/v2/en/cards/" + encodeURIComponent(tcgdexId), { signal: AbortSignal.timeout(4000) });
+      if (r.ok) a = (await r.json()).illustrator || null;
+    } catch {}
+    return (artistCache[tcgdexId] = a);
+  }
   PM.ideas = async () => {
     if (!(await fresh())) return "";
-    const [bins, wish, priced, orders] = await Promise.all([
-      sb.from("binders").select("name, binder_cards(count)").order("created_at"),
-      sb.from("wishlist").select("name").order("created_at", { ascending: false }).limit(3),
-      sb.from("mori_messages").select("payload").eq("kind", "price").order("created_at", { ascending: false }).limit(1),
-      sb.from("market_orders").select("side, card_name, price_usd, status").eq("status", "open").limit(2),
+    const [cardsQ, bins, mems, wish, priced, orders] = await Promise.all([
+      sb.from("cards").select("tcgdex_id, name, set_name, image_url").order("created_at", { ascending: false }).limit(300),
+      sb.from("binders").select("name, binder_cards(cards(image_url))").order("created_at"),
+      sb.from("memories").select("title").order("created_at", { ascending: false }).limit(20),
+      sb.from("wishlist").select("name, image_url").order("created_at", { ascending: false }).limit(3),
+      sb.from("mori_messages").select("payload").eq("kind", "price").order("created_at", { ascending: false }).limit(10),
+      sb.from("market_orders").select("id").eq("status", "open").limit(5),
     ]);
+    const cards = cardsQ.data || [], memories = mems.data || [], pricedRows = (priced.data || []).map((r) => r.payload && r.payload.card).filter((c) => c && c.name);
+    const binders = (bins.data || []).map((x) => ({ name: x.name, n: (x.binder_cards || []).length, img: ((x.binder_cards || []).map((bc) => bc.cards && bc.cards.image_url).find(Boolean)) || null }));
+    // Favourites from the collection itself.
+    const species = topOf(cards.map((c) => String(c.name).replace(/^(Mega|Dark|Light|Shining|Radiant|Galarian|Alolan|Hisuian|Paldean)\s+/i, "").split(/\s+/)[0]));
+    const set = topOf(cards.map((c) => c.set_name));
+    const artists = await Promise.all(cards.slice(0, 10).map((c) => illustrator(c.tcgdex_id).then((a) => ({ a, c }))));
+    const artist = topOf(artists.map((x) => x.a));
+    // How they collect: traits from what they do.
+    const traits = [];
+    if (artist && artist[1] >= 2) traits.push("Follows " + artist[0]);
+    if (memories.length) traits.push("Keeps the stories");
+    if (binders.length >= 2) traits.push("Organises by binder");
+    if (pricedRows.length >= 2 || (orders.data || []).length) traits.push("Watches the market");
+    if (set && set[1] >= 3) traits.push("Collects " + set[0]);
+    if (species && species[1] >= 2) traits.push("Loves " + species[0]);
+    if ((wish.data || []).length) traits.push("Has a chase list");
+    const title = !cards.length ? "A collector just getting started"
+      : artist && artist[1] >= 2 ? "An artwork lover"
+      : memories.length >= 2 ? "A storyteller"
+      : set && set[1] >= 3 ? "A set completer"
+      : pricedRows.length >= 2 ? "A market watcher"
+      : binders.length >= 2 ? "An organiser"
+      : species && species[1] >= 2 ? "A " + species[0] + " fan"
+      : "A collector finding their style";
     const ideas = [];
-    const b = (bins.data || []).map((x) => ({ name: x.name, n: (x.binder_cards && x.binder_cards[0] && x.binder_cards[0].count) || 0 })).sort((a, c) => c.n - a.n)[0];
-    if (b) ideas.push(["Grow your " + b.name + " binder", b.n + " cards so far. Mori can find the cards that would complete it.", "Which cards would complete my " + b.name + " binder?"]);
-    const loc = getLoc();
-    ideas.push([loc ? "Card shows near " + loc.place.split(",")[0] : "Card shows near you", "Find the next shows, their dates and ticket prices.", "When is the next card show near me?"]);
+    const big = binders.slice().sort((x, y) => y.n - x.n)[0];
+    if (big && big.n) {
+      const left = (9 - (big.n % 9)) % 9;
+      ideas.push({ img: cardPic(big.img), kicker: "Finish a page", title: left ? big.name + " is " + left + " card" + (left === 1 ? "" : "s") + " from a full page" : "Start a new page in " + big.name, why: "Your biggest binder, with " + big.n + " cards.", ask: "Which cards would complete my " + big.name + " binder?" });
+    }
+    if (artist && artist[1] >= 2) {
+      const pic = artists.find((x) => x.a === artist[0]);
+      ideas.push({ img: cardPic(pic && pic.c.image_url), kicker: "An artist you love", title: "More art by " + artist[0], why: artist[1] + " of your newest cards are theirs.", ask: "Show me every Pokémon card illustrated by " + artist[0] });
+    }
+    const mem = memories[0];
+    if (mem) ideas.push({ img: cardPic(cards[0] && cards[0].image_url), kicker: "A story to tell", title: "Turn “" + mem.title + "” into a video", why: "You keep the stories behind your cards.", ask: "Turn my " + mem.title + " memory into a short video" });
+    else if (cards[0]) ideas.push({ img: cardPic(cards[0].image_url), kicker: "A story to tell", title: "Save the story of your " + cards[0].name, why: "Your newest card. Where did it come from?", ask: "I want to save a memory about my " + cards[0].name });
+    if (species && species[1] >= 2) {
+      const pic = cards.find((c) => String(c.name).includes(species[0]));
+      ideas.push({ img: cardPic(pic && pic.image_url), kicker: "Your favourite Pokémon", title: "More " + species[0] + " cards to chase", why: "You own " + species[1] + " " + species[0] + " cards.", ask: "Which " + species[0] + " cards should I chase next?" });
+    }
     const w = (wish.data || [])[0];
-    if (w) ideas.push(["Chase " + w.name, "It is on your wish list. Set a buy order and Mori watches the listings for you.", "Set a buy order for " + w.name]);
-    const pc = priced.data && priced.data[0] && priced.data[0].payload && priced.data[0].payload.card;
-    if (pc && pc.name) ideas.push(["Should you grade " + pc.name + "?", "You checked its price recently. A pre-grade shows if grading would pay off.", "Pre-grade my " + pc.name + (pc.number ? " " + pc.number : "")]);
-    ideas.push(["See what went up", "Check which of your cards rose in value this month.", "Which of my cards went up in value this month?"]);
-    if (!(orders.data || []).length) ideas.push(["Bring in your Collectr cards", "Paste your public Collectr link and Mori adds the cards to a binder.", "Add cards to my collection"]);
-    return '<p class="cp-mp-intro">Ideas from Mori, picked from your collection.</p><div class="cp-mp-cards">' +
-      ideas.slice(0, 6).map(([t, sub, q]) => '<div class="cp-mp-card"><b>' + esc(t) + "</b><p>" + esc(sub) + "</p>" + askBtn(q, "Do it with Mori") + "</div>").join("") + "</div>";
+    if (w) ideas.push({ img: cardPic(w.image_url), kicker: "On your chase list", title: "Chase " + w.name, why: "Set a buy order and Mori watches listings for you.", ask: "Set a buy order for " + w.name });
+    const pc = pricedRows[0];
+    if (pc) ideas.push({ img: cardPic(pc.image), kicker: "Worth a look", title: "Should you grade " + pc.name + "?", why: "You checked its price recently.", ask: "Pre-grade my " + pc.name + (pc.number ? " " + pc.number : "") });
+    const setPic = set && cards.find((c) => c.set_name === set[0] && c.image_url);
+    if (set && set[1] >= 3) ideas.push({ img: cardPic(setPic && setPic.image_url), glyph: "◎", kicker: "Complete a set", title: "Fill the gaps in " + set[0], why: set[1] + " of your cards are from this set.", ask: "Which cards would complete my " + set[0] + " collection?" });
+    const loc = getLoc();
+    ideas.push({ glyph: "⌖", kicker: "Near you", title: loc && loc.place.includes(",") ? "Card shows near " + loc.place.split(",")[0] : "Card shows near you", why: "Dates, tickets and what to bring.", ask: "When is the next card show near me?" });
+    if (pricedRows.length >= 2 || (orders.data || []).length) ideas.push({ glyph: "↗", kicker: "Your market", title: "See which of your cards went up", why: "You keep an eye on prices.", ask: "Which of my cards went up in value this month?" });
+    if (!cards.length) ideas.push({ glyph: "+", kicker: "Get started", title: "Bring in your cards", why: "Add them one by one, from a photo, or from Collectr.", ask: "Add cards to my collection" });
+    return P.ideaBoard ? P.ideaBoard({ title, traits: traits.slice(0, 4) }, ideas.slice(0, 8)) : "";
   };
 
   // Goals: kept on the collector's profile (settings.goals); Mori helps work toward each one.

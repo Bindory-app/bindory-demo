@@ -1678,6 +1678,22 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 #clickable-prototype .cp-fill-row{min-width:0;max-width:100%}
 #clickable-prototype .cp-fill-row .cp-fill-slot.is-name,#clickable-prototype .cp-fill-row .cp-fill-slot.is-binder,#clickable-prototype .cp-fill-row .cp-fill-slot.is-cond,#clickable-prototype .cp-fill-row .cp-fill-slot.is-price{flex:1 1 0;width:0;min-width:0}
 #clickable-prototype .cp-fill-row .cp-fill-slot.is-num{flex:0 1 54px;width:54px;min-width:38px}
+
+/* Ideas moodboard (sidebar Ideas tab): like Ideas from Mori on Home, in two staggered columns. */
+#clickable-prototype .cp-mb-me{border-radius:16px;padding:12px 13px;margin-bottom:10px;background:linear-gradient(135deg,#efeaff,#fbe9f4);color:var(--mori-ink)}
+#clickable-prototype .cp-mb-me small{display:block;font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mori-kicker)}
+#clickable-prototype .cp-mb-me b{display:block;font-size:15px;line-height:1.25;margin-top:2px}
+#clickable-prototype .cp-mb-me span{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+#clickable-prototype .cp-mb-me i{font-style:normal;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:99px;background:rgba(255,255,255,.75);color:var(--mori-primary)}
+#clickable-prototype .cp-mb{columns:2;column-gap:8px}
+#clickable-prototype .cp-mb-tile{display:block;width:100%;break-inside:avoid;margin:0 0 8px;border:1px solid var(--mori-line);background:var(--mori-card);border-radius:14px;padding:7px 7px 10px;font:inherit;text-align:left;color:var(--mori-ink);cursor:pointer}
+#clickable-prototype .cp-mb-art{display:flex;align-items:center;justify-content:center;height:92px;border-radius:9px;overflow:hidden;background:var(--mori-soft);margin-bottom:7px}
+#clickable-prototype .cp-mb-tile.is-tall .cp-mb-art{height:138px}
+#clickable-prototype .cp-mb-art img{width:100%;height:100%;object-fit:cover;object-position:50% 25%;display:block}
+#clickable-prototype .cp-mb-art em{font-style:normal;font-size:28px;color:var(--mori-primary);opacity:.8}
+#clickable-prototype .cp-mb-tile small{display:block;font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mori-kicker)}
+#clickable-prototype .cp-mb-tile b{display:block;font-size:11.5px;line-height:1.3;margin-top:2px}
+#clickable-prototype .cp-mb-tile p{margin:4px 0 0;font-size:10px;line-height:1.35;color:var(--mori-muted)}
 </style>
 <section id="clickable-prototype" aria-label="Clickable Bindory prototype">
   <div class="cp-shell">
@@ -4345,6 +4361,17 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   };
   const ago = d => { const days = Math.round((Date.now() - d) / 864e5); return days <= 0 ? 'Today' : days === 1 ? 'Yesterday' : days < 7 ? days + ' days ago' : new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
   const askBtn = (q, label) => '<button class="cp-mp-go" data-mori-panel-ask="' + esc(q) + '">' + esc(label || 'Ask Mori') + '</button>';
+  /* Ideas as a moodboard (like Ideas from Mori on Home): a short read of how the collector collects,
+     then picture tiles in two staggered columns. Each tile says why Mori picked it; tapping one asks
+     Mori. Items: { img, kicker, title, why, ask }. Tiles without a picture get a soft colour block. */
+  const IDEA_TINTS = ['#e9e4ff,#f6d9ee', '#dff1ff,#e9e4ff', '#fde7d9,#f6d9ee', '#e3f6ea,#dff1ff'];
+  const ideaBoard = (profile, items) => (profile ? '<div class="cp-mb-me"><small>How you collect</small><b>' + esc(profile.title) + '</b>' +
+      (profile.traits && profile.traits.length ? '<span>' + profile.traits.map(t => '<i>' + esc(t) + '</i>').join('') + '</span>' : '') + '</div>' : '') +
+    '<div class="cp-mb">' + items.map((i, n) => '<button class="cp-mb-tile' + (n % 3 === 0 ? ' is-tall' : '') + '" data-mori-panel-ask="' + esc(i.ask) + '">' +
+      (i.img ? '<span class="cp-mb-art"><img src="' + esc(i.img) + '" alt="" loading="lazy"></span>'
+        : '<span class="cp-mb-art is-plain" style="background:linear-gradient(135deg,' + IDEA_TINTS[n % IDEA_TINTS.length] + ')"><em>' + esc(i.glyph || '✦') + '</em></span>') +
+      '<small>' + esc(i.kicker) + '</small><b>' + esc(i.title) + '</b>' + (i.why ? '<p>' + esc(i.why) + '</p>' : '') + '</button>').join('') + '</div>';
+  P.ideaBoard = ideaBoard;
   const SAMPLE = {
     history: () => '<div class="cp-mp-search"><input type="search" placeholder="Search your chats" data-mp-search aria-label="Search your chats"></div><div class="cp-mp-list">' + [
       ['Price check: Mega Charizard X ex 125/094', 'Market price US$511, PSA 10 recent sales US$1,075', 0],
@@ -4352,12 +4379,14 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       ['Sell Umbreon VMAX 215/203 for at least US$450', 'Sell order set, front and back photos saved', 3],
       ['I traded my Pikachu for a Charizard', 'Memory saved: League night trade', 6]
     ].map(([t, sub, d]) => '<button class="cp-mp-row" data-mori-panel-ask="' + esc(t) + '"><b>' + esc(t) + '</b><small>' + esc(sub) + '</small><i>' + ago(Date.now() - d * 864e5) + '</i></button>').join('') + '</div>',
-    ideas: () => '<p class="cp-mp-intro">Ideas from Mori, picked from your collection.</p><div class="cp-mp-cards">' + [
-      ['Finish your Moonlight binder', '9 cards so far. Three more Darkness types would complete the night sky theme.', 'Which cards would complete my Moonlight Pokémon binder?'],
-      ['Umbreon VMAX went up 8%', 'It is near its 30-day high. A sell order could catch the peak.', 'Set a sell order for Umbreon VMAX 215/203'],
-      ['Card show this weekend', 'East Bay Card Show is 20 minutes away. Early Bird tickets are US$15.', 'Help me buy tickets for East Bay Card Show'],
-      ['Grade your best card', 'Your Mega Charizard X ex looks like a PSA 9 candidate.', 'Pre-grade my Mega Charizard X ex 125/094']
-    ].map(([t, sub, q]) => '<div class="cp-mp-card"><b>' + esc(t) + '</b><p>' + esc(sub) + '</p>' + askBtn(q, 'Do it with Mori') + '</div>').join('') + '</div>',
+    ideas: () => ideaBoard({ title: 'A night sky storyteller', traits: ['Moon themed artwork', 'Keeps the stories', 'Finishes pages'] }, [
+      { img: cardImg('lugia'), kicker: 'Finish a page', title: 'Moonlight Pokémon is 3 cards from a full page', why: 'You fill binders page by page.', ask: 'Which cards would complete my Moonlight Pokémon binder?' },
+      { img: cardImg('mew'), kicker: 'An artist you love', title: 'More art by aky CG Works', why: '4 of your cards are theirs.', ask: 'Show me every Pokémon card illustrated by aky CG Works' },
+      { img: cardImg('umbreon'), kicker: 'A story to tell', title: 'Turn your league night trade into a video', why: 'You save a memory with most new cards.', ask: 'Turn my league night memory into a short video' },
+      { img: IMG['cover-moonmoments'] || '', kicker: 'A new binder', title: 'Group your moon themed cards', why: 'They are spread across 3 binders.', ask: 'Create a binder using my moon themed cards' },
+      { img: cardImg('charizard'), kicker: 'Worth a look', title: 'Should you grade Mega Charizard X ex?', why: 'You checked its price twice this week.', ask: 'Pre-grade my Mega Charizard X ex 125/094' },
+      { glyph: '⌖', kicker: 'Near you', title: 'East Bay Card Show this weekend', why: 'Early bird tickets are US$15.', ask: 'When is the next card show near me?' }
+    ].map(i => i.img === '' ? Object.assign(i, { img: null }) : i)),
     goals: () => '<div class="cp-mp-cards">' + [
       ['Complete Evolving Skies alt arts', 3, 8, 'Help me with my goal: Complete Evolving Skies alt arts'],
       ['Keep card spending under US$300 a month', 210, 300, 'Help me with my goal: Keep card spending under US$300 a month'],
@@ -4387,6 +4416,11 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     panel.scrollTop = 0;
   }
   P.moriShowTab = showTab;
+  /* Mori in the bottom menu (and Ask Mori on Home) always brings the collector back to Main chat. */
+  app.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-go="mori"]'); if (!b || !app.contains(b)) return;
+    if (moriTab !== 'chat' || !drawer.hidden) showTab('chat');
+  }, true);
   app.addEventListener('click', e => {
     const b = e.target.closest('button,[data-mori-drawer-close]'); if (!b || !moriScreen.contains(b)) return;
     if ('moriMenu' in b.dataset) { openDrawer(); return; }
@@ -5519,28 +5553,86 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     U.scrollDown();
   });
 
-  // Ideas: next steps picked from the collector's own binders, wish list, prices and location.
+  // Ideas: a moodboard picked from how this collector actually collects: their binders, cards,
+  // favourite artist, Pokémon and set, memories, wish list, price checks and location.
+  const cardPic = (u) => (u ? (/\.(webp|png|jpe?g)$/i.test(u) ? u : u + "/low.webp") : null);
+  const topOf = (list) => {
+    const n = {};
+    for (const x of list) if (x) n[x] = (n[x] || 0) + 1;
+    return Object.entries(n).sort((a, c) => c[1] - a[1])[0] || null;
+  };
+  const artistCache = {};
+  async function illustrator(tcgdexId) {
+    if (tcgdexId in artistCache) return artistCache[tcgdexId];
+    let a = null;
+    try {
+      const r = await fetch("https://api.tcgdex.net/v2/en/cards/" + encodeURIComponent(tcgdexId), { signal: AbortSignal.timeout(4000) });
+      if (r.ok) a = (await r.json()).illustrator || null;
+    } catch {}
+    return (artistCache[tcgdexId] = a);
+  }
   PM.ideas = async () => {
     if (!(await fresh())) return "";
-    const [bins, wish, priced, orders] = await Promise.all([
-      sb.from("binders").select("name, binder_cards(count)").order("created_at"),
-      sb.from("wishlist").select("name").order("created_at", { ascending: false }).limit(3),
-      sb.from("mori_messages").select("payload").eq("kind", "price").order("created_at", { ascending: false }).limit(1),
-      sb.from("market_orders").select("side, card_name, price_usd, status").eq("status", "open").limit(2),
+    const [cardsQ, bins, mems, wish, priced, orders] = await Promise.all([
+      sb.from("cards").select("tcgdex_id, name, set_name, image_url").order("created_at", { ascending: false }).limit(300),
+      sb.from("binders").select("name, binder_cards(cards(image_url))").order("created_at"),
+      sb.from("memories").select("title").order("created_at", { ascending: false }).limit(20),
+      sb.from("wishlist").select("name, image_url").order("created_at", { ascending: false }).limit(3),
+      sb.from("mori_messages").select("payload").eq("kind", "price").order("created_at", { ascending: false }).limit(10),
+      sb.from("market_orders").select("id").eq("status", "open").limit(5),
     ]);
+    const cards = cardsQ.data || [], memories = mems.data || [], pricedRows = (priced.data || []).map((r) => r.payload && r.payload.card).filter((c) => c && c.name);
+    const binders = (bins.data || []).map((x) => ({ name: x.name, n: (x.binder_cards || []).length, img: ((x.binder_cards || []).map((bc) => bc.cards && bc.cards.image_url).find(Boolean)) || null }));
+    // Favourites from the collection itself.
+    const species = topOf(cards.map((c) => String(c.name).replace(/^(Mega|Dark|Light|Shining|Radiant|Galarian|Alolan|Hisuian|Paldean)\s+/i, "").split(/\s+/)[0]));
+    const set = topOf(cards.map((c) => c.set_name));
+    const artists = await Promise.all(cards.slice(0, 10).map((c) => illustrator(c.tcgdex_id).then((a) => ({ a, c }))));
+    const artist = topOf(artists.map((x) => x.a));
+    // How they collect: traits from what they do.
+    const traits = [];
+    if (artist && artist[1] >= 2) traits.push("Follows " + artist[0]);
+    if (memories.length) traits.push("Keeps the stories");
+    if (binders.length >= 2) traits.push("Organises by binder");
+    if (pricedRows.length >= 2 || (orders.data || []).length) traits.push("Watches the market");
+    if (set && set[1] >= 3) traits.push("Collects " + set[0]);
+    if (species && species[1] >= 2) traits.push("Loves " + species[0]);
+    if ((wish.data || []).length) traits.push("Has a chase list");
+    const title = !cards.length ? "A collector just getting started"
+      : artist && artist[1] >= 2 ? "An artwork lover"
+      : memories.length >= 2 ? "A storyteller"
+      : set && set[1] >= 3 ? "A set completer"
+      : pricedRows.length >= 2 ? "A market watcher"
+      : binders.length >= 2 ? "An organiser"
+      : species && species[1] >= 2 ? "A " + species[0] + " fan"
+      : "A collector finding their style";
     const ideas = [];
-    const b = (bins.data || []).map((x) => ({ name: x.name, n: (x.binder_cards && x.binder_cards[0] && x.binder_cards[0].count) || 0 })).sort((a, c) => c.n - a.n)[0];
-    if (b) ideas.push(["Grow your " + b.name + " binder", b.n + " cards so far. Mori can find the cards that would complete it.", "Which cards would complete my " + b.name + " binder?"]);
-    const loc = getLoc();
-    ideas.push([loc ? "Card shows near " + loc.place.split(",")[0] : "Card shows near you", "Find the next shows, their dates and ticket prices.", "When is the next card show near me?"]);
+    const big = binders.slice().sort((x, y) => y.n - x.n)[0];
+    if (big && big.n) {
+      const left = (9 - (big.n % 9)) % 9;
+      ideas.push({ img: cardPic(big.img), kicker: "Finish a page", title: left ? big.name + " is " + left + " card" + (left === 1 ? "" : "s") + " from a full page" : "Start a new page in " + big.name, why: "Your biggest binder, with " + big.n + " cards.", ask: "Which cards would complete my " + big.name + " binder?" });
+    }
+    if (artist && artist[1] >= 2) {
+      const pic = artists.find((x) => x.a === artist[0]);
+      ideas.push({ img: cardPic(pic && pic.c.image_url), kicker: "An artist you love", title: "More art by " + artist[0], why: artist[1] + " of your newest cards are theirs.", ask: "Show me every Pokémon card illustrated by " + artist[0] });
+    }
+    const mem = memories[0];
+    if (mem) ideas.push({ img: cardPic(cards[0] && cards[0].image_url), kicker: "A story to tell", title: "Turn “" + mem.title + "” into a video", why: "You keep the stories behind your cards.", ask: "Turn my " + mem.title + " memory into a short video" });
+    else if (cards[0]) ideas.push({ img: cardPic(cards[0].image_url), kicker: "A story to tell", title: "Save the story of your " + cards[0].name, why: "Your newest card. Where did it come from?", ask: "I want to save a memory about my " + cards[0].name });
+    if (species && species[1] >= 2) {
+      const pic = cards.find((c) => String(c.name).includes(species[0]));
+      ideas.push({ img: cardPic(pic && pic.image_url), kicker: "Your favourite Pokémon", title: "More " + species[0] + " cards to chase", why: "You own " + species[1] + " " + species[0] + " cards.", ask: "Which " + species[0] + " cards should I chase next?" });
+    }
     const w = (wish.data || [])[0];
-    if (w) ideas.push(["Chase " + w.name, "It is on your wish list. Set a buy order and Mori watches the listings for you.", "Set a buy order for " + w.name]);
-    const pc = priced.data && priced.data[0] && priced.data[0].payload && priced.data[0].payload.card;
-    if (pc && pc.name) ideas.push(["Should you grade " + pc.name + "?", "You checked its price recently. A pre-grade shows if grading would pay off.", "Pre-grade my " + pc.name + (pc.number ? " " + pc.number : "")]);
-    ideas.push(["See what went up", "Check which of your cards rose in value this month.", "Which of my cards went up in value this month?"]);
-    if (!(orders.data || []).length) ideas.push(["Bring in your Collectr cards", "Paste your public Collectr link and Mori adds the cards to a binder.", "Add cards to my collection"]);
-    return '<p class="cp-mp-intro">Ideas from Mori, picked from your collection.</p><div class="cp-mp-cards">' +
-      ideas.slice(0, 6).map(([t, sub, q]) => '<div class="cp-mp-card"><b>' + esc(t) + "</b><p>" + esc(sub) + "</p>" + askBtn(q, "Do it with Mori") + "</div>").join("") + "</div>";
+    if (w) ideas.push({ img: cardPic(w.image_url), kicker: "On your chase list", title: "Chase " + w.name, why: "Set a buy order and Mori watches listings for you.", ask: "Set a buy order for " + w.name });
+    const pc = pricedRows[0];
+    if (pc) ideas.push({ img: cardPic(pc.image), kicker: "Worth a look", title: "Should you grade " + pc.name + "?", why: "You checked its price recently.", ask: "Pre-grade my " + pc.name + (pc.number ? " " + pc.number : "") });
+    const setPic = set && cards.find((c) => c.set_name === set[0] && c.image_url);
+    if (set && set[1] >= 3) ideas.push({ img: cardPic(setPic && setPic.image_url), glyph: "◎", kicker: "Complete a set", title: "Fill the gaps in " + set[0], why: set[1] + " of your cards are from this set.", ask: "Which cards would complete my " + set[0] + " collection?" });
+    const loc = getLoc();
+    ideas.push({ glyph: "⌖", kicker: "Near you", title: loc && loc.place.includes(",") ? "Card shows near " + loc.place.split(",")[0] : "Card shows near you", why: "Dates, tickets and what to bring.", ask: "When is the next card show near me?" });
+    if (pricedRows.length >= 2 || (orders.data || []).length) ideas.push({ glyph: "↗", kicker: "Your market", title: "See which of your cards went up", why: "You keep an eye on prices.", ask: "Which of my cards went up in value this month?" });
+    if (!cards.length) ideas.push({ glyph: "+", kicker: "Get started", title: "Bring in your cards", why: "Add them one by one, from a photo, or from Collectr.", ask: "Add cards to my collection" });
+    return P.ideaBoard ? P.ideaBoard({ title, traits: traits.slice(0, 4) }, ideas.slice(0, 8)) : "";
   };
 
   // Goals: kept on the collector's profile (settings.goals); Mori helps work toward each one.
