@@ -97,6 +97,8 @@ export function routeMoriMessage(message: string, hasPhotos = false): MoriAgent 
     return "order";
   if (/^(please )?add\b.*\bcollection\b|\badd (this|a|the) card\b/i.test(m)) return "add";
   if (/\b(put|place|move|build|create|make)\b.{0,30}\bbinder\b/i.test(m)) return "add";
+  // Event tickets are Ask Mori's (card shows), even though "buy" appears.
+  if (/\btickets?\b/i.test(m)) return "ask";
   if (/\bprice\b|\bworth\b|\bvalue\b|\bhow much\b|\bwent (up|down)\b|\btrend(y|ing|s)?\b/i.test(m))
     return "price";
   // Ask Mori's own jobs: what to chase, card shows and news, collectors, videos, completing a set.

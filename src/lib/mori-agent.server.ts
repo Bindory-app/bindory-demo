@@ -48,11 +48,11 @@ export const SYSTEM = `You are Mori, a warm, concise Pokémon TCG collector agen
 Answer only what the collector asked, in one short, focused answer: no extra analyses, cards or proposals they did not ask for. Put the natural next steps and any extra help into the Suggestions line as prompts the collector can tap (e.g. "What cards should I trade or sell?"), and do not write a separate "Next step" line. If the collector asked several things, answer each in its own short block, separated by a line containing only ---.
 - What to chase next: list_my_cards, pick the set or theme they collect most, get_set_cards for it, choose ONE specific card they are missing (prefer a notable one), get_card_prices for it, and in the same answer always call add_to_wishlist for that card (do not ask first; the collector confirms on the card). Your text: one or two sentences on why it fits, with today's price range.
 - Trendy collections: call market_trends and name the 2-3 cards or sets rising fastest, with the change in % and today's price range. Say which of them the collector already owns (list_my_cards).
-- Card shows and events: use the collector's location from the "[App note: the collector's location ...]" (from their phone) and search for that city (e.g. "Pokemon TCG card show <city> <month year>"); never assume a city, not even one remembered from earlier chats. If there is no location note, do not list events for a guessed city: say you need their location, ask them to allow location on their phone or type their city, and stop. Call web_search and web_fetch on the best 1-2 pages, then list 2-3 upcoming events near them with date, venue, opening hours and ticket price exactly as the pages say, and the official event or ticket page as a Markdown link (e.g. [Tickets](https://...)) when a page gives one; say so when a date or venue could not be confirmed. Answer only that: do not list their cards, prices or a card to hunt, and do not call add_to_wishlist. Suggestions must be about these events, e.g. "Help me buy tickets for <event name>", "What should I bring to <event name>?", "Shows in another city?". When asked to help buy tickets: find the official ticket page, give its link, the price and how to buy; never buy, book or enter payment details yourself.
+- Card shows and events: use the collector's location from the "[App note: the collector's location ...]" (from their phone) and search for that city (e.g. "Pokemon TCG card show <city> <month year>"); never assume a city, not even one remembered from earlier chats. If there is no location note, do not list events for a guessed city: say you need their location, ask them to allow location on their phone or type their city, and stop. Call web_search and web_fetch on the best 1-2 pages, then list 2-3 upcoming events near them with date, venue, opening hours and ticket price exactly as the pages say, and the official event or ticket page as a Markdown link (e.g. [Tickets](https://...)) when a page gives one; say so when a date or venue could not be confirmed. Answer only that: do not list their cards, prices or a card to hunt, and do not call add_to_wishlist. Suggestions must be about these events, e.g. "Help me buy tickets for <event name>", "What should I bring to <event name>?", "Shows in another city?". When asked to help buy tickets: find the event's official ticket page with web_search and web_fetch, then call show_tickets with that page and every ticket option it lists (name, price, when the sale ends) so the collector can pick a ticket and quantity and open the organiser's checkout; reply in one or two short lines. Never buy, book or enter payment details yourself.
 - Refer to other collectors by name, never as he or she.
 - Never suggest getting a card the collector already owns (check list_my_cards).
 "This card", "it" or "that one" means the card most recently discussed in this chat (from photos, a pre-grade report, a price check or an order). Use that card; never ask which card when one was just discussed.
-You act through your tools: web_search, web_fetch, search_catalogue, get_card_prices, pre_grade_report, my_price_movers, get_set_cards, list_my_cards, list_my_orders, market_trends, plan_video, show_collectors, find_related_cards, find_collectors, suggest_binder_for_card, add_card_to_collection, add_to_wishlist, create_binder, save_memory, set_order.
+You act through your tools: web_search, web_fetch, search_catalogue, get_card_prices, pre_grade_report, my_price_movers, get_set_cards, list_my_cards, list_my_orders, market_trends, plan_video, show_collectors, show_tickets, find_related_cards, find_collectors, suggest_binder_for_card, add_card_to_collection, add_to_wishlist, create_binder, save_memory, set_order.
 Rules:
 - Be proactive. When a request is open-ended (build a binder, complete my set, what to chase next, collectors who share my taste, trade-ups, value changes), start with list_my_cards and the other tools and come back with a concrete suggestion. Do not hand the work back to the collector; ask at most one short question, after you have suggested something.
 - Only list_my_cards says what the collector owns. Cards in earlier confirmation cards that were not confirmed are not in their collection.
@@ -325,6 +325,35 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
         },
       },
       required: ["picks"],
+    },
+  },
+  {
+    type: "function",
+    name: "show_tickets",
+    description:
+      "Show the collector an event's tickets as a card: the official ticket page and every ticket option it lists (name, price, when sales end). The collector picks a ticket and quantity, then opens the organiser's checkout and pays there themselves. Only use a ticket_url and options read from the event's own pages with web_search / web_fetch.",
+    strict: false,
+    parameters: {
+      type: "object",
+      properties: {
+        event: str("Event name, e.g. East Bay Card Show"),
+        date: str("Date(s) as the page shows them, e.g. Sat 28 - Sun 29 Nov 2026"),
+        venue: str("Venue and city"),
+        ticket_url: str("The official ticket or registration page (https)"),
+        options: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: str("Ticket type as the page names it, e.g. Saturday Early Bird"),
+              price: str("Price as the page shows it, e.g. US$15"),
+              note: str("Optional: when the sale ends, what it includes"),
+            },
+            required: ["name"],
+          },
+        },
+      },
+      required: ["event", "ticket_url", "options"],
     },
   },
   {
@@ -1038,6 +1067,48 @@ export async function executeMoriTool(
       result = {
         shown_to_user: true,
         note: "The profile cards are on screen. Reply in one short line.",
+      };
+    }
+  } else if (name === "show_tickets") {
+    // The organiser's own ticket page; the collector pays there (Bindory never takes payment).
+    let url = "";
+    try {
+      const u = new URL(s(args["ticket_url"]) ?? "");
+      if (u.protocol === "https:" && !/(^|\.)bindory\.app$/i.test(u.hostname)) url = u.toString();
+    } catch {
+      url = "";
+    }
+    const clip = (v: unknown, n: number) => (s(v) ?? "").replace(/\s+/g, " ").trim().slice(0, n);
+    const options = (Array.isArray(args["options"]) ? (args["options"] as Args[]) : [])
+      .map((o) => ({
+        name: clip(o["name"], 80),
+        price: clip(o["price"], 30),
+        note: clip(o["note"], 120),
+      }))
+      .filter((o) => o.name)
+      .slice(0, 8);
+    const event = clip(args["event"], 100);
+    if (!url || !event)
+      result = {
+        error:
+          "Give the event name and its official ticket page (an https link from the page you read).",
+      };
+    else {
+      rows.push({
+        role: "mori",
+        kind: "tickets",
+        content: `Tickets for ${event}`,
+        payload: {
+          event,
+          date: clip(args["date"], 80),
+          venue: clip(args["venue"], 120),
+          url,
+          options,
+        } as unknown as Json,
+      });
+      result = {
+        shown_to_user: true,
+        note: "The ticket card is on screen: the collector picks a ticket and quantity and opens checkout to pay on the organiser's page. Reply in one or two short lines (which ticket suits them, if they said a day), and do not list the prices again.",
       };
     }
   } else if (name === "request_card_photos") {

@@ -4466,6 +4466,42 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       "</div>";
   }
 
+  // Tickets for an event: the collector picks a ticket type and quantity, then opens the organiser's
+  // own checkout and pays there. Bindory never takes the payment or sees the card.
+  function ticketsHTML(t) {
+    let host = "";
+    try { host = new URL(t.url).hostname.replace(/^www\./, ""); } catch {}
+    const opts = (t.options || []).map((o, i) =>
+      '<label class="bd-tix-opt"><input type="radio" name="bd-tix-' + esc(String(Date.now())) + '" value="' + i + '"' + (i === 0 ? " checked" : "") + ">" +
+      "<span><b>" + esc(o.name) + "</b>" + (o.note ? "<small>" + esc(o.note) + "</small>" : "") + "</span>" + (o.price ? "<i>" + esc(o.price) + "</i>" : "") + "</label>").join("");
+    return '<div class="bd-tix" data-bd-tix="' + esc(t.url) + '" data-bd-tix-options="' + esc(JSON.stringify(t.options || [])) + '">' +
+      '<small class="bd-tix-kicker">Tickets</small><b class="bd-tix-event">' + esc(t.event) + "</b>" +
+      (t.date || t.venue ? "<p class=\"bd-tix-when\">" + esc([t.date, t.venue].filter(Boolean).join(" · ")) + "</p>" : "") +
+      (opts ? '<div class="bd-tix-opts">' + opts + "</div>" : "") +
+      '<div class="bd-tix-qty"><span>Tickets</span><button type="button" data-bd-tix-step="-1" aria-label="One fewer">−</button><b data-bd-tix-n>1</b><button type="button" data-bd-tix-step="1" aria-label="One more">+</button></div>' +
+      '<div class="cp-mori-actions"><button class="cp-mori-go" data-bd-tix-go>Go to checkout</button></div>' +
+      '<p class="cp-mori-sample">Opens ' + esc(host || "the organiser's site") + ". You pay there; Bindory never sees your card.</p></div>";
+  }
+  app.addEventListener("click", (e) => {
+    const box = e.target.closest && e.target.closest("[data-bd-tix]");
+    if (!box || !app.contains(box)) return;
+    const step = e.target.closest("[data-bd-tix-step]"), go = e.target.closest("[data-bd-tix-go]");
+    const nEl = box.querySelector("[data-bd-tix-n]");
+    if (step) { nEl.textContent = String(Math.min(10, Math.max(1, Number(nEl.textContent) + Number(step.dataset.bdTixStep)))); return; }
+    if (!go) return;
+    e.stopPropagation();
+    let options = [];
+    try { options = JSON.parse(box.dataset.bdTixOptions || "[]"); } catch {}
+    const pick = options[Number((box.querySelector("input[type=radio]:checked") || {}).value || 0)];
+    const n = Number(nEl.textContent) || 1;
+    const what = (pick ? pick.name : "your ticket") + " × " + n;
+    window.open(box.dataset.bdTix, "_blank", "noopener");
+    let note = box.querySelector(".bd-tix-picked");
+    if (!note) { note = document.createElement("p"); note.className = "bd-tix-picked"; box.querySelector(".cp-mori-actions").after(note); }
+    note.innerHTML = "On the organiser's page, choose <b>" + esc(what) + "</b>" + (pick && pick.price ? " (" + esc(pick.price) + " each)" : "") + ", then pay there.";
+    try { navigator.clipboard && navigator.clipboard.writeText(what); } catch {}
+  });
+
   // Markdown from the sync agent: headings, tables, lists, bold. Escaped first; links show as text.
   function mdHTML(t) {
     const inline = (x) => esc(x).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
@@ -4574,6 +4610,12 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
           ui.scrollDown();
         }
         continue;
+      }
+      if (r.kind === "tickets" && r.payload && r.payload.url) {
+        const card = ticketsHTML(r.payload);
+        if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", card);
+        else last = ui.say(stepsHTML + card);
+        lastKind = "tickets"; continue;
       }
       if (r.kind === "sync") { last = ui.say(stepsHTML + '<div class="bd-sync" data-bd-sync="' + esc(r.id) + '"><small>Collectr sync</small><p class="bd-sync-status"><i class="bd-spin"></i>' + esc(r.content) + '</p><div class="bd-sync-result"></div></div>'); watchSync(last.querySelector("[data-bd-sync]")); lastKind = "sync"; continue; }
       if (r.kind === "confirm" && r.payload) { last = ui.say(stepsHTML + proposalHTML(r.payload, r.id)); fillPhotos(last); }
@@ -4933,6 +4975,11 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       ".bd-slot .bd-num,.bd-slot .bd-price{display:flex;align-items:center;gap:8px}.bd-slot .bd-price b{font-size:16px;color:#4a4f6e}.bd-slot .bd-num b{font-size:20px;color:#6b7090}.bd-slot-err{color:#c0392b;font-size:14px;margin:0}" +
       ".bd-slot button[type=submit]{background:#5b4bd6;color:#fff;border-color:#5b4bd6}" +
       ".cp-mori-body a{color:#5b4bd6;font-weight:700;text-decoration:underline}" +
+      ".bd-tix{border:1px solid #e6e2fa;border-radius:16px;padding:12px;margin-top:8px;background:#fff}.bd-tix-kicker{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#5b4bd6;display:block}" +
+      ".bd-tix-event{display:block;font-size:16px;margin-top:2px}.bd-tix-when{margin:2px 0 8px;color:#6b7090;font-size:13px}.bd-tix-opts{display:grid;gap:6px}" +
+      ".bd-tix-opt{display:flex;align-items:center;gap:8px;border:1px solid #e6e2fa;border-radius:12px;padding:9px 10px;cursor:pointer}.bd-tix-opt span{flex:1;display:grid}.bd-tix-opt small{color:#6b7090;font-size:12px}.bd-tix-opt i{font-style:normal;font-weight:800}" +
+      ".bd-tix-opt:has(input:checked){border-color:#5b4bd6;background:#f5f3fe}.bd-tix-qty{display:flex;align-items:center;gap:10px;margin:10px 0 4px}.bd-tix-qty span{flex:1;font-weight:700;color:#4a4f6e}" +
+      ".bd-tix-qty button{width:34px;height:34px;border-radius:50%;border:1px solid #d9d4f5;background:#f1eefc;color:#5b4bd6;font-size:18px;font-weight:800}.bd-tix-picked{font-size:13px;margin:6px 0 0}" +
       ".bd-sync small{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#5b4bd6}.bd-sync-status{display:flex;align-items:center;gap:8px;color:#4a4f6e;margin:6px 0}" +
       ".bd-spin{width:14px;height:14px;border-radius:50%;border:2px solid #d9d4f5;border-top-color:#5b4bd6;display:inline-block;animation:bdspin .8s linear infinite;flex:none}@keyframes bdspin{to{transform:rotate(360deg)}}" +
       ".bd-sync-result h4{margin:12px 0 4px;font-size:14px}.bd-sync-result p{margin:4px 0}.bd-md-table{overflow-x:auto;margin:6px 0}.bd-md-table table{border-collapse:collapse;font-size:12px;min-width:100%}" +

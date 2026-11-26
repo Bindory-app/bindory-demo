@@ -31,6 +31,7 @@ export const TOOL_STATUS: Record<string, string> = {
   market_trends: "Checking what is trending",
   plan_video: "Storyboarding your video",
   show_collectors: "Matching collectors",
+  show_tickets: "Finding the tickets",
   request_card_photos: "Asking for photos of your card",
   web_search: "Searching the web",
   web_fetch: "Reading the page",
