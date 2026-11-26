@@ -1087,7 +1087,7 @@
   /* ---------------- Trade-up game (two collectors in person, fair odds) ---------------- */
   // Each side's chance is its share of the combined value. Both phones lock in with a hash of a
   // secret and reveal it after; the server draws from both secrets, so nobody can steer the result.
-  const usdT = (n) => "US$" + Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
+  const usdT = (n) => { const v = Math.round(Number(n || 0) * 100) / 100; return "US$" + v.toLocaleString("en-US", { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 }); };
   const pctT = (x) => (Math.round(x * 1000) / 10).toFixed(1) + "%";
   async function tradeupCall(body) {
     await fresh();
@@ -1144,8 +1144,11 @@
     if (ready && p === null) odds = '<p class="bd-game-err">Option A must be worth less than ' + usdT(S) + " and Option B more.</p>";
     else if (ready) odds = '<div class="bd-game-odds"><div class="bd-game-bar"><i style="width:' + ((1 - p) * 100) + '%"></i>' + (g.result ? '<b class="bd-game-mark" style="left:' + ((1 - g.result.draw) * 100) + '%"></b>' : "") + "</div>" +
       '<p><span>Option A ' + pctT(1 - p) + "</span><span>Option B " + pctT(p) + "</span></p>" +
-      '<p class="bd-game-hint">Why these odds: B is worth ' + usdT(B.total - S) + " more than the starter's cards and A " + usdT(S - A.total) + " less, so the chances balance out. " +
-      "Played many times, the starter would average " + usdT(S) + ", the same as what they put in (" + pctT(1 - p) + " × " + usdT(A.total) + " + " + pctT(p) + " × " + usdT(B.total) + ").</p></div>";
+      (function () {
+        const gapA = S - A.total, gapB = B.total - S, pctOf = (x) => Math.round(x / S * 1000) / 10 + "%";
+        return '<p class="bd-game-hint">The bigger the gap from ' + usdT(S) + ", the smaller the chance. Option A is " + usdT(gapA) + " below (−" + pctOf(gapA) + "), Option B is " + usdT(gapB) + " above (+" + pctOf(gapB) + "). " +
+          "A's chance = B's gap ÷ both gaps = " + usdT(gapB) + " ÷ " + usdT(gapA + gapB) + " = " + pctT(1 - p) + "; B's chance = " + usdT(gapA) + " ÷ " + usdT(gapA + gapB) + " = " + pctT(p) + ". That keeps the trade even for both collectors.</p></div>";
+      })();
     let foot = "";
     if (g.result) {
       const got = g.offers[g.result.option];
