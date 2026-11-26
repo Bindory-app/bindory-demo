@@ -25,6 +25,7 @@ import { Route as ApiMoriConfirmRouteImport } from './routes/api/mori-confirm'
 import { Route as ApiMoriLocateRouteImport } from './routes/api/mori-locate'
 import { Route as ApiMoriMcpRouteImport } from './routes/api/mori-mcp'
 import { Route as ApiMoriSyncRouteImport } from './routes/api/mori-sync'
+import { Route as ApiTradeupRouteImport } from './routes/api/tradeup'
 import { Route as BIdRouteImport } from './routes/b.$id'
 import { Route as BindersIdRouteImport } from './routes/binders.$id'
 import { Route as CUsernameRouteImport } from './routes/c.$username'
@@ -110,6 +111,11 @@ const ApiMoriSyncRoute = ApiMoriSyncRouteImport.update({
   path: '/api/mori-sync',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTradeupRoute = ApiTradeupRouteImport.update({
+  id: '/api/tradeup',
+  path: '/api/tradeup',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BIdRoute = BIdRouteImport.update({
   id: '/b/$id',
   path: '/b/$id',
@@ -148,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/api/mori-locate': typeof ApiMoriLocateRoute
   '/api/mori-mcp': typeof ApiMoriMcpRoute
   '/api/mori-sync': typeof ApiMoriSyncRoute
+  '/api/tradeup': typeof ApiTradeupRoute
   '/b/$id': typeof BIdRoute
   '/binders/$id': typeof BindersIdRoute
   '/c/$username': typeof CUsernameRoute
@@ -170,6 +177,7 @@ export interface FileRoutesByTo {
   '/api/mori-locate': typeof ApiMoriLocateRoute
   '/api/mori-mcp': typeof ApiMoriMcpRoute
   '/api/mori-sync': typeof ApiMoriSyncRoute
+  '/api/tradeup': typeof ApiTradeupRoute
   '/b/$id': typeof BIdRoute
   '/binders/$id': typeof BindersIdRoute
   '/c/$username': typeof CUsernameRoute
@@ -193,6 +201,7 @@ export interface FileRoutesById {
   '/api/mori-locate': typeof ApiMoriLocateRoute
   '/api/mori-mcp': typeof ApiMoriMcpRoute
   '/api/mori-sync': typeof ApiMoriSyncRoute
+  '/api/tradeup': typeof ApiTradeupRoute
   '/b/$id': typeof BIdRoute
   '/binders/$id': typeof BindersIdRoute
   '/c/$username': typeof CUsernameRoute
@@ -217,6 +226,7 @@ export interface FileRouteTypes {
     | '/api/mori-locate'
     | '/api/mori-mcp'
     | '/api/mori-sync'
+    | '/api/tradeup'
     | '/b/$id'
     | '/binders/$id'
     | '/c/$username'
@@ -239,6 +249,7 @@ export interface FileRouteTypes {
     | '/api/mori-locate'
     | '/api/mori-mcp'
     | '/api/mori-sync'
+    | '/api/tradeup'
     | '/b/$id'
     | '/binders/$id'
     | '/c/$username'
@@ -261,6 +272,7 @@ export interface FileRouteTypes {
     | '/api/mori-locate'
     | '/api/mori-mcp'
     | '/api/mori-sync'
+    | '/api/tradeup'
     | '/b/$id'
     | '/binders/$id'
     | '/c/$username'
@@ -284,6 +296,7 @@ export interface RootRouteChildren {
   ApiMoriLocateRoute: typeof ApiMoriLocateRoute
   ApiMoriMcpRoute: typeof ApiMoriMcpRoute
   ApiMoriSyncRoute: typeof ApiMoriSyncRoute
+  ApiTradeupRoute: typeof ApiTradeupRoute
   BIdRoute: typeof BIdRoute
   BindersIdRoute: typeof BindersIdRoute
   CUsernameRoute: typeof CUsernameRoute
@@ -404,6 +417,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMoriSyncRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/tradeup': {
+      id: '/api/tradeup'
+      path: '/api/tradeup'
+      fullPath: '/api/tradeup'
+      preLoaderRoute: typeof ApiTradeupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/b/$id': {
       id: '/b/$id'
       path: '/b/$id'
@@ -452,6 +472,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMoriLocateRoute: ApiMoriLocateRoute,
   ApiMoriMcpRoute: ApiMoriMcpRoute,
   ApiMoriSyncRoute: ApiMoriSyncRoute,
+  ApiTradeupRoute: ApiTradeupRoute,
   BIdRoute: BIdRoute,
   BindersIdRoute: BindersIdRoute,
   CUsernameRoute: CUsernameRoute,

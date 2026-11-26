@@ -5273,6 +5273,15 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       ".bd-slot .bd-num,.bd-slot .bd-price{display:flex;align-items:center;gap:8px}.bd-slot .bd-price b{font-size:16px;color:#4a4f6e}.bd-slot .bd-num b{font-size:20px;color:#6b7090}.bd-slot-err{color:#c0392b;font-size:14px;margin:0}" +
       ".bd-slot button[type=submit]{background:#5b4bd6;color:#fff;border-color:#5b4bd6}" +
       ".cp-mori-body a{color:#5b4bd6;font-weight:700;text-decoration:underline}" +
+      ".bd-game{display:grid;gap:7px;margin-top:4px}.bd-game p{margin:0}.bd-game-kicker{font-size:8px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mori-primary,#5b4bd6)}.bd-game-kicker b{letter-spacing:.12em}" +
+      ".bd-game-join{display:flex;gap:5px}.bd-game-join input{flex:1;min-width:0;font:inherit;font-size:10px;padding:6px 8px;border:1px solid #e2e0ea;border-radius:7px;background:#f1f0f5;letter-spacing:.1em}.bd-game-join button{font:inherit;font-size:10px;font-weight:800;border:1px solid var(--theme-ddd8ec,#ddd8ec);background:var(--mori-soft,#f1eefc);color:var(--mori-primary,#5b4bd6);border-radius:99px;padding:5px 12px}" +
+      ".bd-game-err{color:#c0392b;font-size:9px}.bd-game-side{border:1px solid var(--theme-ddd8ec,#ddd8ec);border-radius:10px;padding:7px;background:var(--mori-card,#fff);display:grid;gap:5px}.bd-game-side>p{display:flex;justify-content:space-between;font-size:10px}.bd-game-side em{font-style:normal;font-weight:800}" +
+      ".bd-game-cards{list-style:none;margin:0;padding:0;display:grid;gap:4px}.bd-game-cards li{display:flex;align-items:center;gap:6px;font-size:9px}.bd-game-cards img,.bd-game-cards i{width:20px;height:28px;border-radius:2px;object-fit:cover;background:#eee;flex:none}.bd-game-cards span{flex:1;min-width:0;display:grid}.bd-game-cards b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bd-game-cards small{color:var(--mori-muted,#6b7090);font-size:8px}.bd-game-cards em{font-style:normal;font-weight:800;font-size:9px}" +
+      ".bd-game-empty{font-size:9px;color:var(--mori-muted,#6b7090)}.bd-game-add,.bd-game-leave{justify-self:start;font:inherit;font-size:9.5px;font-weight:800;border:1px solid var(--theme-ddd8ec,#ddd8ec);background:var(--mori-soft,#f1eefc);color:var(--mori-primary,#5b4bd6);border-radius:99px;padding:5px 10px}.bd-game-leave{background:none;color:var(--mori-muted,#6b7090);border-color:transparent;padding-left:0}" +
+      ".bd-game-odds{display:grid;gap:3px}.bd-game-bar{position:relative;height:9px;border-radius:99px;background:#e9e6f6;overflow:visible}.bd-game-bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#6f5ce6,#c08ad6)}.bd-game-mark{position:absolute;top:-4px;width:3px;height:17px;border-radius:2px;background:var(--mori-ink,#1f2340);transform:translateX(-50%);animation:bdmark 1.4s cubic-bezier(.2,.8,.2,1)}@keyframes bdmark{from{left:0}}" +
+      ".bd-game-odds p{display:flex;justify-content:space-between;font-size:9px;font-weight:800;color:var(--mori-muted,#6b7090)}.bd-game-agree{display:flex;gap:6px;align-items:flex-start;font-size:9px;color:var(--mori-muted,#6b7090)}.bd-game-wait{font-size:9.5px;color:var(--mori-muted,#6b7090);display:flex;gap:6px;align-items:center}" +
+      ".bd-game-result{font-size:12px;font-weight:800}.bd-game-result.is-won{color:var(--mori-primary,#5b4bd6)}.bd-game-proof{font-size:8.5px;color:var(--mori-muted,#6b7090)}.bd-game-proof code{display:block;word-break:break-all;font-size:7.5px;margin-top:3px}" +
+      ".bd-pick{max-height:46vh;overflow:auto;display:grid;gap:6px}.bd-pick label{display:flex;align-items:center;gap:10px;border:1px solid #e6e2fa;border-radius:12px;padding:8px}.bd-pick label[hidden]{display:none}.bd-pick img,.bd-pick i{width:34px;height:47px;border-radius:3px;object-fit:cover;background:#eee}.bd-pick span{display:grid;flex:1;min-width:0}.bd-pick small{color:#6b7090;font-size:12px}" +
       ".bd-choices{display:grid;gap:5px;margin-top:7px}.bd-choice{font:inherit;font-weight:700;font-size:10px;text-align:left;padding:8.5px 29px 8.5px 10px;border:1px solid var(--theme-ddd8ec,#ddd8ec);border-radius:8.5px;background:var(--mori-card,#fff);color:var(--mori-ink,#1f2340);position:relative;cursor:pointer}" +
       ".bd-choice:hover{border-color:var(--mori-primary,#5b4bd6)}.bd-choice.is-own{color:#6b7090}.bd-choices.is-done .bd-choice{opacity:.45;cursor:default}" +
       ".bd-choices.is-done .bd-choice.is-picked{opacity:1;border:1.5px solid var(--mori-primary,#5b4bd6);background:var(--mori-soft,#f1eefc);color:var(--mori-primary,#5b4bd6)}" +
@@ -5585,6 +5594,155 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     } catch { P.toast("Could not download that file."); }
   });
 
+  /* ---------------- Trade-up game (two collectors in person, fair odds) ---------------- */
+  // Each side's chance is its share of the combined value. Both phones lock in with a hash of a
+  // secret and reveal it after; the server draws from both secrets, so nobody can steer the result.
+  const usdT = (n) => "US$" + Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
+  const pctT = (x) => (Math.round(x * 1000) / 10).toFixed(1) + "%";
+  async function tradeupCall(body) {
+    await fresh();
+    const res = await fetch("/api/tradeup", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token }, body: JSON.stringify(body) });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out.error || "Something went wrong. Please try again.");
+    return out;
+  }
+  const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  async function sha256hex(text) { return hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))); }
+  function mySecret(id) {
+    const k = "bd_tradeup_" + id;
+    let v = localStorage.getItem(k);
+    if (!v) { const b = new Uint8Array(32); crypto.getRandomValues(b); v = hex(b); localStorage.setItem(k, v); }
+    return v;
+  }
+  const tradeupStartHTML = () => '<div class="bd-game" data-bd-game-start><small class="bd-game-kicker">Trade-up game</small>' +
+    "<p>Play with another collector here with you. You both put in cards, I value each side at today's prices, and one fair draw decides who takes all. Your chance of winning is your share of the total value.</p>" +
+    '<div class="cp-mori-actions"><button class="cp-mori-go" data-bd-game-new>Start a game</button></div>' +
+    '<form class="bd-game-join" data-bd-game-join novalidate><input name="code" inputmode="numeric" maxlength="6" placeholder="6-digit code" aria-label="Game code"><button type="submit">Join</button></form>' +
+    '<p class="bd-game-err" hidden></p>' +
+    '<div class="cp-mori-chips"><button data-mori-ask="Give me trade-up ideas for my collection">Trade-up ideas from Mori</button></div></div>';
+  function cardsList(cards, mine) {
+    if (!cards.length) return '<p class="bd-game-empty">' + (mine ? "No cards yet." : "Nothing in yet.") + "</p>";
+    return '<ul class="bd-game-cards">' + cards.map((c) => "<li>" + (c.image ? '<img src="' + esc(/\/(low|high)\.(webp|png|jpg)$/.test(c.image) ? c.image : c.image + "/low.webp") + '" alt="">' : "<i></i>") +
+      "<span><b>" + esc(c.name) + "</b><small>" + esc([c.number, c.set_name].filter(Boolean).join(" · ")) + "</small></span><em>" + usdT(c.usd) + "</em></li>").join("") + "</ul>";
+  }
+  function gameHTML(g) {
+    if (g.status === "expired" || g.status === "cancelled") return '<small class="bd-game-kicker">Trade-up game</small><p>This game ' + (g.status === "expired" ? "has expired." : "was cancelled.") + "</p>";
+    const both = g.me.cards.length && g.them.cards.length;
+    const bar = both ? '<div class="bd-game-odds"><div class="bd-game-bar"><i style="width:' + (g.chance.me * 100) + '%"></i>' +
+      (g.result ? '<b class="bd-game-mark" style="left:' + ((g.role === "host" ? g.result.draw : 1 - g.result.draw) * 100) + '%"></b>' : "") + "</div>" +
+      '<p><span>You ' + pctT(g.chance.me) + "</span><span>Them " + pctT(g.chance.them) + "</span></p></div>" : "";
+    let foot = "";
+    if (g.result) {
+      const won = g.result.winner === "you";
+      foot = '<p class="bd-game-result ' + (won ? "is-won" : "is-lost") + '">' + (won ? "You won! You take all " + (g.me.cards.length + g.them.cards.length) + " cards." : "They won this one. Hand over your cards.") + "</p>" +
+        '<details class="bd-game-proof"><summary>How this was decided</summary><p>Your chance was ' + pctT(g.result.your_chance) + ". The draw " + g.result.draw.toFixed(4) + " came from both phones' secrets: SHA-256 of \"bindory-tradeup:\" + host secret + \":\" + guest secret, first 13 hex digits ÷ 2^52. The host wins below the host's chance.</p>" +
+        "<code>host secret " + esc(g.result.proof.host_secret) + "</code><code>guest secret " + esc(g.result.proof.guest_secret) + "</code><p>You were the " + esc(g.result.proof.you_are) + ".</p></details>" +
+        '<div class="cp-mori-chips"><button data-mori-ask="Help me save a memory of this trade-up game">Save it as a memory</button><button data-bd-game-again>Play again</button></div>';
+    } else if (!g.joined) {
+      foot = '<p class="bd-game-wait">Waiting for the other player to join with code <b>' + esc(g.code) + "</b>…</p>";
+    } else if (g.me.locked && g.them.locked) {
+      foot = '<p class="bd-game-wait"><i class="bd-spin"></i>Rolling…</p>';
+    } else if (g.me.locked) {
+      foot = '<p class="bd-game-wait">You are locked in. Waiting for them…</p><div class="cp-mori-chips"><button data-bd-game-cards>Change my cards</button></div>';
+    } else {
+      foot = (both ? '<label class="bd-game-agree"><input type="checkbox" data-bd-game-adult> I am 18 or over and agree the winner takes all the cards.</label><div class="cp-mori-actions"><button class="cp-mori-go" data-bd-game-lock>Lock in</button></div>' : "") +
+        (g.them.locked ? '<p class="bd-game-wait">They are locked in.</p>' : "");
+    }
+    return '<small class="bd-game-kicker">Trade-up game · code <b>' + esc(g.code) + "</b></small>" +
+      '<div class="bd-game-side"><p><b>Your cards</b><em>' + usdT(g.me.total) + "</em></p>" + cardsList(g.me.cards, true) +
+      (!g.result && !g.me.locked ? '<button class="bd-game-add" data-bd-game-cards>' + (g.me.cards.length ? "Change my cards" : "+ Add cards from my collection") + "</button>" : "") + "</div>" +
+      '<div class="bd-game-side"><p><b>Their cards</b><em>' + usdT(g.them.total) + "</em></p>" + cardsList(g.them.cards, false) + "</div>" +
+      bar + '<p class="bd-game-err" hidden></p>' + foot +
+      (!g.result ? '<button class="bd-game-leave" data-bd-game-leave>Leave game</button>' : "");
+  }
+  const games = new Map(); // id -> latest state
+  function paint(box, g) {
+    games.set(g.id, g);
+    box.dataset.bdGame = g.id;
+    box.innerHTML = gameHTML(g);
+    if (g.status === "open" && !box.dataset.polling) poll(box);
+    if (g.status === "open" && g.me.locked && g.them.locked && !g.me.revealed) revealNow(box, g);
+  }
+  function poll(box) {
+    box.dataset.polling = "1";
+    const tick = async () => {
+      if (!box.isConnected) return;
+      const g = games.get(box.dataset.bdGame);
+      if (!g || g.status !== "open") { delete box.dataset.polling; return; }
+      try {
+        const n = await tradeupCall({ action: "state", id: g.id });
+        if (JSON.stringify(n) !== JSON.stringify(g)) paint(box, n);
+      } catch {}
+      if (box.isConnected && (games.get(box.dataset.bdGame) || {}).status === "open") setTimeout(tick, 2000); else delete box.dataset.polling;
+    };
+    setTimeout(tick, 2000);
+  }
+  async function revealNow(box, g) {
+    if (box.dataset.revealing) return;
+    box.dataset.revealing = "1";
+    try { paint(box, await tradeupCall({ action: "reveal", id: g.id, secret: mySecret(g.id) })); }
+    catch (e) { showErr(box, e.message); }
+    delete box.dataset.revealing;
+  }
+  const showErr = (box, msg) => { const e = box.querySelector(".bd-game-err"); if (e) { e.textContent = msg; e.hidden = false; } else P.toast(msg); };
+  function gameBox(fromEl) { const b = fromEl.closest(".bd-game"); b.removeAttribute("data-bd-game-start"); return b; }
+  // My collection, to pick cards for the game.
+  async function pickCards(current) {
+    const { data } = await sb.from("cards").select("id, name, number, set_name, image_url").order("created_at", { ascending: false }).limit(400);
+    const list = data || [];
+    return new Promise((resolve) => {
+      const box = document.createElement("div");
+      box.className = "bd-photo-sheet bd-slot";
+      const chosen = new Set(current);
+      box.innerHTML = '<form novalidate><p><b>Pick your cards</b> <small>(up to 10)</small></p><input name="q" placeholder="Search your collection" autocomplete="off">' +
+        '<div class="bd-pick">' + (list.length ? list.map((c) => '<label data-name="' + esc((c.name + " " + (c.number || "") + " " + (c.set_name || "")).toLowerCase()) + '"><input type="checkbox" value="' + esc(c.id) + '"' + (chosen.has(c.id) ? " checked" : "") + ">" +
+          (c.image_url ? '<img src="' + esc(c.image_url.endsWith(".webp") ? c.image_url : c.image_url + "/low.webp") + '" alt="">' : "<i></i>") + "<span><b>" + esc(c.name) + "</b><small>" + esc([c.number, c.set_name].filter(Boolean).join(" · ")) + "</small></span></label>").join("") : "<p>No cards in your collection yet.</p>") + "</div>" +
+        '<p class="bd-slot-err" hidden></p><button type="submit">Use these cards</button><button type="button" data-back-skip>Cancel</button></form>';
+      document.body.append(box);
+      const f = box.querySelector("form"), err = box.querySelector(".bd-slot-err");
+      f.elements.q.addEventListener("input", () => { const q = f.elements.q.value.trim().toLowerCase(); box.querySelectorAll(".bd-pick label").forEach((l) => { l.hidden = q && !l.dataset.name.includes(q); }); });
+      box.addEventListener("click", (e) => { if (e.target === box || e.target.closest("[data-back-skip]")) { box.remove(); resolve(null); } });
+      f.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const ids = [...box.querySelectorAll(".bd-pick input:checked")].map((x) => x.value);
+        if (ids.length > 10) { err.textContent = "Up to 10 cards."; err.hidden = false; return; }
+        box.remove(); resolve(ids);
+      });
+    });
+  }
+  app.addEventListener("submit", async (e) => {
+    const f = e.target.closest && e.target.closest("[data-bd-game-join]");
+    if (!f) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const box = gameBox(f);
+    try { paint(box, await tradeupCall({ action: "join", code: f.elements.code.value.trim() })); } catch (err) { showErr(box, err.message); }
+  }, true);
+  app.addEventListener("click", async (e) => {
+    const b = e.target.closest && e.target.closest("[data-bd-game-new],[data-bd-game-cards],[data-bd-game-lock],[data-bd-game-leave],[data-bd-game-again]");
+    if (!b || !app.contains(b)) return;
+    e.stopPropagation();
+    const box = gameBox(b), g = games.get(box.dataset.bdGame);
+    try {
+      if ("bdGameNew" in b.dataset || "bdGameAgain" in b.dataset) {
+        if ("bdGameAgain" in b.dataset) { const nb = document.createElement("div"); nb.className = "bd-game"; box.after(nb); return paint(nb, await tradeupCall({ action: "create" })); }
+        return paint(box, await tradeupCall({ action: "create" }));
+      }
+      if ("bdGameLeave" in b.dataset) return paint(box, await tradeupCall({ action: "cancel", id: g.id }));
+      if ("bdGameCards" in b.dataset) {
+        const ids = await pickCards(g.me.cards.map((c) => c.id));
+        if (!ids) return;
+        b.disabled = true; b.textContent = "Pricing your cards…";
+        return paint(box, await tradeupCall({ action: "cards", id: g.id, card_ids: ids }));
+      }
+      if ("bdGameLock" in b.dataset) {
+        const adult = box.querySelector("[data-bd-game-adult]");
+        if (!adult || !adult.checked) return showErr(box, "Tick the box to confirm you are 18 or over and agree the winner takes all.");
+        b.disabled = true;
+        return paint(box, await tradeupCall({ action: "lock", id: g.id, commit: await sha256hex(mySecret(g.id)), adult: true }));
+      }
+    } catch (err) { b.disabled = false; showErr(box, err.message); }
+  });
+
   // Called from the wireframe's own route() (patched at build time) for typed and tapped messages.
   window.bdLiveRoute = async (text, ui) => {
     // A photo attached from the chat box goes with this message and shows in its bubble.
@@ -5595,6 +5753,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       ui = Object.assign({}, ui, { photos: [shot] });
     }
     if (!(await fresh())) return false; // guests keep the wireframe's scripted Mori
+    // The Trade-up challenge shortcut opens the in-person trade-up game.
+    if (/^start a trade-?up (challenge|game)\.?$/i.test(text.trim())) { ui.say(tradeupStartHTML()); ui.scrollDown(); return true; }
     // "Near me" questions need the collector's location first (the phone asks once).
     let loc = getLoc();
     if (!loc && NEEDS_LOC.test(text)) {
