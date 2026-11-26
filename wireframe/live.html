@@ -349,6 +349,19 @@
     let last = null, lastKind = "";
     for (const r of rows) {
       if (r.role !== "mori" || r.kind === "status") continue;
+      if (r.kind === "choices") {
+        // Mori asked a question: its likely answers, one tap each (like option cards).
+        const list = (r.payload && r.payload.choices) || [];
+        if (list.length) {
+          const html = '<div class="bd-choices">' + list.map((c) => /…$|\.\.\.$/.test(c)
+            ? '<button type="button" class="bd-choice is-own" data-bd-choice-own>' + esc(c) + "</button>"
+            : '<button type="button" class="bd-choice" data-mori-ask="' + esc(c) + '">' + esc(c) + "</button>").join("") + "</div>";
+          if (last) last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", html);
+          else ui.say(html);
+          ui.scrollDown();
+        }
+        continue;
+      }
       if (r.kind === "suggest") {
         // Follow-up questions go under the last bubble of this answer.
         const list = (r.payload && r.payload.suggestions) || [];
@@ -667,6 +680,24 @@
     slotPopup(inp, inp.selectionStart ?? 0);
   });
 
+  // Tapping a choice sends it as the collector's answer; it gets a tick and the others are set aside.
+  document.addEventListener("click", (e) => {
+    const c = e.target.closest && e.target.closest(".bd-choice");
+    if (!c || !app.contains(c) || c.closest(".bd-choices.is-done")) return;
+    const group = c.closest(".bd-choices");
+    if ("bdChoiceOwn" in c.dataset) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      const inp = app.querySelector("[data-mori-input]");
+      if (inp) { inp.value = ""; inp.placeholder = "Type your answer"; inp.focus(); }
+      return;
+    }
+    setTimeout(() => {
+      group.classList.add("is-done");
+      c.classList.add("is-picked");
+      group.querySelectorAll(".bd-choice").forEach((x) => { x.disabled = true; });
+    }, 0);
+  }, true);
+
   // Stop: while Mori is answering, the send button becomes a stop button.
   let liveRun = null;
   const STOP_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>';
@@ -723,6 +754,10 @@
       ".bd-slot .bd-num,.bd-slot .bd-price{display:flex;align-items:center;gap:8px}.bd-slot .bd-price b{font-size:16px;color:#4a4f6e}.bd-slot .bd-num b{font-size:20px;color:#6b7090}.bd-slot-err{color:#c0392b;font-size:14px;margin:0}" +
       ".bd-slot button[type=submit]{background:#5b4bd6;color:#fff;border-color:#5b4bd6}" +
       ".cp-mori-body a{color:#5b4bd6;font-weight:700;text-decoration:underline}" +
+      ".bd-choices{display:grid;gap:7px;margin-top:10px}.bd-choice{font:inherit;font-size:14px;text-align:left;padding:12px 40px 12px 14px;border:1px solid #d9d4f5;border-radius:12px;background:#fff;color:#1f2340;position:relative;cursor:pointer}" +
+      ".bd-choice:hover{border-color:#5b4bd6}.bd-choice.is-own{color:#6b7090}.bd-choices.is-done .bd-choice{opacity:.45;cursor:default}" +
+      ".bd-choices.is-done .bd-choice.is-picked{opacity:1;border:2px solid #1f2340;font-weight:700}" +
+      ".bd-choice.is-picked::after{content:'✓';position:absolute;right:12px;top:50%;transform:translateY(-50%);width:20px;height:20px;border-radius:50%;background:#1f2340;color:#fff;font-size:12px;display:grid;place-items:center}" +
       // Mori's replies sit straight in the chat, without the avatar beside each one.
       "#clickable-prototype [data-mori-thread] .cp-mori-msg.cp-mori-mori>.cp-mori-face{display:none}" +
       "#clickable-prototype [data-mori-thread] .cp-mori-msg.cp-mori-mori .cp-mori-body{border-radius:16px;max-width:100%}" +
@@ -865,7 +900,7 @@
           if (ev.type === "status") { steps.push(ev.text); const label = typing.querySelector(".cp-mori-typing span"); if (label) label.textContent = ev.text; }
           if (ev.type === "text") {
             if (!bubble) { bubble = ui.say("<p></p>"); typing.after(bubble); }
-            streamed += ev.text; bubble.querySelector("p").innerHTML = fmt(streamed.replace(/(^|\n|(?<=[.?!])[ \t]+)[ \t*_]*suggestions?[ \t*_]*:[\s\S]*$/i, "")); ui.scrollDown();
+            streamed += ev.text; bubble.querySelector("p").innerHTML = fmt(streamed.replace(/(^|\n|(?<=[.?!])[ \t]+)[ \t*_]*(suggestions?|choices?)[ \t*_]*:[\s\S]*$/i, "")); ui.scrollDown();
           }
           if (ev.type === "error") throw new Error(ev.text);
           if (ev.type === "done") { typing.remove(); bubble?.remove(); bubble = null; renderRows(ev.rows, ui, steps); }

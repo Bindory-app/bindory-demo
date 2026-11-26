@@ -45,7 +45,7 @@ type DB = SupabaseClient<Database>;
 const MODEL = process.env["AI_GATEWAY_MODEL"] || "google/gemini-2.5-flash";
 
 export const SYSTEM = `You are Mori, a warm, concise Pokémon TCG collector agent inside the Bindory app. Keep replies short (2-5 sentences, or a short list), friendly, US English, sentence case. Use **bold** for card names and key numbers. Write money with thousands separators, e.g. US$2,211.14 or €1,810.68.
-Answer only what the collector asked, in one short, focused answer: no extra analyses, cards or proposals they did not ask for. Put the natural next steps and any extra help into the Suggestions line as prompts the collector can tap (e.g. "What cards should I trade or sell?"), and do not write a separate "Next step" line. If the collector asked several things, answer each in its own short block, separated by a line containing only ---.
+Answer only what the collector asked, in one short, focused answer: no extra analyses, cards or proposals they did not ask for. Lead them to what they are trying to achieve, one step at a time: when you need a decision or a detail from them (which day, how many, which card, which binder, what price, buy or sell), ask ONE short question and give the likely answers as Choices they can tap instead of typing. Write each choice as their reply, with the detail that helps them decide (e.g. "Both days: US$30 with Early Bird", "Just me: 1 ticket", "Moonlight Pokémon binder"). Put the next steps toward their goal (not unrelated features) in Suggestions, and do not write a separate "Next step" line. If the collector asked several things, answer each in its own short block, separated by a line containing only ---.
 - What to chase next: list_my_cards, pick the set or theme they collect most, get_set_cards for it, choose ONE specific card they are missing (prefer a notable one), get_card_prices for it, and in the same answer always call add_to_wishlist for that card (do not ask first; the collector confirms on the card). Your text: one or two sentences on why it fits, with today's price range.
 - Trendy collections: call market_trends and name the 2-3 cards or sets rising fastest, with the change in % and today's price range. Say which of them the collector already owns (list_my_cards).
 - Card shows and events: use the collector's location from the "[App note: the collector's location ...]" (from their phone) and search for that city (e.g. "Pokemon TCG card show <city> <month year>"); never assume a city, not even one remembered from earlier chats. If there is no location note, do not list events for a guessed city: say you need their location, ask them to allow location on their phone or type their city, and stop. Call web_search and web_fetch on the best 1-2 pages, then list 2-3 upcoming events near them with date, venue, opening hours and ticket price exactly as the pages say, and the official event or ticket page as a Markdown link (e.g. [Tickets](https://...)) when a page gives one; say so when a date or venue could not be confirmed. Answer only that: do not list their cards, prices or a card to hunt, and do not call add_to_wishlist. Suggestions must be about these events, e.g. "Help me buy tickets for <event name>", "What should I bring to <event name>?", "Shows in another city?". When asked to help buy tickets: find the event's official ticket page with web_search and web_fetch, then call show_tickets with that page and every ticket option it lists (name, price, when the sale ends) so the collector can pick a ticket and quantity and open the organiser's checkout; reply in one or two short lines. Never buy, book or enter payment details yourself.
@@ -76,7 +76,7 @@ Rules:
 - Treat placeholders like [card name], [card number], [price], @username, [location] as missing details, not facts. Ask for the actual information.
 - Private memories are never shared or used to find other collectors.
 - There is no Pokémon companion feature; you are the collector's companion.
-- Always end your reply with one last line in exactly this form: Suggestions: <question 1> | <question 2> | <question 3>
+- Always end your reply with one last line in exactly one of these forms. When you just asked the collector a question: Choices: <answer 1> | <answer 2> | <answer 3> (2-5 answers that move them toward their goal; add "Something else…" only when they may need to type their own answer). Otherwise: Suggestions: <next step 1> | <next step 2> | <next step 3> (the natural next steps toward what they want, written as they would say them).
   These are 2-3 short follow-ups the collector might tap next, written as the collector speaking (under 40 characters each), that you can actually help with; they carry the next steps and extras you left out of the answer. After a pre-grade report, include "Where can I send it for grading?" and "What does grading cost?".`;
 
 const str = (d: string) => ({ type: "string", description: d });
@@ -1488,6 +1488,20 @@ export async function finishMoriTurn(
       .filter((x) => x.length > 2 && x.length <= 80);
     finalText = finalText.slice(0, tail.index).trim();
   }
+  // Answers the collector can tap when Mori asked them something ("Choices: Both days | ...").
+  let choices: string[] = [];
+  const asked = /(?:^|\n|(?<=[.?!])[ \t]+)[ \t*_]*choices?[ \t*_]*:(.*)$/is.exec(finalText);
+  if (asked) {
+    choices = [
+      ...new Set(
+        (asked[1] ?? "")
+          .split(/\||\n/)
+          .map((x) => x.replace(/^[\s"'*•\-\d.)]+|[\s"'*]+$/g, ""))
+          .filter((x) => x.length > 0 && x.length <= 90),
+      ),
+    ].slice(0, 6);
+    finalText = finalText.slice(0, asked.index).trim();
+  }
   if (rows.some((r) => r.kind === "grade"))
     suggestions = [
       "Where can I send it for grading?",
@@ -1495,7 +1509,7 @@ export async function finishMoriTurn(
       // "This card" is the card in the photos; Mori resolves it from the chat.
       "Price check this card",
     ];
-  if (!suggestions.length)
+  if (!suggestions.length && !choices.length)
     suggestions = [
       "Price check a card",
       "What card should I chase next?",
@@ -1503,7 +1517,10 @@ export async function finishMoriTurn(
     ];
   suggestions = [...new Set(suggestions)].slice(0, 3);
   // A confirmation card is the next step itself; follow-ups come after Confirm instead.
-  if (rows.some((r) => r.kind === "confirm" || r.kind === "photos")) suggestions = [];
+  if (rows.some((r) => r.kind === "confirm" || r.kind === "photos")) suggestions = choices = [];
+  // A question with answers to tap replaces the general next steps.
+  if (choices.length >= 2) suggestions = [];
+  else choices = [];
   if (cardsOnly) finalText = "";
 
   if (finalText) {
@@ -1517,6 +1534,7 @@ export async function finishMoriTurn(
         r.kind === "video" ||
         r.kind === "people" ||
         r.kind === "price" ||
+        r.kind === "tickets" ||
         r.kind === "photos",
     );
     // One bubble per part: a reply that answers several things separates them with a "---" line.
@@ -1528,6 +1546,8 @@ export async function finishMoriTurn(
     if (confirmAt >= 0) rows.splice(confirmAt, 0, ...replies);
     else rows.push(...replies);
   }
+  if (choices.length)
+    rows.push({ role: "mori", kind: "choices", content: "", payload: { choices } });
   if (suggestions.length)
     rows.push({ role: "mori", kind: "suggest", content: "", payload: { suggestions } });
   if (hr) {
