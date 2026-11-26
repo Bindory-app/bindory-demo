@@ -855,6 +855,206 @@
     else cityPopup();
   });
 
+  /* ---------------- Sidebar tabs with the collector's own data (Muse-style) ---------------- */
+  // The prototype draws the sidebar and sample panels; signed in, each tab shows real data.
+  const PM = (P.moriPanelLive = P.moriPanelLive || {});
+  const when = (d) => { const t = new Date(d), days = Math.floor((Date.now() - t) / 864e5); return days <= 0 ? t.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : days === 1 ? "Yesterday" : days < 7 ? t.toLocaleDateString("en-US", { weekday: "short" }) : t.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+  const clip = (t, n) => { t = String(t || "").replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
+  const askBtn = (q, label) => '<button class="cp-mp-go" data-mori-panel-ask="' + esc(q) + '">' + esc(label) + "</button>";
+
+  // History: past conversations (a new one starts after a 3-hour pause), newest first.
+  async function chatsList() {
+    const { data } = await sb.from("mori_messages").select("role, kind, content, created_at").order("created_at", { ascending: false }).limit(600);
+    const rows = (data || []).slice().reverse(), chats = [];
+    for (const r of rows) {
+      const last = chats[chats.length - 1];
+      if (!last || new Date(r.created_at) - new Date(last.end) > 3 * 36e5) chats.push({ start: r.created_at, end: r.created_at, title: "", reply: "", n: 0 });
+      const c = chats[chats.length - 1];
+      c.end = r.created_at; c.n++;
+      if (r.role === "user" && !c.title) c.title = r.content;
+      if (r.role === "mori" && r.kind === "text" && !c.reply) c.reply = r.content;
+    }
+    return chats.filter((c) => c.title).reverse();
+  }
+  PM.history = async () => {
+    if (!(await fresh())) return "";
+    const chats = await chatsList();
+    if (!chats.length) return '<p class="cp-mp-empty">Your chats with Mori will appear here.</p>';
+    return '<div class="cp-mp-search"><input type="search" placeholder="Search your chats" data-mp-search aria-label="Search your chats"></div><div class="cp-mp-list">' +
+      chats.slice(0, 60).map((c) => '<button class="cp-mp-row" data-bd-chat="' + esc(c.start) + "|" + esc(c.end) + '"><b>' + esc(clip(c.title.split("\n")[0], 80)) + "</b><small>" + esc(clip(c.reply, 110)) + "</small><i>" + esc(when(c.end)) + "</i></button>").join("") + "</div>";
+  };
+  // Opening a past chat shows it in Main chat and lets the collector carry on from there.
+  app.addEventListener("click", async (e) => {
+    const b = e.target.closest && e.target.closest("[data-bd-chat]");
+    if (!b || !app.contains(b)) return;
+    e.stopPropagation();
+    const [start, end] = b.dataset.bdChat.split("|");
+    const { data } = await sb.from("mori_messages").select("id, role, kind, content, payload, created_at").gte("created_at", start).lte("created_at", end).order("created_at");
+    const U = P.moriUI;
+    if (!U) return;
+    P.moriShowTab("chat");
+    U.reset();
+    const ui = { addMsg: U.addMsg, say: U.say, scrollDown: U.scrollDown };
+    let batch = [];
+    const flush = () => { if (batch.length) { renderRows(batch, ui, []); batch = []; } };
+    for (const r of data || []) {
+      if (r.role === "user") { flush(); U.userSays(String(r.content).replace(/\n\[Sent [^\]]*\]$/, "")); }
+      else batch.push(r);
+    }
+    flush();
+    chatSince = new Date(new Date(start).getTime() - 1000).toISOString();
+    U.scrollDown();
+  });
+
+  // Ideas: next steps picked from the collector's own binders, wish list, prices and location.
+  PM.ideas = async () => {
+    if (!(await fresh())) return "";
+    const [bins, wish, priced, orders] = await Promise.all([
+      sb.from("binders").select("name, binder_cards(count)").order("created_at"),
+      sb.from("wishlist").select("name").order("created_at", { ascending: false }).limit(3),
+      sb.from("mori_messages").select("payload").eq("kind", "price").order("created_at", { ascending: false }).limit(1),
+      sb.from("market_orders").select("side, card_name, price_usd, status").eq("status", "open").limit(2),
+    ]);
+    const ideas = [];
+    const b = (bins.data || []).map((x) => ({ name: x.name, n: (x.binder_cards && x.binder_cards[0] && x.binder_cards[0].count) || 0 })).sort((a, c) => c.n - a.n)[0];
+    if (b) ideas.push(["Grow your " + b.name + " binder", b.n + " cards so far. Mori can find the cards that would complete it.", "Which cards would complete my " + b.name + " binder?"]);
+    const loc = getLoc();
+    ideas.push([loc ? "Card shows near " + loc.place.split(",")[0] : "Card shows near you", "Find the next shows, their dates and ticket prices.", "When is the next card show near me?"]);
+    const w = (wish.data || [])[0];
+    if (w) ideas.push(["Chase " + w.name, "It is on your wish list. Set a buy order and Mori watches the listings for you.", "Set a buy order for " + w.name]);
+    const pc = priced.data && priced.data[0] && priced.data[0].payload && priced.data[0].payload.card;
+    if (pc && pc.name) ideas.push(["Should you grade " + pc.name + "?", "You checked its price recently. A pre-grade shows if grading would pay off.", "Pre-grade my " + pc.name + (pc.number ? " " + pc.number : "")]);
+    ideas.push(["See what went up", "Check which of your cards rose in value this month.", "Which of my cards went up in value this month?"]);
+    if (!(orders.data || []).length) ideas.push(["Bring in your Collectr cards", "Paste your public Collectr link and Mori adds the cards to a binder.", "Add cards to my collection"]);
+    return '<p class="cp-mp-intro">Ideas from Mori, picked from your collection.</p><div class="cp-mp-cards">' +
+      ideas.slice(0, 6).map(([t, sub, q]) => '<div class="cp-mp-card"><b>' + esc(t) + "</b><p>" + esc(sub) + "</p>" + askBtn(q, "Do it with Mori") + "</div>").join("") + "</div>";
+  };
+
+  // Goals: kept on the collector's profile (settings.goals); Mori helps work toward each one.
+  async function loadGoals() {
+    const { data } = await sb.from("profiles").select("settings").eq("id", session.user.id).single();
+    const settings = (data && data.settings) || {};
+    return { settings, goals: Array.isArray(settings.goals) ? settings.goals : [] };
+  }
+  async function saveGoals(goals) {
+    const { settings } = await loadGoals();
+    const { error } = await sb.from("profiles").update({ settings: Object.assign({}, settings, { goals }) }).eq("id", session.user.id);
+    if (error) throw error;
+  }
+  PM.goals = async () => {
+    if (!(await fresh())) return "";
+    const { goals } = await loadGoals();
+    return (goals.length ? '<div class="cp-mp-cards">' + goals.map((g) => {
+      const pct = g.target ? Math.min(100, Math.round((g.done || 0) / g.target * 100)) : 0;
+      return '<div class="cp-mp-card" data-bd-goal="' + esc(g.id) + '"><b>' + esc(g.title) + "</b>" +
+        (g.target ? '<div class="cp-mp-bar"><i style="width:' + pct + '%"></i></div><small>' + (g.done || 0) + " of " + g.target + (g.unit ? " " + esc(g.unit) : "") + "</small>" : "") +
+        '<div class="cp-mp-acts">' + askBtn("Help me with my goal: " + g.title, "Work on it with Mori") +
+        (g.target ? '<button class="cp-mp-go" data-bd-goal-step="1">+1</button>' : "") + '<button class="cp-mp-go" data-bd-goal-done>' + (pct >= 100 ? "Remove" : "Done") + "</button></div></div>";
+    }).join("") + "</div>" : '<p class="cp-mp-empty">Set a collecting goal and Mori will help you get there.</p>') +
+      '<button class="cp-mp-new" data-bd-goal-new>+ New goal</button>';
+  };
+  const GOAL_KINDS = [["Complete a set or binder", "cards", "Complete Evolving Skies alt arts", 8], ["Get a specific card", "", "Get a PSA 10 Umbreon", 1], ["Stay within a monthly budget", "US$ spent", "Keep card spending under US$300 a month", 300], ["Grade my best cards", "cards", "Grade my 3 best cards", 3], ["Something else", "", "", 0]];
+  function goalPopup() {
+    if (document.querySelector(".bd-slot")) return;
+    const box = document.createElement("div");
+    box.className = "bd-photo-sheet bd-slot";
+    box.innerHTML = '<form novalidate><p><b>New goal</b></p><div class="bd-choices">' + GOAL_KINDS.map((k, i) => '<button type="button" class="bd-choice" data-goal-kind="' + i + '">' + esc(k[0]) + "</button>").join("") + "</div>" +
+      '<label>Your goal<input name="title" maxlength="80" autocapitalize="sentences" placeholder="e.g. Complete Evolving Skies alt arts"></label>' +
+      '<label>Target (optional)<input name="target" inputmode="numeric" maxlength="6" placeholder="e.g. 8"></label>' +
+      '<p class="bd-slot-err" hidden></p><button type="submit">Save goal</button><button type="button" data-back-skip>Cancel</button></form>';
+    document.body.append(box);
+    const f = box.querySelector("form"), err = box.querySelector(".bd-slot-err");
+    let unit = "";
+    box.addEventListener("click", (e) => {
+      if (e.target === box || e.target.closest("[data-back-skip]")) return box.remove();
+      const k = e.target.closest("[data-goal-kind]");
+      if (!k) return;
+      const g = GOAL_KINDS[Number(k.dataset.goalKind)];
+      box.querySelectorAll("[data-goal-kind]").forEach((x) => x.classList.toggle("is-picked", x === k));
+      unit = g[1]; f.elements.title.placeholder = g[2] || "Describe your goal"; f.elements.target.placeholder = g[3] ? "e.g. " + g[3] : "Optional";
+      f.elements.title.focus();
+    });
+    f.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const title = f.elements.title.value.trim().replace(/\s+/g, " "), target = Number(f.elements.target.value.replace(/[^\d]/g, "")) || 0;
+      if (title.length < 3) { err.textContent = "Write your goal in a few words."; err.hidden = false; return; }
+      try {
+        const { goals } = await loadGoals();
+        goals.unshift({ id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()), title, target, done: 0, unit, created: new Date().toISOString() });
+        await saveGoals(goals.slice(0, 20));
+        box.remove(); P.toast("Goal saved"); P.moriShowTab("goals");
+      } catch { err.textContent = "Could not save the goal. Please try again."; err.hidden = false; }
+    });
+  }
+  app.addEventListener("click", async (e) => {
+    const b = e.target.closest && e.target.closest("[data-bd-goal-new],[data-bd-goal-step],[data-bd-goal-done]");
+    if (!b || !app.contains(b)) return;
+    e.stopPropagation();
+    if ("bdGoalNew" in b.dataset) return goalPopup();
+    const id = b.closest("[data-bd-goal]").dataset.bdGoal;
+    try {
+      const { goals } = await loadGoals();
+      const g = goals.find((x) => x.id === id);
+      if (!g) return;
+      if ("bdGoalStep" in b.dataset) g.done = Math.min(g.target || 0, (g.done || 0) + 1);
+      const next = "bdGoalDone" in b.dataset ? goals.filter((x) => x.id !== id) : goals;
+      await saveGoals(next);
+      if ("bdGoalDone" in b.dataset) P.toast(g.target && (g.done || 0) >= g.target ? "Goal removed" : "Goal completed. Nice work!");
+      P.moriShowTab("goals");
+    } catch { P.toast("Could not update the goal."); }
+  });
+
+  // Library: everything Mori made or saved for the collector, filterable by kind.
+  PM.library = async () => {
+    if (!(await fresh())) return "";
+    const [mems, bins, made] = await Promise.all([
+      sb.from("memories").select("title, place, created_at").order("created_at", { ascending: false }).limit(40),
+      sb.from("binders").select("name, created_at, binder_cards(count)").order("created_at", { ascending: false }).limit(40),
+      sb.from("mori_messages").select("id, kind, content, payload, created_at").in("kind", ["price", "tickets", "video", "sync"]).order("created_at", { ascending: false }).limit(60),
+    ]);
+    const items = [];
+    for (const m of mems.data || []) items.push({ k: "Memories", t: m.title, sub: m.place || "Saved memory", at: m.created_at, act: 'data-bd-lib-go="collection"' });
+    for (const b of bins.data || []) items.push({ k: "Binders", t: b.name, sub: ((b.binder_cards && b.binder_cards[0] && b.binder_cards[0].count) || 0) + " cards", at: b.created_at, act: 'data-bd-lib-go="collection"' });
+    const seenPrice = new Set();
+    for (const r of made.data || []) {
+      const p = r.payload || {};
+      if (r.kind === "price" && p.card && p.card.name && !seenPrice.has(p.card.name)) {
+        seenPrice.add(p.card.name);
+        const v = p.scale && p.scale.market;
+        items.push({ k: "Price checks", t: p.card.name + (p.card.number ? " " + p.card.number : ""), sub: v ? "US$" + Number(v).toLocaleString("en-US") + " market price" : "Price check", at: r.created_at, act: 'data-mori-panel-ask="' + esc("Price check: " + p.card.name + (p.card.number ? " " + p.card.number : "")) + '"' });
+      }
+      if (r.kind === "tickets" && p.url) items.push({ k: "Tickets", t: p.event || "Tickets", sub: [p.date, p.venue].filter(Boolean).join(" · "), at: r.created_at, act: 'data-bd-lib-url="' + esc(p.url) + '"' });
+      if (r.kind === "video" && p.title) items.push({ k: "Videos", t: p.title, sub: "Video plan, " + ((p.frames || []).length) + " scenes", at: r.created_at, act: "" });
+      if (r.kind === "sync" && p.sync && p.sync.files) p.sync.files.forEach((f, n) => items.push({ k: "Files", t: String(f.filename).split("/").pop(), sub: "From your Collectr sync", at: r.created_at, act: 'data-bd-lib-file="' + esc(r.id) + "|" + n + '"' }));
+    }
+    if (!items.length) return '<p class="cp-mp-empty">Memories, binders, price checks, tickets and files Mori makes for you will collect here.</p>';
+    items.sort((a, c) => new Date(c.at) - new Date(a.at));
+    const kinds = ["All"].concat(["Memories", "Binders", "Price checks", "Tickets", "Videos", "Files"].filter((k) => items.some((x) => x.k === k)));
+    return '<div class="cp-mp-segs" data-bd-lib-segs>' + kinds.map((k, i) => '<button class="' + (i ? "" : "is-on") + '" data-bd-lib-kind="' + esc(k) + '">' + esc(k) + "</button>").join("") + "</div>" +
+      '<div class="cp-mp-list">' + items.slice(0, 80).map((x) => '<button class="cp-mp-row" data-kind="' + esc(x.k) + '" ' + x.act + '><small class="cp-mp-kind">' + esc(x.k) + "</small><b>" + esc(x.t) + "</b><small>" + esc(x.sub) + "</small><i>" + esc(when(x.at)) + "</i></button>").join("") + "</div>";
+  };
+  app.addEventListener("click", async (e) => {
+    const b = e.target.closest && e.target.closest("[data-bd-lib-kind],[data-bd-lib-go],[data-bd-lib-url],[data-bd-lib-file]");
+    if (!b || !app.contains(b)) return;
+    e.stopPropagation();
+    if (b.dataset.bdLibKind) {
+      const k = b.dataset.bdLibKind, panel = b.closest("[data-mori-panel]");
+      panel.querySelectorAll("[data-bd-lib-kind]").forEach((x) => x.classList.toggle("is-on", x === b));
+      panel.querySelectorAll(".cp-mp-row").forEach((r) => { r.hidden = k !== "All" && r.dataset.kind !== k; });
+      return;
+    }
+    if (b.dataset.bdLibGo) { P.moriShowTab("chat"); P.moriUI.nav(b.dataset.bdLibGo); return; }
+    if (b.dataset.bdLibUrl) { window.open(b.dataset.bdLibUrl, "_blank", "noopener"); return; }
+    const [id, n] = b.dataset.bdLibFile.split("|");
+    try {
+      const res = await syncCall(id, "file", { n: Number(n) });
+      if (!res.ok) throw new Error(String(res.status));
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a"); a.href = url; a.download = b.querySelector("b").textContent; document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch { P.toast("Could not download that file."); }
+  });
+
   // Called from the wireframe's own route() (patched at build time) for typed and tapped messages.
   window.bdLiveRoute = async (text, ui) => {
     // A photo attached from the chat box goes with this message and shows in its bubble.

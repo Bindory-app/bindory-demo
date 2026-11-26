@@ -1587,6 +1587,59 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 #clickable-prototype .cp-mem-tpl .cp-mem-field{display:inline-flex;align-items:center;max-width:100%;border:1px solid #6250d8;border-radius:6px;background:#fff;padding:0 0 0 7px;vertical-align:baseline;box-shadow:0 0 0 3px #6250d822}
 #clickable-prototype .cp-mem-tpl .cp-mem-field b{font-size:10px;font-weight:800;color:var(--mori-ink);line-height:1.6}
 #clickable-prototype .cp-mem-tpl .cp-mem-field .cp-mem-input{border:0;box-shadow:none;padding:1px 7px 1px 1px;min-width:0;background:none}
+
+/* ---- Muse-style header: menu, Mori's circle and name tag (no title or greeting) ---- */
+#clickable-prototype .cp-mori-top{display:grid;grid-template-columns:1fr auto 1fr;align-items:start;margin:0 0 10px}
+#clickable-prototype .cp-mori-top>.cp-mori-menu{justify-self:start}
+#clickable-prototype .cp-mori-top>.cp-mori-auth,#clickable-prototype .cp-mori-top>.cp-mori-top-spacer{justify-self:end;grid-column:3;grid-row:1}
+#clickable-prototype .cp-app.is-guest .cp-mori-top-spacer{display:none}
+#clickable-prototype .cp-mori-menu{width:38px;height:38px;border-radius:50%;border:1px solid var(--mori-line);background:var(--mori-card);color:var(--mori-ink);display:grid;place-items:center;cursor:pointer;padding:0}
+#clickable-prototype .cp-mori-menu svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+#clickable-prototype .cp-mori-id{flex-direction:column;gap:0;align-items:center;grid-column:2;grid-row:1}
+#clickable-prototype .cp-mori-id .cp-mori-face{width:58px;height:58px}
+#clickable-prototype .cp-mori-name{position:relative;margin-top:-9px;background:var(--mori-soft,#f1eefc);border:1px solid var(--mori-line);color:var(--mori-ink);border-radius:99px;padding:2px 11px;font-size:11px;font-weight:800;line-height:1.5}
+#clickable-prototype .cp-mori-room-link i[data-mori-level-chip]{display:none}
+
+/* ---- Sidebar ---- */
+#clickable-prototype .cp-mori-screen.has-drawer{overflow:hidden}
+#clickable-prototype .cp-mori-scrim{position:absolute;left:0;right:0;background:#1d1a3340;opacity:0;transition:opacity .2s;z-index:40}
+#clickable-prototype .cp-mori-scrim.is-open{opacity:1}
+#clickable-prototype .cp-mori-drawer{position:absolute;left:0;width:78%;max-width:300px;background:var(--mori-card,#fff);box-shadow:8px 0 30px #1d1a3326;z-index:41;transform:translateX(-102%);transition:transform .22s ease;display:flex;flex-direction:column;padding:18px 14px 14px;box-sizing:border-box;border-radius:0 22px 22px 0}
+#clickable-prototype .cp-mori-drawer.is-open{transform:none}
+#clickable-prototype .cp-mori-drawer-title{font-size:22px;font-weight:800;letter-spacing:-.02em;margin:4px 6px 18px;color:var(--mori-ink)}
+#clickable-prototype .cp-mori-drawer-kicker{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mori-muted);margin:0 6px 6px}
+#clickable-prototype .cp-mori-tabs{display:grid;gap:2px}
+#clickable-prototype .cp-mori-tabs button{display:flex;align-items:center;gap:12px;border:0;background:none;font:inherit;font-size:14px;font-weight:700;color:var(--mori-ink);padding:11px 10px;border-radius:12px;cursor:pointer;text-align:left}
+#clickable-prototype .cp-mori-tabs button.is-on{background:var(--mori-soft,#f1eefc)}
+#clickable-prototype .cp-mori-tabs svg,#clickable-prototype .cp-mori-drawer-foot svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+#clickable-prototype .cp-mori-drawer-foot{margin-top:auto;display:flex;gap:8px;align-items:center}
+#clickable-prototype .cp-mori-drawer-icon{width:40px;height:40px;border-radius:50%;border:1px solid var(--mori-line);background:var(--mori-card);color:var(--mori-ink);display:grid;place-items:center;cursor:pointer;padding:0;flex:none}
+#clickable-prototype .cp-mori-drawer-search{flex:1;height:40px;border-radius:99px;border:1px solid var(--mori-line);background:var(--mori-soft,#f6f4fd);color:var(--mori-muted);display:flex;align-items:center;gap:8px;padding:0 14px;font:inherit;font-size:13px;cursor:pointer}
+
+/* ---- Tab panels (History, Ideas, Goals, Library) in place of the chat ---- */
+#clickable-prototype .cp-mori-screen.is-panel .cp-mori-thread,#clickable-prototype .cp-mori-screen.is-panel .cp-mori-composer{display:none}
+#clickable-prototype .cp-mori-panel{display:grid;gap:10px;padding-bottom:20px}
+#clickable-prototype .cp-mp-loading,#clickable-prototype .cp-mp-intro,#clickable-prototype .cp-mp-empty{color:var(--mori-muted);font-size:12px;margin:2px 2px 0}
+#clickable-prototype .cp-mp-list,#clickable-prototype .cp-mp-cards{display:grid;gap:8px}
+#clickable-prototype .cp-mp-row{display:grid;gap:2px;text-align:left;border:1px solid var(--mori-line);background:var(--mori-card);border-radius:14px;padding:10px 12px;font:inherit;color:var(--mori-ink);position:relative;cursor:pointer}
+#clickable-prototype .cp-mp-row b{font-size:13px;line-height:1.3;padding-right:64px}
+#clickable-prototype .cp-mp-row small{font-size:11px;color:var(--mori-muted);line-height:1.4}
+#clickable-prototype .cp-mp-row i{position:absolute;right:12px;top:11px;font-style:normal;font-size:10px;color:var(--mori-muted)}
+#clickable-prototype .cp-mp-row .cp-mp-kind{font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mori-kicker,#6b5bd6)}
+#clickable-prototype .cp-mp-card{border:1px solid var(--mori-line);background:var(--mori-card);border-radius:16px;padding:12px;display:grid;gap:6px}
+#clickable-prototype .cp-mp-card b{font-size:14px;line-height:1.3}
+#clickable-prototype .cp-mp-card p{margin:0;font-size:12px;line-height:1.45;color:var(--mori-muted)}
+#clickable-prototype .cp-mp-card small{font-size:11px;color:var(--mori-muted)}
+#clickable-prototype .cp-mp-go,#clickable-prototype .cp-mp-new{justify-self:start;border:1px solid var(--mori-line);background:var(--mori-soft,#f1eefc);color:var(--mori-primary);border-radius:99px;padding:7px 12px;font:inherit;font-size:12px;font-weight:800;cursor:pointer}
+#clickable-prototype .cp-mp-new{justify-self:stretch;text-align:center;padding:11px}
+#clickable-prototype .cp-mp-bar{height:6px;border-radius:99px;background:var(--mori-soft,#f1eefc);overflow:hidden}
+#clickable-prototype .cp-mp-bar i{display:block;height:100%;background:var(--mori-primary);border-radius:99px}
+#clickable-prototype .cp-mp-search input{width:100%;box-sizing:border-box;border:1px solid var(--mori-line);background:var(--mori-card);border-radius:99px;padding:10px 14px;font:inherit;font-size:13px;color:var(--mori-ink)}
+#clickable-prototype .cp-mp-segs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
+#clickable-prototype .cp-mp-segs button{flex:none;border:1px solid var(--mori-line);background:var(--mori-card);border-radius:99px;padding:6px 11px;font:inherit;font-size:11.5px;font-weight:700;color:var(--mori-muted);cursor:pointer}
+#clickable-prototype .cp-mp-segs button.is-on{background:var(--mori-ink);border-color:var(--mori-ink);color:#fff}
+#clickable-prototype .cp-mp-acts{display:flex;gap:6px;flex-wrap:wrap}
+#clickable-prototype .cp-mori-screen{position:relative}
 </style>
 <section id="clickable-prototype" aria-label="Clickable Bindory prototype">
   <div class="cp-shell">
@@ -1652,7 +1705,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
           <nav class="cp-bottom" aria-label="Main app navigation"><button data-go="home" aria-label="Home"></button><button data-go="explore" aria-label="Search"></button><button data-go="story" aria-label="My Journey"></button><button data-go="binder" aria-label="My Binder"></button><button data-go="profile" aria-label="My Profile"></button></nav>
         </section>
         <section class="cp-screen cp-mori-screen" data-screen="mori">
-          <div class="cp-top cp-mori-top"><div class="cp-mori-id"><button class="cp-mori-room-link" data-go="mori-room" aria-label="Open Mori Studio"><span class="cp-mori-face"><img data-img="mori-face" alt=""></span><i data-mori-level-chip>Lv 3</i></button><div><p class="cp-kicker">Your Bindory Agent</p><h1>Ask Mori</h1></div></div><button class="cp-mori-reset" data-mori-reset aria-label="Start a new conversation">New chat</button><div class="cp-mori-auth"><button data-mori-auth="login">Log in</button><button class="cp-mori-go" data-mori-auth="signup">Sign up</button></div></div>
+          <div class="cp-top cp-mori-top"><button type="button" class="cp-mori-menu" data-mori-menu aria-label="Open menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M5 15h14"/></svg></button><div class="cp-mori-id"><button class="cp-mori-room-link" data-go="mori-room" aria-label="Open Mori Studio"><span class="cp-mori-face"><img data-img="mori-face" alt=""></span><i data-mori-level-chip hidden>Lv 3</i></button><span class="cp-mori-name" data-mori-panel-title>Mori</span></div><div class="cp-mori-auth"><button data-mori-auth="login">Log in</button><button class="cp-mori-go" data-mori-auth="signup">Sign up</button></div><span class="cp-mori-top-spacer" aria-hidden="true"></span></div>
+          <div class="cp-mori-panel" data-mori-panel hidden></div>
           <div class="cp-mori-thread" data-mori-thread aria-live="polite"></div>
           <form class="cp-mori-composer" data-mori-form autocomplete="off">
             <div class="cp-mori-attachment" data-mori-attachment hidden></div>
@@ -1664,6 +1718,23 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
             </div>
           </form>
           <nav class="cp-bottom" aria-label="Main app navigation"></nav>
+          <div class="cp-mori-scrim" data-mori-drawer-close hidden></div>
+          <aside class="cp-mori-drawer" data-mori-drawer aria-label="Mori menu" hidden>
+            <p class="cp-mori-drawer-title">Mori</p>
+            <p class="cp-mori-drawer-kicker">Tabs</p>
+            <nav class="cp-mori-tabs">
+              <button data-mori-tab="chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18.5V7a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H8.5z"/></svg>Main chat</button>
+              <button data-mori-tab="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v3.2h3.2M12 8v4.3l2.8 1.7"/></svg>History</button>
+              <button data-mori-tab="ideas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg>Ideas</button>
+              <button data-mori-tab="goals"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.2l2.4 2.4 4.8-5"/></svg>Goals</button>
+              <button data-mori-tab="library"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="7.5" r="3"/><path d="M16.5 4.5l3 5h-6zM4.5 14.5h6v6h-6z"/><rect x="13.5" y="14.5" width="6" height="6" rx="3"/></svg>Library</button>
+            </nav>
+            <div class="cp-mori-drawer-foot">
+              <button class="cp-mori-drawer-icon" data-mori-drawer-settings aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6L18 18M6 18l1.4-1.4M16.6 7.4L18 6"/></svg></button>
+              <button class="cp-mori-drawer-search" data-mori-drawer-search><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>Search</button>
+              <button class="cp-mori-drawer-icon" data-mori-reset data-mori-drawer-new aria-label="New chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5H7a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3h9a3 3 0 0 0 3-3v-5M17.5 4.5l2 2L13 13l-2.7.7.7-2.7z"/></svg></button>
+            </div>
+          </aside>
         </section>
         <section class="cp-screen cp-collection-screen" data-screen="collection">
           <div class="cp-top"><div><p class="cp-kicker">Everything you keep</p><h1>My Collection</h1></div><button class="cp-col-add" data-mori-ask="Add a card to my collection" aria-label="Add with Mori">＋</button></div>
@@ -2781,9 +2852,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       return '<div class="cp-mori-marquee-row" style="--row:' + i + '"><div class="cp-mori-marquee-track">' + set(false) + set(true) + '</div></div>';
     }).join('') + '</div></div>';
   function renderEmpty() {
-    thread.innerHTML =
-      '<div class="cp-mori-hello"><b>' + (guest ? 'Hi, I am Mori.<br>What shall we do today?' : 'Hi ' + (window.bdFirstName || 'Wing') + ',<br>what shall we do today?') + '</b></div>' +
-      primaryButtons() + suggestionRows();
+    /* Muse-style: no greeting or title, just Mori's circle and name tag above the shortcuts. */
+    thread.innerHTML = primaryButtons() + suggestionRows();
     moriScreen.classList.add('is-empty');
   }
   const isEmpty = () => !qs('.cp-mori-msg', thread);
@@ -4109,10 +4179,13 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   moriScreen.addEventListener('click', e => {
     if (!guest) return;
     const b = e.target.closest('button'); if (!b || 'moriAuth' in b.dataset) return;
+    /* Guests can open the menu and look through its tabs (sample content). */
+    if ('moriMenu' in b.dataset || b.dataset.moriTab || 'moriDrawerSearch' in b.dataset || b.closest('.cp-mp-segs')) return;
     e.stopPropagation(); e.preventDefault();
     const typed = input.value.trim();
     if ('moriSend' in b.dataset) M.afterAuth = typed ? { text: typed, label: 'Continue: “' + (typed.length > 26 ? typed.slice(0, 26) + '…' : typed) + '”' } : null;
-    else M.afterAuth = b.dataset.moriPrompt ? { prompt: b.dataset.moriPrompt, label: b.textContent.trim() } : (b.dataset.moriAsk ? { text: b.dataset.moriAsk, label: 'Continue' } : null);
+    else M.afterAuth = b.dataset.moriPrompt ? { prompt: b.dataset.moriPrompt, label: b.textContent.trim() } : (b.dataset.moriAsk || b.dataset.moriPanelAsk ? { text: b.dataset.moriAsk || b.dataset.moriPanelAsk, label: 'Continue' } : null);
+    if (b.dataset.moriPanelAsk) showTab('chat');
     openAuth('signup');
   }, true);
   qs('[data-mori-form]', moriScreen).addEventListener('submit', e => {
@@ -4127,6 +4200,88 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     if (b.dataset.moriAuth) { openAuth(b.dataset.moriAuth); return; }
     if ('authClose' in b.dataset) { closeAuth(); return; }
     if (b.dataset.authProvider) connect(b);
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* Sidebar (Muse-style): Main chat, History, Ideas, Goals, Library      */
+  /* ------------------------------------------------------------------ */
+  /* Each tab shows a panel in place of the chat. The prototype shows sample content; the live demo
+     replaces it with the collector's own data through P.moriPanelLive[tab] (async, returns HTML). */
+  const drawer = qs('[data-mori-drawer]', moriScreen), scrim = qs('[data-mori-drawer-close]', moriScreen);
+  const panel = qs('[data-mori-panel]', moriScreen), panelTitle = qs('[data-mori-panel-title]', moriScreen);
+  const TAB_TITLES = { chat: 'Mori', history: 'History', ideas: 'Ideas', goals: 'Goals', library: 'Library' };
+  P.moriPanelLive = P.moriPanelLive || {};
+  P.moriUI = { addMsg, say, userSays, scrollDown, reset, thread, nav };
+  let moriTab = 'chat';
+  /* The drawer covers the visible part of the (scrolling) Mori screen, which stays still while it is open. */
+  const openDrawer = () => {
+    const top = moriScreen.scrollTop + 'px', h = moriScreen.clientHeight + 'px';
+    [drawer, scrim].forEach(x => { x.style.top = top; x.style.height = h; x.hidden = false; });
+    moriScreen.classList.add('has-drawer');
+    requestAnimationFrame(() => { drawer.classList.add('is-open'); scrim.classList.add('is-open'); });
+  };
+  const closeDrawer = () => {
+    drawer.classList.remove('is-open'); scrim.classList.remove('is-open');
+    setTimeout(() => { if (!drawer.classList.contains('is-open')) { drawer.hidden = true; scrim.hidden = true; moriScreen.classList.remove('has-drawer'); } }, 220);
+  };
+  const ago = d => { const days = Math.round((Date.now() - d) / 864e5); return days <= 0 ? 'Today' : days === 1 ? 'Yesterday' : days < 7 ? days + ' days ago' : new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
+  const askBtn = (q, label) => '<button class="cp-mp-go" data-mori-panel-ask="' + esc(q) + '">' + esc(label || 'Ask Mori') + '</button>';
+  const SAMPLE = {
+    history: () => '<div class="cp-mp-search"><input type="search" placeholder="Search your chats" data-mp-search aria-label="Search your chats"></div><div class="cp-mp-list">' + [
+      ['Price check: Mega Charizard X ex 125/094', 'Market price US$511, PSA 10 recent sales US$1,075', 0],
+      ['When is the next card show near me?', 'East Bay Card Show, Sat 28 to Sun 29 Nov', 1],
+      ['Sell Umbreon VMAX 215/203 for at least US$450', 'Sell order set, front and back photos saved', 3],
+      ['I traded my Pikachu for a Charizard', 'Memory saved: League night trade', 6]
+    ].map(([t, sub, d]) => '<button class="cp-mp-row" data-mori-panel-ask="' + esc(t) + '"><b>' + esc(t) + '</b><small>' + esc(sub) + '</small><i>' + ago(Date.now() - d * 864e5) + '</i></button>').join('') + '</div>',
+    ideas: () => '<p class="cp-mp-intro">Ideas from Mori, picked from your collection.</p><div class="cp-mp-cards">' + [
+      ['Finish your Moonlight binder', '9 cards so far. Three more Darkness types would complete the night sky theme.', 'Which cards would complete my Moonlight Pokémon binder?'],
+      ['Umbreon VMAX went up 8%', 'It is near its 30-day high. A sell order could catch the peak.', 'Set a sell order for Umbreon VMAX 215/203'],
+      ['Card show this weekend', 'East Bay Card Show is 20 minutes away. Early Bird tickets are US$15.', 'Help me buy tickets for East Bay Card Show'],
+      ['Grade your best card', 'Your Mega Charizard X ex looks like a PSA 9 candidate.', 'Pre-grade my Mega Charizard X ex 125/094']
+    ].map(([t, sub, q]) => '<div class="cp-mp-card"><b>' + esc(t) + '</b><p>' + esc(sub) + '</p>' + askBtn(q, 'Do it with Mori') + '</div>').join('') + '</div>',
+    goals: () => '<div class="cp-mp-cards">' + [
+      ['Complete Evolving Skies alt arts', 3, 8, 'Help me with my goal: Complete Evolving Skies alt arts'],
+      ['Keep card spending under US$300 a month', 210, 300, 'Help me with my goal: Keep card spending under US$300 a month'],
+      ['Get a PSA 10 Umbreon', 0, 1, 'Help me with my goal: Get a PSA 10 Umbreon']
+    ].map(([t, n, of, q]) => '<div class="cp-mp-card"><b>' + esc(t) + '</b><div class="cp-mp-bar"><i style="width:' + Math.round(n / of * 100) + '%"></i></div><small>' + n + ' of ' + of + '</small>' + askBtn(q, 'Work on it with Mori') + '</div>').join('') +
+      '</div><button class="cp-mp-new" data-mori-panel-ask="Help me set a new collecting goal">+ New goal</button>',
+    library: () => '<div class="cp-mp-segs">' + ['All', 'Memories', 'Binders', 'Price checks', 'Files'].map((x, i) => '<button class="' + (i ? '' : 'is-on') + '">' + x + '</button>').join('') + '</div><div class="cp-mp-list">' + [
+      ['Memory', 'League night trade', 'Pikachu for Charizard with @minacollects'],
+      ['Binder', 'Moonlight Pokémon', '9 cards'],
+      ['Price check', 'Mega Charizard X ex 125/094', 'US$511 market price'],
+      ['File', 'collectr-proposal.md', 'From your Collectr sync']
+    ].map(([k, t, sub]) => '<div class="cp-mp-row"><small class="cp-mp-kind">' + esc(k) + '</small><b>' + esc(t) + '</b><small>' + esc(sub) + '</small></div>').join('') + '</div>'
+  };
+  async function showTab(tab) {
+    moriTab = tab;
+    closeDrawer();
+    qsa('[data-mori-tab]', drawer).forEach(b => b.classList.toggle('is-on', b.dataset.moriTab === tab));
+    moriScreen.classList.toggle('is-panel', tab !== 'chat');
+    panelTitle.textContent = TAB_TITLES[tab] || 'Mori';
+    if (tab === 'chat') { panel.hidden = true; panel.innerHTML = ''; return; }
+    panel.hidden = false;
+    panel.innerHTML = '<div class="cp-mp-loading">Loading…</div>';
+    let html = '';
+    try { html = P.moriPanelLive[tab] && !guest ? await P.moriPanelLive[tab]() : ''; } catch { html = ''; }
+    if (moriTab !== tab) return;
+    panel.innerHTML = html || SAMPLE[tab]();
+    panel.scrollTop = 0;
+  }
+  P.moriShowTab = showTab;
+  app.addEventListener('click', e => {
+    const b = e.target.closest('button,[data-mori-drawer-close]'); if (!b || !moriScreen.contains(b)) return;
+    if ('moriMenu' in b.dataset) { openDrawer(); return; }
+    if ('moriDrawerClose' in b.dataset) { closeDrawer(); return; }
+    if (b.dataset.moriTab) { showTab(b.dataset.moriTab); return; }
+    if ('moriDrawerSearch' in b.dataset) { showTab('history').then(() => { const f = qs('[data-mp-search]', panel); if (f) f.focus(); }); return; }
+    if ('moriDrawerSettings' in b.dataset) { closeDrawer(); nav('profile-settings'); return; }
+    if ('moriDrawerNew' in b.dataset) { showTab('chat'); return; } /* the reset itself runs in the main handler */
+    if (b.dataset.moriPanelAsk) { const q = b.dataset.moriPanelAsk; showTab('chat'); if (!isEmpty()) reset(); send(q); }
+  });
+  app.addEventListener('input', e => {
+    const f = e.target.closest && e.target.closest('[data-mp-search]'); if (!f) return;
+    const q = f.value.trim().toLowerCase();
+    qsa('.cp-mp-row', panel).forEach(r => { r.hidden = q && !r.textContent.toLowerCase().includes(q); });
   });
 
   /* ------------------------------------------------------------------ */
@@ -5105,6 +5260,206 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     e.stopPropagation();
     if ("bdLocRetry" in b.dataset) { b.closest(".cp-mori-chips")?.remove(); resendPending(); }
     else cityPopup();
+  });
+
+  /* ---------------- Sidebar tabs with the collector's own data (Muse-style) ---------------- */
+  // The prototype draws the sidebar and sample panels; signed in, each tab shows real data.
+  const PM = (P.moriPanelLive = P.moriPanelLive || {});
+  const when = (d) => { const t = new Date(d), days = Math.floor((Date.now() - t) / 864e5); return days <= 0 ? t.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : days === 1 ? "Yesterday" : days < 7 ? t.toLocaleDateString("en-US", { weekday: "short" }) : t.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+  const clip = (t, n) => { t = String(t || "").replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
+  const askBtn = (q, label) => '<button class="cp-mp-go" data-mori-panel-ask="' + esc(q) + '">' + esc(label) + "</button>";
+
+  // History: past conversations (a new one starts after a 3-hour pause), newest first.
+  async function chatsList() {
+    const { data } = await sb.from("mori_messages").select("role, kind, content, created_at").order("created_at", { ascending: false }).limit(600);
+    const rows = (data || []).slice().reverse(), chats = [];
+    for (const r of rows) {
+      const last = chats[chats.length - 1];
+      if (!last || new Date(r.created_at) - new Date(last.end) > 3 * 36e5) chats.push({ start: r.created_at, end: r.created_at, title: "", reply: "", n: 0 });
+      const c = chats[chats.length - 1];
+      c.end = r.created_at; c.n++;
+      if (r.role === "user" && !c.title) c.title = r.content;
+      if (r.role === "mori" && r.kind === "text" && !c.reply) c.reply = r.content;
+    }
+    return chats.filter((c) => c.title).reverse();
+  }
+  PM.history = async () => {
+    if (!(await fresh())) return "";
+    const chats = await chatsList();
+    if (!chats.length) return '<p class="cp-mp-empty">Your chats with Mori will appear here.</p>';
+    return '<div class="cp-mp-search"><input type="search" placeholder="Search your chats" data-mp-search aria-label="Search your chats"></div><div class="cp-mp-list">' +
+      chats.slice(0, 60).map((c) => '<button class="cp-mp-row" data-bd-chat="' + esc(c.start) + "|" + esc(c.end) + '"><b>' + esc(clip(c.title.split("\n")[0], 80)) + "</b><small>" + esc(clip(c.reply, 110)) + "</small><i>" + esc(when(c.end)) + "</i></button>").join("") + "</div>";
+  };
+  // Opening a past chat shows it in Main chat and lets the collector carry on from there.
+  app.addEventListener("click", async (e) => {
+    const b = e.target.closest && e.target.closest("[data-bd-chat]");
+    if (!b || !app.contains(b)) return;
+    e.stopPropagation();
+    const [start, end] = b.dataset.bdChat.split("|");
+    const { data } = await sb.from("mori_messages").select("id, role, kind, content, payload, created_at").gte("created_at", start).lte("created_at", end).order("created_at");
+    const U = P.moriUI;
+    if (!U) return;
+    P.moriShowTab("chat");
+    U.reset();
+    const ui = { addMsg: U.addMsg, say: U.say, scrollDown: U.scrollDown };
+    let batch = [];
+    const flush = () => { if (batch.length) { renderRows(batch, ui, []); batch = []; } };
+    for (const r of data || []) {
+      if (r.role === "user") { flush(); U.userSays(String(r.content).replace(/\n\[Sent [^\]]*\]$/, "")); }
+      else batch.push(r);
+    }
+    flush();
+    chatSince = new Date(new Date(start).getTime() - 1000).toISOString();
+    U.scrollDown();
+  });
+
+  // Ideas: next steps picked from the collector's own binders, wish list, prices and location.
+  PM.ideas = async () => {
+    if (!(await fresh())) return "";
+    const [bins, wish, priced, orders] = await Promise.all([
+      sb.from("binders").select("name, binder_cards(count)").order("created_at"),
+      sb.from("wishlist").select("name").order("created_at", { ascending: false }).limit(3),
+      sb.from("mori_messages").select("payload").eq("kind", "price").order("created_at", { ascending: false }).limit(1),
+      sb.from("market_orders").select("side, card_name, price_usd, status").eq("status", "open").limit(2),
+    ]);
+    const ideas = [];
+    const b = (bins.data || []).map((x) => ({ name: x.name, n: (x.binder_cards && x.binder_cards[0] && x.binder_cards[0].count) || 0 })).sort((a, c) => c.n - a.n)[0];
+    if (b) ideas.push(["Grow your " + b.name + " binder", b.n + " cards so far. Mori can find the cards that would complete it.", "Which cards would complete my " + b.name + " binder?"]);
+    const loc = getLoc();
+    ideas.push([loc ? "Card shows near " + loc.place.split(",")[0] : "Card shows near you", "Find the next shows, their dates and ticket prices.", "When is the next card show near me?"]);
+    const w = (wish.data || [])[0];
+    if (w) ideas.push(["Chase " + w.name, "It is on your wish list. Set a buy order and Mori watches the listings for you.", "Set a buy order for " + w.name]);
+    const pc = priced.data && priced.data[0] && priced.data[0].payload && priced.data[0].payload.card;
+    if (pc && pc.name) ideas.push(["Should you grade " + pc.name + "?", "You checked its price recently. A pre-grade shows if grading would pay off.", "Pre-grade my " + pc.name + (pc.number ? " " + pc.number : "")]);
+    ideas.push(["See what went up", "Check which of your cards rose in value this month.", "Which of my cards went up in value this month?"]);
+    if (!(orders.data || []).length) ideas.push(["Bring in your Collectr cards", "Paste your public Collectr link and Mori adds the cards to a binder.", "Add cards to my collection"]);
+    return '<p class="cp-mp-intro">Ideas from Mori, picked from your collection.</p><div class="cp-mp-cards">' +
+      ideas.slice(0, 6).map(([t, sub, q]) => '<div class="cp-mp-card"><b>' + esc(t) + "</b><p>" + esc(sub) + "</p>" + askBtn(q, "Do it with Mori") + "</div>").join("") + "</div>";
+  };
+
+  // Goals: kept on the collector's profile (settings.goals); Mori helps work toward each one.
+  async function loadGoals() {
+    const { data } = await sb.from("profiles").select("settings").eq("id", session.user.id).single();
+    const settings = (data && data.settings) || {};
+    return { settings, goals: Array.isArray(settings.goals) ? settings.goals : [] };
+  }
+  async function saveGoals(goals) {
+    const { settings } = await loadGoals();
+    const { error } = await sb.from("profiles").update({ settings: Object.assign({}, settings, { goals }) }).eq("id", session.user.id);
+    if (error) throw error;
+  }
+  PM.goals = async () => {
+    if (!(await fresh())) return "";
+    const { goals } = await loadGoals();
+    return (goals.length ? '<div class="cp-mp-cards">' + goals.map((g) => {
+      const pct = g.target ? Math.min(100, Math.round((g.done || 0) / g.target * 100)) : 0;
+      return '<div class="cp-mp-card" data-bd-goal="' + esc(g.id) + '"><b>' + esc(g.title) + "</b>" +
+        (g.target ? '<div class="cp-mp-bar"><i style="width:' + pct + '%"></i></div><small>' + (g.done || 0) + " of " + g.target + (g.unit ? " " + esc(g.unit) : "") + "</small>" : "") +
+        '<div class="cp-mp-acts">' + askBtn("Help me with my goal: " + g.title, "Work on it with Mori") +
+        (g.target ? '<button class="cp-mp-go" data-bd-goal-step="1">+1</button>' : "") + '<button class="cp-mp-go" data-bd-goal-done>' + (pct >= 100 ? "Remove" : "Done") + "</button></div></div>";
+    }).join("") + "</div>" : '<p class="cp-mp-empty">Set a collecting goal and Mori will help you get there.</p>') +
+      '<button class="cp-mp-new" data-bd-goal-new>+ New goal</button>';
+  };
+  const GOAL_KINDS = [["Complete a set or binder", "cards", "Complete Evolving Skies alt arts", 8], ["Get a specific card", "", "Get a PSA 10 Umbreon", 1], ["Stay within a monthly budget", "US$ spent", "Keep card spending under US$300 a month", 300], ["Grade my best cards", "cards", "Grade my 3 best cards", 3], ["Something else", "", "", 0]];
+  function goalPopup() {
+    if (document.querySelector(".bd-slot")) return;
+    const box = document.createElement("div");
+    box.className = "bd-photo-sheet bd-slot";
+    box.innerHTML = '<form novalidate><p><b>New goal</b></p><div class="bd-choices">' + GOAL_KINDS.map((k, i) => '<button type="button" class="bd-choice" data-goal-kind="' + i + '">' + esc(k[0]) + "</button>").join("") + "</div>" +
+      '<label>Your goal<input name="title" maxlength="80" autocapitalize="sentences" placeholder="e.g. Complete Evolving Skies alt arts"></label>' +
+      '<label>Target (optional)<input name="target" inputmode="numeric" maxlength="6" placeholder="e.g. 8"></label>' +
+      '<p class="bd-slot-err" hidden></p><button type="submit">Save goal</button><button type="button" data-back-skip>Cancel</button></form>';
+    document.body.append(box);
+    const f = box.querySelector("form"), err = box.querySelector(".bd-slot-err");
+    let unit = "";
+    box.addEventListener("click", (e) => {
+      if (e.target === box || e.target.closest("[data-back-skip]")) return box.remove();
+      const k = e.target.closest("[data-goal-kind]");
+      if (!k) return;
+      const g = GOAL_KINDS[Number(k.dataset.goalKind)];
+      box.querySelectorAll("[data-goal-kind]").forEach((x) => x.classList.toggle("is-picked", x === k));
+      unit = g[1]; f.elements.title.placeholder = g[2] || "Describe your goal"; f.elements.target.placeholder = g[3] ? "e.g. " + g[3] : "Optional";
+      f.elements.title.focus();
+    });
+    f.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const title = f.elements.title.value.trim().replace(/\s+/g, " "), target = Number(f.elements.target.value.replace(/[^\d]/g, "")) || 0;
+      if (title.length < 3) { err.textContent = "Write your goal in a few words."; err.hidden = false; return; }
+      try {
+        const { goals } = await loadGoals();
+        goals.unshift({ id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()), title, target, done: 0, unit, created: new Date().toISOString() });
+        await saveGoals(goals.slice(0, 20));
+        box.remove(); P.toast("Goal saved"); P.moriShowTab("goals");
+      } catch { err.textContent = "Could not save the goal. Please try again."; err.hidden = false; }
+    });
+  }
+  app.addEventListener("click", async (e) => {
+    const b = e.target.closest && e.target.closest("[data-bd-goal-new],[data-bd-goal-step],[data-bd-goal-done]");
+    if (!b || !app.contains(b)) return;
+    e.stopPropagation();
+    if ("bdGoalNew" in b.dataset) return goalPopup();
+    const id = b.closest("[data-bd-goal]").dataset.bdGoal;
+    try {
+      const { goals } = await loadGoals();
+      const g = goals.find((x) => x.id === id);
+      if (!g) return;
+      if ("bdGoalStep" in b.dataset) g.done = Math.min(g.target || 0, (g.done || 0) + 1);
+      const next = "bdGoalDone" in b.dataset ? goals.filter((x) => x.id !== id) : goals;
+      await saveGoals(next);
+      if ("bdGoalDone" in b.dataset) P.toast(g.target && (g.done || 0) >= g.target ? "Goal removed" : "Goal completed. Nice work!");
+      P.moriShowTab("goals");
+    } catch { P.toast("Could not update the goal."); }
+  });
+
+  // Library: everything Mori made or saved for the collector, filterable by kind.
+  PM.library = async () => {
+    if (!(await fresh())) return "";
+    const [mems, bins, made] = await Promise.all([
+      sb.from("memories").select("title, place, created_at").order("created_at", { ascending: false }).limit(40),
+      sb.from("binders").select("name, created_at, binder_cards(count)").order("created_at", { ascending: false }).limit(40),
+      sb.from("mori_messages").select("id, kind, content, payload, created_at").in("kind", ["price", "tickets", "video", "sync"]).order("created_at", { ascending: false }).limit(60),
+    ]);
+    const items = [];
+    for (const m of mems.data || []) items.push({ k: "Memories", t: m.title, sub: m.place || "Saved memory", at: m.created_at, act: 'data-bd-lib-go="collection"' });
+    for (const b of bins.data || []) items.push({ k: "Binders", t: b.name, sub: ((b.binder_cards && b.binder_cards[0] && b.binder_cards[0].count) || 0) + " cards", at: b.created_at, act: 'data-bd-lib-go="collection"' });
+    const seenPrice = new Set();
+    for (const r of made.data || []) {
+      const p = r.payload || {};
+      if (r.kind === "price" && p.card && p.card.name && !seenPrice.has(p.card.name)) {
+        seenPrice.add(p.card.name);
+        const v = p.scale && p.scale.market;
+        items.push({ k: "Price checks", t: p.card.name + (p.card.number ? " " + p.card.number : ""), sub: v ? "US$" + Number(v).toLocaleString("en-US") + " market price" : "Price check", at: r.created_at, act: 'data-mori-panel-ask="' + esc("Price check: " + p.card.name + (p.card.number ? " " + p.card.number : "")) + '"' });
+      }
+      if (r.kind === "tickets" && p.url) items.push({ k: "Tickets", t: p.event || "Tickets", sub: [p.date, p.venue].filter(Boolean).join(" · "), at: r.created_at, act: 'data-bd-lib-url="' + esc(p.url) + '"' });
+      if (r.kind === "video" && p.title) items.push({ k: "Videos", t: p.title, sub: "Video plan, " + ((p.frames || []).length) + " scenes", at: r.created_at, act: "" });
+      if (r.kind === "sync" && p.sync && p.sync.files) p.sync.files.forEach((f, n) => items.push({ k: "Files", t: String(f.filename).split("/").pop(), sub: "From your Collectr sync", at: r.created_at, act: 'data-bd-lib-file="' + esc(r.id) + "|" + n + '"' }));
+    }
+    if (!items.length) return '<p class="cp-mp-empty">Memories, binders, price checks, tickets and files Mori makes for you will collect here.</p>';
+    items.sort((a, c) => new Date(c.at) - new Date(a.at));
+    const kinds = ["All"].concat(["Memories", "Binders", "Price checks", "Tickets", "Videos", "Files"].filter((k) => items.some((x) => x.k === k)));
+    return '<div class="cp-mp-segs" data-bd-lib-segs>' + kinds.map((k, i) => '<button class="' + (i ? "" : "is-on") + '" data-bd-lib-kind="' + esc(k) + '">' + esc(k) + "</button>").join("") + "</div>" +
+      '<div class="cp-mp-list">' + items.slice(0, 80).map((x) => '<button class="cp-mp-row" data-kind="' + esc(x.k) + '" ' + x.act + '><small class="cp-mp-kind">' + esc(x.k) + "</small><b>" + esc(x.t) + "</b><small>" + esc(x.sub) + "</small><i>" + esc(when(x.at)) + "</i></button>").join("") + "</div>";
+  };
+  app.addEventListener("click", async (e) => {
+    const b = e.target.closest && e.target.closest("[data-bd-lib-kind],[data-bd-lib-go],[data-bd-lib-url],[data-bd-lib-file]");
+    if (!b || !app.contains(b)) return;
+    e.stopPropagation();
+    if (b.dataset.bdLibKind) {
+      const k = b.dataset.bdLibKind, panel = b.closest("[data-mori-panel]");
+      panel.querySelectorAll("[data-bd-lib-kind]").forEach((x) => x.classList.toggle("is-on", x === b));
+      panel.querySelectorAll(".cp-mp-row").forEach((r) => { r.hidden = k !== "All" && r.dataset.kind !== k; });
+      return;
+    }
+    if (b.dataset.bdLibGo) { P.moriShowTab("chat"); P.moriUI.nav(b.dataset.bdLibGo); return; }
+    if (b.dataset.bdLibUrl) { window.open(b.dataset.bdLibUrl, "_blank", "noopener"); return; }
+    const [id, n] = b.dataset.bdLibFile.split("|");
+    try {
+      const res = await syncCall(id, "file", { n: Number(n) });
+      if (!res.ok) throw new Error(String(res.status));
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a"); a.href = url; a.download = b.querySelector("b").textContent; document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch { P.toast("Could not download that file."); }
   });
 
   // Called from the wireframe's own route() (patched at build time) for typed and tapped messages.
