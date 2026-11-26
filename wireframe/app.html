@@ -5410,14 +5410,16 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   const clip = (t, n) => { t = String(t || "").replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
   const askBtn = (q, label) => '<button class="cp-mp-go" data-mori-panel-ask="' + esc(q) + '">' + esc(label) + "</button>";
 
-  // History: past conversations (a new one starts after a 3-hour pause), newest first.
+  // History: one entry per chat, newest first. Each message carries its chat (payload.chat, the
+  // chat's start time); older messages without one fall back to a 3-hour pause.
   async function chatsList() {
-    const { data } = await sb.from("mori_messages").select("role, kind, content, created_at").order("created_at", { ascending: false }).limit(600);
+    const { data } = await sb.from("mori_messages").select("role, kind, content, payload, created_at").order("created_at", { ascending: false }).limit(800);
     const rows = (data || []).slice().reverse(), chats = [];
     for (const r of rows) {
-      const last = chats[chats.length - 1];
-      if (!last || new Date(r.created_at) - new Date(last.end) > 3 * 36e5) chats.push({ start: r.created_at, end: r.created_at, title: "", reply: "", n: 0 });
-      const c = chats[chats.length - 1];
+      const key = r.role === "user" && r.payload && typeof r.payload.chat === "string" ? r.payload.chat : null;
+      let c = chats[chats.length - 1];
+      const startsNew = !c || (r.role === "user" && (key ? key !== c.key : c.key || new Date(r.created_at) - new Date(c.end) > 3 * 36e5));
+      if (startsNew) { c = { key, start: r.created_at, end: r.created_at, title: "", reply: "", n: 0 }; chats.push(c); }
       c.end = r.created_at; c.n++;
       if (r.role === "user" && !c.title) c.title = r.content;
       if (r.role === "mori" && r.kind === "text" && !c.reply) c.reply = r.content;
@@ -5429,14 +5431,14 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     const chats = await chatsList();
     if (!chats.length) return '<p class="cp-mp-empty">Your chats with Mori will appear here.</p>';
     return '<div class="cp-mp-search"><input type="search" placeholder="Search your chats" data-mp-search aria-label="Search your chats"></div><div class="cp-mp-list">' +
-      chats.slice(0, 60).map((c) => '<button class="cp-mp-row" data-bd-chat="' + esc(c.start) + "|" + esc(c.end) + '"><b>' + esc(clip(c.title.split("\n")[0], 80)) + "</b><small>" + esc(clip(c.reply, 110)) + "</small><i>" + esc(when(c.end)) + "</i></button>").join("") + "</div>";
+      chats.slice(0, 60).map((c) => '<button class="cp-mp-row" data-bd-chat="' + esc(c.start) + "|" + esc(c.end) + "|" + esc(c.key || "") + '"><b>' + esc(clip(c.title.split("\n")[0], 80)) + "</b><small>" + esc(clip(c.reply, 110)) + "</small><i>" + esc(when(c.end)) + "</i></button>").join("") + "</div>";
   };
   // Opening a past chat shows it in Main chat and lets the collector carry on from there.
   app.addEventListener("click", async (e) => {
     const b = e.target.closest && e.target.closest("[data-bd-chat]");
     if (!b || !app.contains(b)) return;
     e.stopPropagation();
-    const [start, end] = b.dataset.bdChat.split("|");
+    const [start, end, key] = b.dataset.bdChat.split("|");
     const { data } = await sb.from("mori_messages").select("id, role, kind, content, payload, created_at").gte("created_at", start).lte("created_at", end).order("created_at");
     const U = P.moriUI;
     if (!U) return;
@@ -5450,7 +5452,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       else batch.push(r);
     }
     flush();
-    chatSince = new Date(new Date(start).getTime() - 1000).toISOString();
+    // Carrying on keeps adding to this same chat (same key), so it stays one History entry.
+    chatSince = key || new Date(new Date(start).getTime() - 1000).toISOString();
     U.scrollDown();
   });
 

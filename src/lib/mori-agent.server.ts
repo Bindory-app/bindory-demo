@@ -1285,7 +1285,9 @@ export async function runMori(
     : message;
   const ins = await db
     .from("mori_messages")
-    .insert({ role: "user", content: stored })
+    // The chat this message belongs to (its start time, sent by the app), so History lists one
+    // entry per chat and New chat always starts a new one.
+    .insert({ role: "user", content: stored, payload: since ? ({ chat: since } as Json) : null })
     .select("created_at")
     .single();
   if (ins.error) throw ins.error;
