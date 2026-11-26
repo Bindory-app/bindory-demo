@@ -1602,9 +1602,9 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 
 /* ---- Sidebar ---- */
 #clickable-prototype .cp-mori-screen.has-drawer{overflow:hidden}
-#clickable-prototype .cp-mori-scrim{position:absolute;left:0;right:0;background:#1d1a3340;opacity:0;transition:opacity .2s;z-index:40}
+#clickable-prototype .cp-mori-scrim{position:absolute;top:0;bottom:0;left:0;right:0;background:#1d1a3340;opacity:0;transition:opacity .2s;z-index:40}
 #clickable-prototype .cp-mori-scrim.is-open{opacity:1}
-#clickable-prototype .cp-mori-drawer{position:absolute;left:0;width:78%;max-width:300px;background:var(--mori-card,#fff);box-shadow:8px 0 30px #1d1a3326;z-index:41;transform:translateX(-102%);transition:transform .22s ease;display:flex;flex-direction:column;padding:18px 14px 14px;box-sizing:border-box;border-radius:0 22px 22px 0}
+#clickable-prototype .cp-mori-drawer{position:absolute;top:0;bottom:0;left:0;width:78%;max-width:300px;background:var(--mori-card,#fff);box-shadow:8px 0 30px #1d1a3326;z-index:41;transform:translateX(-102%);transition:transform .22s ease;display:flex;flex-direction:column;padding:18px 14px 14px;box-sizing:border-box;border-radius:0 22px 22px 0}
 #clickable-prototype .cp-mori-drawer.is-open{transform:none}
 #clickable-prototype .cp-mori-drawer-title{font-size:22px;font-weight:800;letter-spacing:-.02em;margin:4px 6px 18px;color:var(--mori-ink)}
 #clickable-prototype .cp-mori-drawer-kicker{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mori-muted);margin:0 6px 6px}
@@ -1639,7 +1639,6 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 #clickable-prototype .cp-mp-segs button{flex:none;border:1px solid var(--mori-line);background:var(--mori-card);border-radius:99px;padding:6px 11px;font:inherit;font-size:11.5px;font-weight:700;color:var(--mori-muted);cursor:pointer}
 #clickable-prototype .cp-mp-segs button.is-on{background:var(--mori-ink);border-color:var(--mori-ink);color:#fff}
 #clickable-prototype .cp-mp-acts{display:flex;gap:6px;flex-wrap:wrap}
-#clickable-prototype .cp-mori-screen{position:relative}
 </style>
 <section id="clickable-prototype" aria-label="Clickable Bindory prototype">
   <div class="cp-shell">
@@ -4213,10 +4212,10 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   P.moriPanelLive = P.moriPanelLive || {};
   P.moriUI = { addMsg, say, userSays, scrollDown, reset, thread, nav };
   let moriTab = 'chat';
-  /* The drawer covers the visible part of the (scrolling) Mori screen, which stays still while it is open. */
+  /* The drawer covers the phone screen (like the bottom menu, it is placed against the app frame,
+     not the scrolling Mori screen); the screen stays still while it is open. */
   const openDrawer = () => {
-    const top = moriScreen.scrollTop + 'px', h = moriScreen.clientHeight + 'px';
-    [drawer, scrim].forEach(x => { x.style.top = top; x.style.height = h; x.hidden = false; });
+    [drawer, scrim].forEach(x => { x.hidden = false; });
     moriScreen.classList.add('has-drawer');
     requestAnimationFrame(() => { drawer.classList.add('is-open'); scrim.classList.add('is-open'); });
   };
