@@ -60,10 +60,13 @@ export const Route = createFileRoute("/api/mori-chat")({
           return new Response("Photo must belong to you", { status: 403 });
         // Where the collector is (a place name their phone gave), for "near me" questions.
         const location =
-          "location" in body &&
-          typeof body.location === "string" &&
-          /^[\p{L}\p{N} ,.'’()-]{2,100}$/u.test(body.location.trim())
-            ? body.location.trim()
+          "location" in body && typeof body.location === "string"
+            ? body.location
+                .normalize("NFC")
+                .replace(/[^\p{L}\p{M}\p{N} ,.'’()&/–-]/gu, "")
+                .replace(/\s+/g, " ")
+                .trim()
+                .slice(0, 100) || undefined
             : undefined;
         const encoder = new TextEncoder();
         const abort = new AbortController();
