@@ -1658,6 +1658,18 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 #clickable-prototype .cp-fill-go{font:inherit;font-size:10px;font-weight:800;border:0;border-radius:10px;padding:8px 14px;background:var(--mori-primary);color:#fff;cursor:pointer}
 #clickable-prototype .cp-fill.is-done{opacity:.6}
 #clickable-prototype .cp-fill.is-done .cp-fill-go{background:#b9b0f0;cursor:default}
+#clickable-prototype .cp-fill{gap:7px}
+#clickable-prototype .cp-fill-row{display:flex;align-items:center;gap:5px;flex-wrap:nowrap;font-size:10.5px;color:var(--mori-ink);white-space:nowrap}
+#clickable-prototype .cp-fill-row .cp-fill-slot{margin:0;min-width:0}
+#clickable-prototype .cp-fill-row .cp-fill-slot.is-name,#clickable-prototype .cp-fill-row .cp-fill-slot.is-binder,#clickable-prototype .cp-fill-row .cp-fill-slot.is-price{flex:1 1 auto;width:auto;max-width:none}
+#clickable-prototype .cp-fill-row .cp-fill-slot.is-num{flex:0 0 58px;width:58px;padding-left:6px;padding-right:6px}
+#clickable-prototype .cp-fill-row .cp-fill-slash{margin:0}
+#clickable-prototype .cp-fill-row .cp-fill-go{margin-left:auto;flex:none;padding:7px 12px}
+#clickable-prototype .cp-fill-row .cp-fill-tabs{flex:none;gap:4px}
+#clickable-prototype .cp-fill-row .cp-fill-tabs button{padding:4px 9px}
+#clickable-prototype .cp-fill-row.cp-fill-new[hidden]{display:none}
+/* New chat: a snug pill in the top right */
+#clickable-prototype .cp-mori-top>.cp-mori-reset{grid-column:3;grid-row:1;justify-self:end;align-self:start;width:auto;padding:4px 10px;line-height:1.3}
 </style>
 <section id="clickable-prototype" aria-label="Clickable Bindory prototype">
   <div class="cp-shell">
@@ -3156,20 +3168,29 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     add: { ask: 'Which card are you adding? Fill in the <b>card name and number</b> and pick a binder, or take a photo and I will identify it.' }
   };
   const fillSlot = (name, ph, cls = '', extra = '') => '<input class="cp-fill-slot ' + cls + '" name="' + name + '" placeholder="' + ph + '" autocomplete="off"' + extra + '>';
-  const cardSlots = () => fillSlot('name', 'card name', 'is-name', ' autocapitalize="words" maxlength="60"') + ' ' +
-    fillSlot('num', 'number', 'is-num', ' inputmode="numeric" maxlength="7"') + '<span class="cp-fill-slash">/</span>' + fillSlot('of', 'set size', 'is-num', ' inputmode="numeric" maxlength="7"');
-  const binderNames = () => ((P.binderNames && P.binderNames().length) ? P.binderNames() : S.binders.map(b => b.name)).filter(Boolean);
+    /* Every binder the collector sees in My Collection, plus any the live demo knows about. */
+  const binderNames = () => [...new Set(S.binders.map(b => b.name).concat(P.binderNames ? P.binderNames() : []))].filter(Boolean);
   const binderSelect = () => '<select class="cp-fill-slot is-binder" name="binder"><option value="" disabled selected>binder</option>' +
-    [...new Set(binderNames())].map(n => '<option>' + esc(n) + '</option>').join('') + '<option value="__new">+ New binder</option></select>' +
-    '<span class="cp-fill-new" hidden> called ' + fillSlot('newbinder', 'binder name', 'is-name', ' maxlength="60"') + '</span>';
+    [...new Set(binderNames())].map(n => '<option>' + esc(n) + '</option>').join('') + '<option value="__new">+ New binder</option></select>';
+  /* Short layouts: price check in 2 lines (name; number / set + button), add and orders in 3. */
+  const numSlots = () => fillSlot('num', 'number', 'is-num', ' inputmode="numeric" maxlength="7"') + '<span class="cp-fill-slash">/</span>' + fillSlot('of', 'set size', 'is-num', ' inputmode="numeric" maxlength="7"');
+  const nameSlot = () => fillSlot('name', 'card name', 'is-name', ' autocapitalize="words" maxlength="60"');
   function fillForm(kind, side = 'buy') {
-    if (kind === 'price') return '<form class="cp-fill" data-fill="price" novalidate><p class="cp-fill-line">Price check ' + cardSlots() + '</p>' +
-      '<p class="cp-fill-err" hidden></p><div class="cp-fill-acts"><button type="submit" class="cp-fill-go">Check price</button></div></form>';
-    if (kind === 'add') return '<form class="cp-fill" data-fill="add" novalidate><p class="cp-fill-line">Add ' + cardSlots() + ' to my collection, in ' + binderSelect() + '</p>' +
-      '<p class="cp-fill-err" hidden></p><div class="cp-fill-acts"><button type="submit" class="cp-fill-go">Add card</button></div></form>';
-    return '<form class="cp-fill" data-fill="order" data-side="' + side + '" novalidate><div class="cp-fill-tabs"><button type="button" data-fill-side="buy"' + (side === 'buy' ? ' class="is-on"' : '') + '>Buy</button><button type="button" data-fill-side="sell"' + (side === 'sell' ? ' class="is-on"' : '') + '>Sell</button></div>' +
-      '<p class="cp-fill-line"><span data-fill-verb>' + (side === 'sell' ? 'Sell' : 'Buy') + '</span> ' + cardSlots() + ' for <span data-fill-price-word>' + (side === 'sell' ? 'at least' : 'up to') + '</span> US$' + fillSlot('price', 'price', 'is-num', ' inputmode="decimal" maxlength="10"') + '</p>' +
-      '<p class="cp-fill-err" hidden></p><div class="cp-fill-acts"><button type="submit" class="cp-fill-go">Set order</button></div></form>';
+    if (kind === 'price') return '<form class="cp-fill" data-fill="price" novalidate>' +
+      '<div class="cp-fill-row"><span>Price check</span>' + nameSlot() + '</div>' +
+      '<div class="cp-fill-row">' + numSlots() + '<button type="submit" class="cp-fill-go">Check price</button></div>' +
+      '<p class="cp-fill-err" hidden></p></form>';
+    if (kind === 'add') return '<form class="cp-fill" data-fill="add" novalidate>' +
+      '<div class="cp-fill-row"><span>Add</span>' + nameSlot() + '</div>' +
+      '<div class="cp-fill-row">' + numSlots() + '<span>in</span>' + binderSelect() + '</div>' +
+      '<div class="cp-fill-row cp-fill-new" hidden><span>New binder</span>' + fillSlot('newbinder', 'binder name', 'is-name', ' maxlength="60"') + '</div>' +
+      '<div class="cp-fill-row"><button type="submit" class="cp-fill-go">Add card</button></div>' +
+      '<p class="cp-fill-err" hidden></p></form>';
+    return '<form class="cp-fill" data-fill="order" data-side="' + side + '" novalidate>' +
+      '<div class="cp-fill-row"><span class="cp-fill-tabs"><button type="button" data-fill-side="buy"' + (side === 'buy' ? ' class="is-on"' : '') + '>Buy</button><button type="button" data-fill-side="sell"' + (side === 'sell' ? ' class="is-on"' : '') + '>Sell</button></span>' + nameSlot() + '</div>' +
+      '<div class="cp-fill-row">' + numSlots() + '<span data-fill-price-word>' + (side === 'sell' ? 'at least' : 'up to') + '</span><span>US$</span>' + fillSlot('price', 'price', 'is-price', ' inputmode="decimal" maxlength="10"') + '</div>' +
+      '<div class="cp-fill-row"><button type="submit" class="cp-fill-go">Set order</button></div>' +
+      '<p class="cp-fill-err" hidden></p></form>';
   }
   /* A typed card ("Mega Charizard X ex 125/094") into the name and number boxes. */
   function prefillCard(form, card) {
@@ -3188,9 +3209,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       const sel = qsa('[data-fill="add"] select[name="binder"]', thread).pop();
       P.binderNamesAsync().then(names => {
         if (!sel || !names) return;
-        const keep = sel.querySelector('option[value="__new"]');
-        qsa('option:not([value=""]):not([value="__new"])', sel).forEach(o => o.remove());
-        [...new Set(names)].forEach(n => { const o = document.createElement('option'); o.textContent = n; sel.insertBefore(o, keep); });
+        const keep = sel.querySelector('option[value="__new"]'), have = new Set(qsa('option', sel).map(o => o.textContent));
+        names.filter(n => !have.has(n)).forEach(n => { const o = document.createElement('option'); o.textContent = n; sel.insertBefore(o, keep); });
       }).catch(() => {});
     }
   }
@@ -3230,7 +3250,6 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     const form = t.closest('form.cp-fill'); if (!form || form.classList.contains('is-done')) return;
     const side = t.dataset.fillSide; form.dataset.side = side;
     qsa('[data-fill-side]', form).forEach(b => b.classList.toggle('is-on', b === t));
-    qs('[data-fill-verb]', form).textContent = side === 'sell' ? 'Sell' : 'Buy';
     qs('[data-fill-price-word]', form).textContent = side === 'sell' ? 'at least' : 'up to';
   });
   app.addEventListener('change', e => {
