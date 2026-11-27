@@ -17,7 +17,7 @@ import {
   type HRResponse,
 } from "./harnessrouter.server";
 import { collectrTaskInput, syncAnswerText, syncItems, type SyncItem } from "./collectr";
-import { isOwnTask, signTask } from "./mori-mcp-auth.server";
+import { isOwnTask, signTask } from "./mori-signing.server";
 import { findCards, getCard, cardImage } from "./tcgdex";
 
 type DB = SupabaseClient<Database>;
