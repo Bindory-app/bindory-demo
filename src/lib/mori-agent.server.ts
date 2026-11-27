@@ -63,7 +63,7 @@ async function streamWithFallback(
 
 /** Which agent runtime answers: "harnessrouter" (the Ask Mori harness) or "gateway" (default, and
  *  the rollback). Set with MORI_RUNTIME in the server environment. */
-export const moriRuntime = (): "harnessrouter" | "gateway" =>
+const moriRuntime = (): "harnessrouter" | "gateway" =>
   process.env["MORI_RUNTIME"]?.trim() === "harnessrouter" ? "harnessrouter" : "gateway";
 
 /** Server execution only: shared by the authenticated RPC and streaming HTTP handler. */

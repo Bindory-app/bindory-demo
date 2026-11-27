@@ -1,14 +1,14 @@
 import type { Json } from "@/integrations/supabase/types";
 import type { OrderCondition } from "./mori-validation";
 /** Shared, browser-safe definitions for Mori's agent tools. */
-export const WRITE_TOOLS = [
+const WRITE_TOOLS = [
   "add_card_to_collection",
   "create_binder",
   "save_memory",
   "add_to_wishlist",
   "set_order",
 ] as const;
-export type WriteTool = (typeof WRITE_TOOLS)[number];
+type WriteTool = (typeof WRITE_TOOLS)[number];
 export const isWriteTool = (n: string): n is WriteTool =>
   (WRITE_TOOLS as readonly string[]).includes(n);
 

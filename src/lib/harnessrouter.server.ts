@@ -10,8 +10,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import handoff from "../../harnessrouter.json";
 
-export const API_BASE = "https://api.harnessrouter.ai";
-export const UHP_VERSION = "2026-09-28";
+const API_BASE = "https://api.harnessrouter.ai";
+const UHP_VERSION = "2026-09-28";
 const TERMINAL_STATUSES = new Set(["completed", "incomplete", "failed", "cancelled"]);
 /** A harness by its feature key in harnessrouter.json (e.g. "collectr"), set by the server only. */
 export function harnessIdForFeature(feature: string): string {
@@ -20,7 +20,7 @@ export function harnessIdForFeature(feature: string): string {
   return id;
 }
 
-export interface FileRef {
+interface FileRef {
   file_id?: string | undefined;
   filename?: string | undefined;
   download_url?: string | undefined;
@@ -62,7 +62,7 @@ export class HRError extends Error {
 }
 
 let cachedKey: string | undefined;
-export function hrApiKey(): string {
+function hrApiKey(): string {
   if (cachedKey) return cachedKey;
   const env = process.env["HR_API_KEY"]?.trim();
   if (env) return (cachedKey = env);

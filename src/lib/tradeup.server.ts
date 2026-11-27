@@ -77,7 +77,7 @@ function offers(g: Game) {
 }
 
 /** The game as one player sees it: the starter's cards, the two offers, B's chance and the result. */
-export function view(g: Game, userId: string) {
+function view(g: Game, userId: string) {
   const me = sideOf(g, userId);
   const start = { cards: g.host_cards, total: Number(g.host_total) };
   const o = offers(g);

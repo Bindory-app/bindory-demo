@@ -42,7 +42,7 @@ function jwtExpiry(jwt: string): number | undefined {
   }
 }
 
-export type CollectorSession = { userId: string; accessToken: string };
+type CollectorSession = { userId: string; accessToken: string };
 
 /** Seals the collector's session for one task; expires with the session or after 10 minutes. */
 export function sealCollector(s: CollectorSession, now = Date.now()): string {

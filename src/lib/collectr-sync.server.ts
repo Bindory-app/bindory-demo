@@ -21,7 +21,7 @@ import { isOwnTask, signTask } from "./mori-signing.server";
 import { findCards, getCard, cardImage } from "./tcgdex";
 
 type DB = SupabaseClient<Database>;
-export type SyncState = {
+type SyncState = {
   response_id: string;
   session_id: string;
   sig: string;

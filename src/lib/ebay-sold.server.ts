@@ -22,7 +22,7 @@ const ACTOR = "oTtB3VgfuE9GtxQt2";
 const TTL = 6 * 60 * 60 * 1000;
 const cache = new Map<string, { at: number; value: LocalSold | null }>();
 
-export type SoldStat = {
+type SoldStat = {
   /** Average of the newest 5 sales (fewer when fewer exist); the headline value. */
   value: number | null;
   avg_last_3: number | null;
@@ -64,7 +64,7 @@ export function titleCondition(title: string): Condition | null {
   return null;
 }
 
-export type LocalSold = {
+type LocalSold = {
   currency: string;
   condition: Condition;
   site: string;
@@ -72,7 +72,7 @@ export type LocalSold = {
   psa9: SoldStat;
   psa10: SoldStat;
 };
-export type Sale = {
+type Sale = {
   title?: string;
   soldPrice?: string | number;
   soldCurrency?: string;
