@@ -10,15 +10,6 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as CollectionRouteImport } from './routes/collection'
-import { Route as CreateRouteImport } from './routes/create'
-import { Route as CreateBinderRouteImport } from './routes/create-binder'
-import { Route as HomeRouteImport } from './routes/home'
-import { Route as ProfileRouteImport } from './routes/profile'
-import { Route as SearchRouteImport } from './routes/search'
-import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as StudioRouteImport } from './routes/studio'
-import { Route as TrendingBindersRouteImport } from './routes/trending-binders'
 import { Route as ApiFxRouteImport } from './routes/api/fx'
 import { Route as ApiGateRouteImport } from './routes/api/gate'
 import { Route as ApiMoriChatRouteImport } from './routes/api/mori-chat'
@@ -27,59 +18,10 @@ import { Route as ApiMoriLocateRouteImport } from './routes/api/mori-locate'
 import { Route as ApiMoriMcpRouteImport } from './routes/api/mori-mcp'
 import { Route as ApiMoriSyncRouteImport } from './routes/api/mori-sync'
 import { Route as ApiTradeupRouteImport } from './routes/api/tradeup'
-import { Route as BIdRouteImport } from './routes/b.$id'
-import { Route as BindersIdRouteImport } from './routes/binders.$id'
-import { Route as CUsernameRouteImport } from './routes/c.$username'
-import { Route as EventsAnniversaryRouteImport } from './routes/events.anniversary'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CollectionRoute = CollectionRouteImport.update({
-  id: '/collection',
-  path: '/collection',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CreateRoute = CreateRouteImport.update({
-  id: '/create',
-  path: '/create',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CreateBinderRoute = CreateBinderRouteImport.update({
-  id: '/create-binder',
-  path: '/create-binder',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const HomeRoute = HomeRouteImport.update({
-  id: '/home',
-  path: '/home',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProfileRoute = ProfileRouteImport.update({
-  id: '/profile',
-  path: '/profile',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SearchRoute = SearchRouteImport.update({
-  id: '/search',
-  path: '/search',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const StudioRoute = StudioRouteImport.update({
-  id: '/studio',
-  path: '/studio',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const TrendingBindersRoute = TrendingBindersRouteImport.update({
-  id: '/trending-binders',
-  path: '/trending-binders',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiFxRoute = ApiFxRouteImport.update({
@@ -122,38 +64,9 @@ const ApiTradeupRoute = ApiTradeupRouteImport.update({
   path: '/api/tradeup',
   getParentRoute: () => rootRouteImport,
 } as any)
-const BIdRoute = BIdRouteImport.update({
-  id: '/b/$id',
-  path: '/b/$id',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BindersIdRoute = BindersIdRouteImport.update({
-  id: '/binders/$id',
-  path: '/binders/$id',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CUsernameRoute = CUsernameRouteImport.update({
-  id: '/c/$username',
-  path: '/c/$username',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const EventsAnniversaryRoute = EventsAnniversaryRouteImport.update({
-  id: '/events/anniversary',
-  path: '/events/anniversary',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/collection': typeof CollectionRoute
-  '/create': typeof CreateRoute
-  '/create-binder': typeof CreateBinderRoute
-  '/home': typeof HomeRoute
-  '/profile': typeof ProfileRoute
-  '/search': typeof SearchRoute
-  '/settings': typeof SettingsRoute
-  '/studio': typeof StudioRoute
-  '/trending-binders': typeof TrendingBindersRoute
   '/api/fx': typeof ApiFxRoute
   '/api/gate': typeof ApiGateRoute
   '/api/mori-chat': typeof ApiMoriChatRoute
@@ -162,22 +75,9 @@ export interface FileRoutesByFullPath {
   '/api/mori-mcp': typeof ApiMoriMcpRoute
   '/api/mori-sync': typeof ApiMoriSyncRoute
   '/api/tradeup': typeof ApiTradeupRoute
-  '/b/$id': typeof BIdRoute
-  '/binders/$id': typeof BindersIdRoute
-  '/c/$username': typeof CUsernameRoute
-  '/events/anniversary': typeof EventsAnniversaryRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/collection': typeof CollectionRoute
-  '/create': typeof CreateRoute
-  '/create-binder': typeof CreateBinderRoute
-  '/home': typeof HomeRoute
-  '/profile': typeof ProfileRoute
-  '/search': typeof SearchRoute
-  '/settings': typeof SettingsRoute
-  '/studio': typeof StudioRoute
-  '/trending-binders': typeof TrendingBindersRoute
   '/api/fx': typeof ApiFxRoute
   '/api/gate': typeof ApiGateRoute
   '/api/mori-chat': typeof ApiMoriChatRoute
@@ -186,23 +86,10 @@ export interface FileRoutesByTo {
   '/api/mori-mcp': typeof ApiMoriMcpRoute
   '/api/mori-sync': typeof ApiMoriSyncRoute
   '/api/tradeup': typeof ApiTradeupRoute
-  '/b/$id': typeof BIdRoute
-  '/binders/$id': typeof BindersIdRoute
-  '/c/$username': typeof CUsernameRoute
-  '/events/anniversary': typeof EventsAnniversaryRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/collection': typeof CollectionRoute
-  '/create': typeof CreateRoute
-  '/create-binder': typeof CreateBinderRoute
-  '/home': typeof HomeRoute
-  '/profile': typeof ProfileRoute
-  '/search': typeof SearchRoute
-  '/settings': typeof SettingsRoute
-  '/studio': typeof StudioRoute
-  '/trending-binders': typeof TrendingBindersRoute
   '/api/fx': typeof ApiFxRoute
   '/api/gate': typeof ApiGateRoute
   '/api/mori-chat': typeof ApiMoriChatRoute
@@ -211,24 +98,11 @@ export interface FileRoutesById {
   '/api/mori-mcp': typeof ApiMoriMcpRoute
   '/api/mori-sync': typeof ApiMoriSyncRoute
   '/api/tradeup': typeof ApiTradeupRoute
-  '/b/$id': typeof BIdRoute
-  '/binders/$id': typeof BindersIdRoute
-  '/c/$username': typeof CUsernameRoute
-  '/events/anniversary': typeof EventsAnniversaryRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/collection'
-    | '/create'
-    | '/create-binder'
-    | '/home'
-    | '/profile'
-    | '/search'
-    | '/settings'
-    | '/studio'
-    | '/trending-binders'
     | '/api/fx'
     | '/api/gate'
     | '/api/mori-chat'
@@ -237,22 +111,9 @@ export interface FileRouteTypes {
     | '/api/mori-mcp'
     | '/api/mori-sync'
     | '/api/tradeup'
-    | '/b/$id'
-    | '/binders/$id'
-    | '/c/$username'
-    | '/events/anniversary'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/collection'
-    | '/create'
-    | '/create-binder'
-    | '/home'
-    | '/profile'
-    | '/search'
-    | '/settings'
-    | '/studio'
-    | '/trending-binders'
     | '/api/fx'
     | '/api/gate'
     | '/api/mori-chat'
@@ -261,22 +122,9 @@ export interface FileRouteTypes {
     | '/api/mori-mcp'
     | '/api/mori-sync'
     | '/api/tradeup'
-    | '/b/$id'
-    | '/binders/$id'
-    | '/c/$username'
-    | '/events/anniversary'
   id:
     | '__root__'
     | '/'
-    | '/collection'
-    | '/create'
-    | '/create-binder'
-    | '/home'
-    | '/profile'
-    | '/search'
-    | '/settings'
-    | '/studio'
-    | '/trending-binders'
     | '/api/fx'
     | '/api/gate'
     | '/api/mori-chat'
@@ -285,23 +133,10 @@ export interface FileRouteTypes {
     | '/api/mori-mcp'
     | '/api/mori-sync'
     | '/api/tradeup'
-    | '/b/$id'
-    | '/binders/$id'
-    | '/c/$username'
-    | '/events/anniversary'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  CollectionRoute: typeof CollectionRoute
-  CreateRoute: typeof CreateRoute
-  CreateBinderRoute: typeof CreateBinderRoute
-  HomeRoute: typeof HomeRoute
-  ProfileRoute: typeof ProfileRoute
-  SearchRoute: typeof SearchRoute
-  SettingsRoute: typeof SettingsRoute
-  StudioRoute: typeof StudioRoute
-  TrendingBindersRoute: typeof TrendingBindersRoute
   ApiFxRoute: typeof ApiFxRoute
   ApiGateRoute: typeof ApiGateRoute
   ApiMoriChatRoute: typeof ApiMoriChatRoute
@@ -310,10 +145,6 @@ export interface RootRouteChildren {
   ApiMoriMcpRoute: typeof ApiMoriMcpRoute
   ApiMoriSyncRoute: typeof ApiMoriSyncRoute
   ApiTradeupRoute: typeof ApiTradeupRoute
-  BIdRoute: typeof BIdRoute
-  BindersIdRoute: typeof BindersIdRoute
-  CUsernameRoute: typeof CUsernameRoute
-  EventsAnniversaryRoute: typeof EventsAnniversaryRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -323,69 +154,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/collection': {
-      id: '/collection'
-      path: '/collection'
-      fullPath: '/collection'
-      preLoaderRoute: typeof CollectionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/create': {
-      id: '/create'
-      path: '/create'
-      fullPath: '/create'
-      preLoaderRoute: typeof CreateRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/create-binder': {
-      id: '/create-binder'
-      path: '/create-binder'
-      fullPath: '/create-binder'
-      preLoaderRoute: typeof CreateBinderRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/home': {
-      id: '/home'
-      path: '/home'
-      fullPath: '/home'
-      preLoaderRoute: typeof HomeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/profile': {
-      id: '/profile'
-      path: '/profile'
-      fullPath: '/profile'
-      preLoaderRoute: typeof ProfileRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/search': {
-      id: '/search'
-      path: '/search'
-      fullPath: '/search'
-      preLoaderRoute: typeof SearchRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/studio': {
-      id: '/studio'
-      path: '/studio'
-      fullPath: '/studio'
-      preLoaderRoute: typeof StudioRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/trending-binders': {
-      id: '/trending-binders'
-      path: '/trending-binders'
-      fullPath: '/trending-binders'
-      preLoaderRoute: typeof TrendingBindersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/fx': {
@@ -444,48 +212,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTradeupRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/b/$id': {
-      id: '/b/$id'
-      path: '/b/$id'
-      fullPath: '/b/$id'
-      preLoaderRoute: typeof BIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/binders/$id': {
-      id: '/binders/$id'
-      path: '/binders/$id'
-      fullPath: '/binders/$id'
-      preLoaderRoute: typeof BindersIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/c/$username': {
-      id: '/c/$username'
-      path: '/c/$username'
-      fullPath: '/c/$username'
-      preLoaderRoute: typeof CUsernameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/events/anniversary': {
-      id: '/events/anniversary'
-      path: '/events/anniversary'
-      fullPath: '/events/anniversary'
-      preLoaderRoute: typeof EventsAnniversaryRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  CollectionRoute: CollectionRoute,
-  CreateRoute: CreateRoute,
-  CreateBinderRoute: CreateBinderRoute,
-  HomeRoute: HomeRoute,
-  ProfileRoute: ProfileRoute,
-  SearchRoute: SearchRoute,
-  SettingsRoute: SettingsRoute,
-  StudioRoute: StudioRoute,
-  TrendingBindersRoute: TrendingBindersRoute,
   ApiFxRoute: ApiFxRoute,
   ApiGateRoute: ApiGateRoute,
   ApiMoriChatRoute: ApiMoriChatRoute,
@@ -494,10 +225,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMoriMcpRoute: ApiMoriMcpRoute,
   ApiMoriSyncRoute: ApiMoriSyncRoute,
   ApiTradeupRoute: ApiTradeupRoute,
-  BIdRoute: BIdRoute,
-  BindersIdRoute: BindersIdRoute,
-  CUsernameRoute: CUsernameRoute,
-  EventsAnniversaryRoute: EventsAnniversaryRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
