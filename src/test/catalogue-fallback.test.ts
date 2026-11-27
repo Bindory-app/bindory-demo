@@ -43,7 +43,7 @@ describe("Trade memories", () => {
 });
 
 import { getCard } from "@/lib/tcgdex";
-import { cardFromLabel } from "@/lib/mori-agent.server";
+import { cardFromLabel } from "@/lib/mori-proposals.server";
 
 describe("Catalogue resilience", () => {
   it("retries a TCGdex outage instead of failing the lookup", async () => {
