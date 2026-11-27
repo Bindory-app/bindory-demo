@@ -1,6 +1,5 @@
 import { routeMoriMessage } from "./mori-agents";
 import { SYSTEM, tools } from "./mori-prompt.server";
-import { marketFor, type Market } from "./market";
 import {
   COLLECTR_BAD_LINK,
   collectrSyncBinder,
@@ -14,24 +13,11 @@ import {
   type ResponsesInputItem,
   type ResponsesResponse,
 } from "./ai-gateway.server";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Json } from "@/integrations/supabase/types";
-import {
-  cardImage,
-  cardsByIllustrator,
-  getCard,
-  getCardPricing,
-  getSet,
-  getSetCards,
-  findCards,
-  priceScale,
-  searchCards,
-  usdRange,
-} from "./tcgdex";
+import type { Json } from "@/integrations/supabase/types";
+import { cardImage, getCard, getCardPricing, findCards, usdRange } from "./tcgdex";
 import { validateWriteArgs, ownPhotoPath, orderCondition } from "./mori-validation";
-import { ebaySoldPrices } from "./silphco.server";
-import { toCondition } from "./ebay-sold.server";
-import { webFetch, webSearch } from "./telem.server";
+import { stringArg as s, type Args, type DB, type MoriRowDraft } from "./mori-context.server";
+import { runReadTool } from "./mori-read-tools.server";
 import {
   isWriteTool,
   proposalTitle,
@@ -41,117 +27,9 @@ import {
   type ProposalPayload,
 } from "./mori-tools";
 
-type DB = SupabaseClient<Database>;
 // Any tool-capable model ID from https://ai-gateway.vercel.sh/v1/models; override with AI_GATEWAY_MODEL.
 // Default is on the AI Gateway free tier; newer models need paid credits.
 const MODEL = process.env["AI_GATEWAY_MODEL"] || "google/gemini-2.5-flash";
-
-export type Args = Record<string, unknown>;
-const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
-
-/** The collector's market from the tool's country (or currency) argument; US by default. */
-function marketFromArgs(a: Args) {
-  const byCurrency: Record<string, string> = {
-    AUD: "AU",
-    GBP: "GB",
-    CAD: "CA",
-    EUR: "DE",
-    USD: "US",
-  };
-  const c = s(a["country"]) ?? byCurrency[(s(a["currency"]) ?? "").toUpperCase()];
-  return marketFor(c);
-}
-
-/** A card's prices for the collector's market: today's market points converted into their currency,
- *  and recent sold prices from their own eBay site (Apify), else pooled eBay sales converted. */
-export async function marketPrices(
-  card: { id: string; name: string; number: string },
-  pricing: Parameters<typeof priceScale>[0],
-  market: Market,
-  /** Sales the agent read with the Apify actor itself (used instead of the server's lookup). */
-  agentSales?: unknown[],
-  /** The raw card's condition; sold prices are for this condition only. */
-  condition: import("./ebay-sold.server").Condition = "nm",
-) {
-  const { usdTo } = await import("./fx.server");
-  const { localSoldPrices, summarise, CONDITIONS } = await import("./ebay-sold.server");
-  const rate = market.currency === "USD" ? 1 : await usdTo(market.currency);
-  const x = (v: number | null | undefined) =>
-    typeof v === "number" ? Math.round(v * rate * 100) / 100 : null;
-  const scale = priceScale(pricing);
-  const sales = (agentSales ?? []).filter(
-    (
-      x,
-    ): x is {
-      title?: string;
-      soldPrice?: string | number;
-      soldCurrency?: string;
-      endedAt?: string;
-    } => Boolean(x) && typeof x === "object",
-  );
-  // Without item locations the sales can't be limited to the collector's country, so the server
-  // looks them up itself instead.
-  const located = sales.some((x) => "itemLocation" in x);
-  const local =
-    sales.length && located
-      ? summarise(sales.slice(0, 60), card.number, market, condition)
-      : await localSoldPrices(card, market, condition);
-  // The pooled fallback is near mint only, so it is never shown for another condition.
-  const pooled = local || condition !== "nm" ? null : await ebaySoldPrices(card.id);
-  const label = CONDITIONS[condition].label;
-  // Today's lowest listings (worldwide and in their country) from eBay's own Browse API, with a
-  // floor at half the recent sold average (else 40% of the converted market price) so skins, cases
-  // and fan art drop out. No scraping and no Apify here.
-  const { browseLowest } = await import("./ebay-browse.server");
-  const ref = local?.raw.avg_last_3 ? local.raw.avg_last_3 * 0.5 : (x(scale?.market) ?? 0) * 0.4;
-  const lowest = await browseLowest(card, market, condition, ref || undefined).catch(() => null);
-  // Without listings (no keys yet, or eBay unavailable) the card still shows its new layout, with
-  // "–" in place of the listing prices.
-  const listings = {
-    lowest_worldwide: lowest?.lowest_worldwide ?? null,
-    lowest_local: lowest?.lowest_local ?? null,
-    read: Boolean(lowest),
-  };
-  const soldOut = (v: {
-    value: number | null;
-    status: string;
-    n?: number;
-    avg_last_3?: number | null;
-    avg_last_5?: number | null;
-  }) => ({
-    avg_last_3: v.avg_last_3 ?? null,
-    avg_last_5: v.avg_last_5 ?? v.value,
-    sales: v.n ?? null,
-    status: v.status,
-  });
-  return {
-    rate,
-    scale,
-    local,
-    pooled,
-    listings,
-    forTool: {
-      currency: market.currency,
-      ebay_site: market.ebay,
-      listings: listings
-        ? {
-            condition: label,
-            lowest_worldwide: listings.lowest_worldwide,
-            lowest_in_country: listings.lowest_local,
-            listings_read: listings.read,
-          }
-        : null,
-      price_points: scale
-        ? { lowest_listing: x(scale.low), market: x(scale.market), mid: x(scale.mid) }
-        : null,
-      recent_sold: local
-        ? { from: market.ebay, condition: label, raw: soldOut(local.raw) }
-        : pooled
-          ? { condition: label, raw: { value: x(pooled.raw.value_usd), status: pooled.raw.status } }
-          : null,
-    },
-  };
-}
 
 async function briefCard(id: string, reason?: string): Promise<ProposalCard | null> {
   const c = await getCard(id);
@@ -165,202 +43,8 @@ async function briefCard(id: string, reason?: string): Promise<ProposalCard | nu
   };
 }
 
-async function runReadTool(db: DB, name: string, a: Args): Promise<unknown> {
-  switch (name) {
-    case "search_catalogue": {
-      const r = await findCards(s(a["name"]) ?? "", s(a["number"]), s(a["set"]));
-      return r.length
-        ? r
-        : {
-            results: [],
-            note: "No cards found. Try the name alone, or check the number with the collector.",
-          };
-    }
-    case "get_card_prices": {
-      const r = await getCardPricing(s(a["card_id"]) ?? "");
-      if (!r) return { error: "Card not found" };
-      const card = { id: r.card.id, name: r.card.name, number: r.card.localId };
-      const m = await marketPrices(
-        card,
-        r.pricing,
-        marketFromArgs(a),
-        Array.isArray(a["sold_listings"]) ? (a["sold_listings"] as unknown[]) : undefined,
-        toCondition(a["condition"]) ?? "nm",
-      );
-      return {
-        card: { ...card, set: r.card.set.name, rarity: r.card.rarity },
-        // Every price below is in this currency, for the collector's market.
-        ...m.forTool,
-        ...(m.forTool.price_points || m.forTool.recent_sold || m.forTool.listings
-          ? {}
-          : { note: "No price data for this card" }),
-      };
-    }
-    case "web_search": {
-      const results = await webSearch(s(a["query"]) ?? "");
-      return results.length
-        ? { results }
-        : {
-            results: [],
-            note: "Nothing found. Try different words, or say you could not find it.",
-          };
-    }
-    case "web_fetch": {
-      const urls = Array.isArray(a["urls"]) ? a["urls"].filter((u) => typeof u === "string") : [];
-      const pages = await webFetch(urls as string[]);
-      return pages.length ? { pages } : { error: "Give 1-3 http(s) links from web_search." };
-    }
-    case "find_related_cards": {
-      const c = await getCard(s(a["card_id"]) ?? "");
-      if (!c) return { results: [], note: "Card not found" };
-      const [same, art] = await Promise.all([
-        searchCards(c.name, 6),
-        c.illustrator ? cardsByIllustrator(c.illustrator, 6) : Promise.resolve([]),
-      ]);
-      return {
-        card: { id: c.id, name: c.name, illustrator: c.illustrator },
-        same_pokemon: same.filter((x) => x.id !== c.id).map((x) => ({ id: x.id, name: x.name })),
-        same_artist: art.filter((x) => x.id !== c.id).map((x) => ({ id: x.id, name: x.name })),
-      };
-    }
-    case "list_my_cards": {
-      let q = db
-        .from("cards")
-        .select("tcgdex_id, name, set_name, illustrator, year, rarity")
-        .order("created_at", { ascending: false })
-        .limit(50);
-      if (s(a["artist"])) q = q.ilike("illustrator", `%${s(a["artist"])}%`);
-      if (s(a["set"])) q = q.ilike("set_name", `%${s(a["set"])}%`);
-      if (typeof a["year"] === "number") q = q.eq("year", a["year"]);
-      const { data, error } = await q;
-      if (error) throw error;
-      return data.length ? data : { results: [], note: "No matching cards in the collection" };
-    }
-    case "list_my_orders": {
-      // market_orders is created by setup/009 and is not in the generated types yet.
-      const { data, error } = await (db as unknown as SupabaseClient)
-        .from("market_orders")
-        .select("id, side, card_name, image_url, price_usd, status, expires_at, created_at")
-        .eq("status", "open")
-        .gt("expires_at", new Date().toISOString())
-        .order("created_at", { ascending: false })
-        .limit(20);
-      if (error) throw error;
-      return data?.length ? data : { results: [], note: "No open orders" };
-    }
-    case "my_price_movers": {
-      const { data, error } = await db
-        .from("cards")
-        .select("tcgdex_id, name, set_name")
-        .order("created_at", { ascending: false })
-        .limit(24);
-      if (error) throw error;
-      const ids = [...new Set(data.map((c) => c.tcgdex_id).filter(Boolean))];
-      const moves = await priceMoves(ids);
-      return moves.length
-        ? {
-            compared: "7-day average price vs 30-day average price",
-            cards_checked: moves.length,
-            moves,
-          }
-        : { results: [], note: "No price history for the cards in this collection" };
-    }
-    case "market_trends": {
-      const moves = await priceMoves(TREND_CARDS);
-      return moves.length
-        ? { compared: "7-day average price vs 30-day average price", moves }
-        : { results: [], note: "Market prices are unavailable right now. Try again shortly." };
-    }
-    case "get_set_cards": {
-      const set = await getSetCards(s(a["set_id"]) ?? "");
-      if (!set) return { error: "Set not found" };
-      return {
-        set: { id: set.id, name: set.name, total: set.cards.length },
-        cards: set.cards.slice(0, 300).map((c) => ({ id: c.id, number: c.localId, name: c.name })),
-      };
-    }
-    case "find_collectors": {
-      // Public profiles only (bio and public binder count); private memories are never used for discovery.
-      const { data, error } = await db.rpc("list_public_collectors", { p_query: "" });
-      if (error) throw error;
-      const list = (Array.isArray(data) ? data : []) as {
-        display_name?: string;
-        username?: string;
-        bio?: string;
-        binders?: number;
-      }[];
-      return list.length
-        ? list.map((c) => ({
-            name: c.display_name,
-            username: c.username,
-            bio: c.bio,
-            public_binders: c.binders,
-          }))
-        : { results: [], note: "No public collector profiles found" };
-    }
-    case "suggest_binder_for_card": {
-      const [{ data: binders, error }, card] = await Promise.all([
-        db.from("binders").select("id, name, description, binder_cards(count)"),
-        getCard(s(a["card_id"]) ?? ""),
-      ]);
-      if (error) throw error;
-      return {
-        card: card ? { id: card.id, name: card.name, set: card.set.name } : null,
-        binders: binders ?? [],
-      };
-    }
-  }
-  return { error: "Unknown tool" };
-}
-
 const NEEDS_DATA =
   /card show|chase|trade-?up|trend|went up|went down|value|worth|price|complete .*set|share my taste|collectors|binder|video|orders?\b|my cards|my collection|add .* (?:to|into) my|wishlist/i;
-
-// Popular chase cards (checked in TCGdex) whose prices show where collectors are heading.
-const TREND_CARDS = [
-  "sv08.5-161",
-  "me02-125",
-  "sv03.5-199",
-  "swsh7-215",
-  "swsh12-186",
-  "sv08.5-156",
-  "sv04.5-234",
-  "sv08-238",
-  "sv03.5-201",
-  "swsh11-186",
-  "me01-180",
-  "sv09-184",
-  "sv08.5-167",
-];
-
-/** 7-day vs 30-day average price change for these cards, biggest rise first. A few lookups at a
- *  time, retrying once, so a busy moment at TCGdex does not lose them all. */
-async function priceMoves(ids: string[]) {
-  // A few lookups at a time, retrying once, so a busy moment at TCGdex does not lose them all.
-  const lookup = (id: string) =>
-    getCardPricing(id).catch(() =>
-      new Promise((r) => setTimeout(r, 400)).then(() => getCardPricing(id).catch(() => null)),
-    );
-  const priced: Awaited<ReturnType<typeof lookup>>[] = [];
-  for (let i = 0; i < ids.length; i += 6)
-    priced.push(...(await Promise.all(ids.slice(i, i + 6).map(lookup))));
-  const rows = await Promise.all(
-    priced.map(async (r) => {
-      const cm = r?.pricing?.cardmarket as { avg7?: number; avg30?: number } | undefined;
-      if (!r || !cm?.avg7 || !cm.avg30) return null;
-      const range = usdRange(r.pricing);
-      return {
-        card: `${r.card.name} ${r.card.localId}`,
-        set: r.card.set.name,
-        change_pct: Math.round(((cm.avg7 - cm.avg30) / cm.avg30) * 1000) / 10,
-        todays_price_range_usd: range ? `US$${range.low} to US$${range.high}` : undefined,
-      };
-    }),
-  );
-  const moves = rows.filter((x): x is NonNullable<typeof x> => x !== null);
-  moves.sort((x, y) => y.change_pct - x.change_pct);
-  return moves;
-}
 
 // "on 2 Nov 2026" in a memory template message, as YYYY-MM-DD.
 const MONTH_NUM: Record<string, string> = {
@@ -629,7 +313,6 @@ async function streamWithFallback(
   }
 }
 
-export type MoriRowDraft = { role: "mori"; kind: string; content: string; payload?: Json };
 export type MoriToolContext = {
   /** The collector's message this answer is for (memory templates keep their exact words). */
   message: string;
