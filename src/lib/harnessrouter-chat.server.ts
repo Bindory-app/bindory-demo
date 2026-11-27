@@ -2,7 +2,14 @@
 import { randomUUID } from "node:crypto";
 import handoff from "../../harnessrouter.json";
 import type { MoriAgent } from "./mori-agents";
-import { callHarnessRouter, getResponse, HRError, isTerminal, type HRResponse, type OutputItem } from "./harnessrouter.server";
+import {
+  callHarnessRouter,
+  getResponse,
+  HRError,
+  isTerminal,
+  type HRResponse,
+  type OutputItem,
+} from "./harnessrouter.server";
 
 const TERMINAL_EVENTS = new Set(["response.completed", "response.incomplete", "response.failed"]);
 
@@ -81,12 +88,16 @@ export async function uploadFile(bytes: Uint8Array, filename: string, type: stri
   const form = new FormData();
   form.append("purpose", "user_data");
   form.append("file", new Blob([bytes as BlobPart], { type }), filename);
-  return (await (await callHarnessRouter("/v1/files", { method: "POST", body: form })).json()) as { id: string };
+  return (await (await callHarnessRouter("/v1/files", { method: "POST", body: form })).json()) as {
+    id: string;
+  };
 }
 
 /** The session's turns: rebuilds tool outputs when the stream did not carry them. */
 export async function getTurns(sessionId: string) {
-  return (await (await callHarnessRouter(`/v1/sessions/${encodeURIComponent(sessionId)}/turns`)).json()) as {
+  return (await (
+    await callHarnessRouter(`/v1/sessions/${encodeURIComponent(sessionId)}/turns`)
+  ).json()) as {
     turns?: { id: string; tools?: { name?: string; arguments?: string; output?: string }[] }[];
   };
 }
@@ -115,7 +126,9 @@ export class MoriStopped extends Error {
 
 /** Best-effort cancel of a running task (its session stays usable). */
 async function cancelResponse(id: string): Promise<void> {
-  await callHarnessRouter(`/v1/responses/${encodeURIComponent(id)}/cancel`, { method: "POST" }).catch(() => {});
+  await callHarnessRouter(`/v1/responses/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+  }).catch(() => {});
 }
 
 /**

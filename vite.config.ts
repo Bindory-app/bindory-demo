@@ -36,15 +36,16 @@ export default defineConfig(({ command, mode }) => {
     resolve: {
       tsconfigPaths: true,
       alias: { "@": `${process.cwd()}/src` },
-      dedupe: [
+      dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
+    },
+    optimizeDeps: {
+      include: [
         "react",
         "react-dom",
+        "react-dom/client",
         "react/jsx-runtime",
         "react/jsx-dev-runtime",
       ],
-    },
-    optimizeDeps: {
-      include: ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime"],
     },
     server: { host: "::", port: 8080 },
     plugins,

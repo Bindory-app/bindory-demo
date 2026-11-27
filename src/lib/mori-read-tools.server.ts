@@ -3,7 +3,14 @@ import { marketFor } from "./market";
 import { toCondition } from "./ebay-sold.server";
 import { stringArg, type Args, type DB } from "./mori-context.server";
 import { marketPrices, priceMoves } from "./mori-prices.server";
-import { cardsByIllustrator, findCards, getCard, getCardPricing, getSetCards, searchCards } from "./tcgdex";
+import {
+  cardsByIllustrator,
+  findCards,
+  getCard,
+  getCardPricing,
+  getSetCards,
+  searchCards,
+} from "./tcgdex";
 import { webFetch, webSearch } from "./telem.server";
 
 /** The collector's market from the tool's country (or currency) argument; US by default. */
@@ -39,7 +46,11 @@ const TREND_CARDS = [
 export async function runReadTool(db: DB, name: string, a: Args): Promise<unknown> {
   switch (name) {
     case "search_catalogue": {
-      const r = await findCards(stringArg(a["name"]) ?? "", stringArg(a["number"]), stringArg(a["set"]));
+      const r = await findCards(
+        stringArg(a["name"]) ?? "",
+        stringArg(a["number"]),
+        stringArg(a["set"]),
+      );
       return r.length
         ? r
         : {

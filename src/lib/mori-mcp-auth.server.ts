@@ -22,7 +22,9 @@ const b64 = (b: Buffer) => b.toString("base64url");
 
 /** The bearer HarnessRouter sends; computed the same way it was stored (HMAC of a fixed label). */
 export function mcpBearer(): string {
-  return createHmac("sha256", moriSecret()).update("mori-mcp:harnessrouter-bearer").digest("base64url");
+  return createHmac("sha256", moriSecret())
+    .update("mori-mcp:harnessrouter-bearer")
+    .digest("base64url");
 }
 export function isHarnessBearer(authorization: string | null): boolean {
   const m = /^Bearer\s+(\S+)$/i.exec(authorization ?? "");
@@ -65,7 +67,11 @@ export function openCollector(token: string | null, now = Date.now()): Collector
   try {
     const raw = Buffer.from(token, "base64url");
     if (raw.length < 12 + 16 + 1) return null;
-    const decipher = createDecipheriv("aes-256-gcm", deriveMoriKey("mori-mcp:seal"), raw.subarray(0, 12));
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      deriveMoriKey("mori-mcp:seal"),
+      raw.subarray(0, 12),
+    );
     decipher.setAuthTag(raw.subarray(raw.length - 16));
     const text = Buffer.concat([
       decipher.update(raw.subarray(12, raw.length - 16)),

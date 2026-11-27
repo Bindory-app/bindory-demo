@@ -130,8 +130,7 @@ export async function buildProposal(
   // Cards are optional: keep only ones Mori actually looked up, so a guessed id never shows the wrong card.
   const cid = stringArg(a["card_id"]);
   const tid = stringArg(a["traded_card_id"]);
-  const card =
-    cid && (!seen || seen.has(cid)) ? ((await briefCard(cid)) ?? undefined) : undefined;
+  const card = cid && (!seen || seen.has(cid)) ? ((await briefCard(cid)) ?? undefined) : undefined;
   const traded_card =
     tid && (!seen || seen.has(tid)) ? ((await briefCard(tid)) ?? undefined) : undefined;
   // From the fill-in template, the story is exactly what the collector wrote (facts, feelings, ratings).

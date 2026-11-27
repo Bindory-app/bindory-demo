@@ -75,7 +75,10 @@ function hrApiKey(): string {
   return (cachedKey = line.slice("HR_API_KEY=".length).trim());
 }
 
-export async function callHarnessRouter(path: string, init: RequestInit & { headers?: Record<string, string> } = {}) {
+export async function callHarnessRouter(
+  path: string,
+  init: RequestInit & { headers?: Record<string, string> } = {},
+) {
   const res = await fetch(API_BASE + path, {
     ...init,
     redirect: "manual",
@@ -145,7 +148,9 @@ export async function responseFiles(r: HRResponse): Promise<FileRef[]> {
   const sid = r.metadata?.session_id;
   if (sid) {
     try {
-      const res = await callHarnessRouter(`/v1/sessions/${encodeURIComponent(sid)}/files?changed=true`);
+      const res = await callHarnessRouter(
+        `/v1/sessions/${encodeURIComponent(sid)}/files?changed=true`,
+      );
       const j = (await res.json()) as { data?: FileRef[]; files?: FileRef[] };
       for (const f of j.data ?? j.files ?? []) add(f);
     } catch {

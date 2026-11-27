@@ -54,7 +54,9 @@ export async function executeMoriTool(
     }[];
     const people = picks
       .map((x) => {
-        const c = all.find((o) => o.username === (stringArg(x["username"]) ?? "").replace(/^@/, ""));
+        const c = all.find(
+          (o) => o.username === (stringArg(x["username"]) ?? "").replace(/^@/, ""),
+        );
         return c
           ? {
               name: c.display_name ?? c.username,
@@ -88,7 +90,8 @@ export async function executeMoriTool(
     } catch {
       url = "";
     }
-    const clip = (v: unknown, n: number) => (stringArg(v) ?? "").replace(/\s+/g, " ").trim().slice(0, n);
+    const clip = (v: unknown, n: number) =>
+      (stringArg(v) ?? "").replace(/\s+/g, " ").trim().slice(0, n);
     const options = (Array.isArray(args["options"]) ? (args["options"] as Args[]) : [])
       .map((o) => ({
         name: clip(o["name"], 80),
