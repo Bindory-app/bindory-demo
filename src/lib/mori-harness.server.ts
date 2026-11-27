@@ -337,7 +337,7 @@ export async function priceCardRow(
     string,
     {
       avg_last_3?: number | null;
-      avg_last_10?: number | null;
+      avg_last_5?: number | null;
       value?: number | null;
       sales?: number | null;
       status: string;
@@ -348,7 +348,7 @@ export async function priceCardRow(
     pts?.["market"] ??
     pts?.["mid"] ??
     pts?.["lowest_listing"] ??
-    sold?.["raw"]?.avg_last_10 ??
+    sold?.["raw"]?.avg_last_5 ??
     sold?.["raw"]?.value ??
     undefined;
   return {

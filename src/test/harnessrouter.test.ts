@@ -626,21 +626,21 @@ describe("Local eBay sold prices", () => {
       "125",
       MARKETS["AU"]!,
     );
-    expect(s.raw).toMatchObject({ avg_last_3: 700, avg_last_10: 700, n: 3, status: "ok" });
-    expect(s.psa10).toMatchObject({ avg_last_3: 1700, avg_last_10: 1700, n: 1, status: "thin" });
+    expect(s.raw).toMatchObject({ avg_last_3: 700, avg_last_5: 700, n: 3, status: "ok" });
+    expect(s.psa10).toMatchObject({ avg_last_3: 1700, avg_last_5: 1700, n: 1, status: "thin" });
     expect(s.psa9.status).toBe("none");
   });
 });
 
-describe("Last 3 and last 10 sold averages", () => {
-  it("averages the newest 3 and newest 10 sales", async () => {
+describe("Last 3 and last 5 sold averages", () => {
+  it("averages the newest 3 and newest 5 sales", async () => {
     const { stat } = await import("@/lib/ebay-sold.server");
     const r = stat([10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 999]);
     expect(r.avg_last_3).toBe(20);
-    expect(r.avg_last_10).toBe(55);
-    expect(r.n).toBe(10);
+    expect(r.avg_last_5).toBe(30);
+    expect(r.n).toBe(5);
   });
-  it("asks the actor for one raw-only search of 10 on the collector's site", async () => {
+  it("asks the actor for one raw-only search of 6 on the collector's site", async () => {
     const { actorInput } = await import("@/lib/ebay-sold.server");
     const { MARKETS } = await import("@/lib/market");
     const input = actorInput({ name: "Umbreon ex", number: "161" }, MARKETS["AU"]!);
@@ -650,12 +650,21 @@ describe("Last 3 and last 10 sold averages", () => {
       ebaySite: "ebay.com.au",
       categoryId: "183454",
       conditionId: 4000,
-      count: 10,
+      count: 6,
       aspectFilter: { "Card Condition": "Near Mint or Better" },
     });
     expect(
       actorInput({ name: "Umbreon ex", number: "161" }, MARKETS["AU"]!, "lp").aspectFilter,
     ).toEqual({ "Card Condition": "Lightly Played (Excellent)" });
+  });
+  it("never excludes Full Art or TAG TEAM cards", async () => {
+    const { actorInput, classifySale } = await import("@/lib/ebay-sold.server");
+    const { MARKETS } = await import("@/lib/market");
+    const k = actorInput({ name: "Umbreon ex", number: "161" }, MARKETS["AU"]!).keywords[0]!;
+    expect(k).not.toMatch(/-art\b|-tag\b/);
+    expect(
+      classifySale("Umbreon ex 161/131 Prismatic Evolutions Full Art Holo Ultra Rare", "161"),
+    ).toBe("raw");
   });
   it("keeps only sales from the collector's own country", async () => {
     const { actorInput, isDomestic, summarise } = await import("@/lib/ebay-sold.server");
@@ -686,7 +695,7 @@ describe("Last 3 and last 10 sold averages", () => {
       "161",
       au,
     );
-    expect(r.raw).toMatchObject({ n: 2, avg_last_10: 1400 });
+    expect(r.raw).toMatchObject({ n: 2, avg_last_5: 1400 });
   });
   it("reads the collector's condition and keeps only that condition's sales", async () => {
     const { toCondition, titleCondition, summarise } = await import("@/lib/ebay-sold.server");
@@ -713,11 +722,11 @@ describe("Last 3 and last 10 sold averages", () => {
     ];
     expect(summarise(sales, "161", MARKETS["AU"]!, "lp").raw).toMatchObject({
       n: 2,
-      avg_last_10: 1400,
+      avg_last_5: 1400,
     });
     expect(summarise(sales, "161", MARKETS["AU"]!, "nm").raw).toMatchObject({
       n: 2,
-      avg_last_10: 1600,
+      avg_last_5: 1600,
     });
   });
   it("leaves out sales far below the rest, like a custom or metal card", async () => {

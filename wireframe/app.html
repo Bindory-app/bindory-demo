@@ -4775,15 +4775,16 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
         '<div style="position:relative;height:6px;margin:12px 12px 6px;border-radius:3px;background:linear-gradient(90deg,#e4e0ff,#9a88ef)">' + pts.map(dot).join("") + "</div>" +
         '<div class="cp-val-values">' + pts.map((x) => "<span><small>" + esc(x[0]) + "</small><b>" + usd(x[1]) + "</b></span>").join("") + "</div>" : "") +
       (sold ? '<small style="display:block;margin:4px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Recent sales</small>' +
-        (sold.raw && ("avg_last_3" in sold.raw || "avg_last_10" in sold.raw)
-          // Average of the last 3 and last 10 sales for each grade.
-          ? '<table class="bd-sold"><thead><tr><th>' + (sold.condition ? "Condition" : "") + '</th><th>Last 3 sold</th><th>Last 10 sold</th></tr></thead><tbody>' +
+        (sold.raw && ("avg_last_3" in sold.raw || "avg_last_5" in sold.raw || "avg_last_10" in sold.raw)
+          // Average of the last 3 and last 5 sales (older price cards in History: last 10).
+          ? '<table class="bd-sold"><thead><tr><th>' + (sold.condition ? "Condition" : "") + '</th><th>Last 3 sold</th><th>Last ' + ("avg_last_5" in sold.raw ? 5 : 10) + ' sold</th></tr></thead><tbody>' +
             // One row per condition: the one the collector picked (older cards: raw NM and graded).
             (sold.condition ? [[esc(sold.condition), sold.raw]] : [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]]).filter(([, x]) => x).map(([label, x]) => {
-              const has = x && typeof x.avg_last_10 === "number";
+              const N = x && "avg_last_5" in x ? 5 : 10, last = x && (N === 5 ? x.avg_last_5 : x.avg_last_10);
+              const has = typeof last === "number";
               const n = x && x.sales ? x.sales : 0;
               return "<tr><th>" + label + "</th>" + (has
-                ? "<td>" + usd(typeof x.avg_last_3 === "number" ? x.avg_last_3 : x.avg_last_10) + (n && n < 3 ? "<small>" + n + " sale" + (n === 1 ? "" : "s") + "</small>" : "") + "</td><td>" + usd(x.avg_last_10) + (n && n < 10 ? "<small>" + n + " sale" + (n === 1 ? "" : "s") + "</small>" : "") + "</td>"
+                ? "<td>" + usd(typeof x.avg_last_3 === "number" ? x.avg_last_3 : last) + (n && n < 3 ? "<small>" + n + " sale" + (n === 1 ? "" : "s") + "</small>" : "") + "</td><td>" + usd(last) + (n && n < N ? "<small>" + n + " sale" + (n === 1 ? "" : "s") + "</small>" : "") + "</td>"
                 : '<td colspan="2" class="is-none">No recent sales</td>') + "</tr>";
             }).join("") + "</tbody></table>"
           : '<div class="cp-val-values">' + [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]].map((x) => "<span><small>" + x[0] + "</small><b>" + soldText(x[1]) + "</b></span>").join("") + "</div>") : "") +
