@@ -24,7 +24,7 @@ import {
   titleCondition,
   type Condition,
 } from "./ebay-sold.server";
-import type { Market } from "./market";
+import { importFeeRate, type Market } from "./market";
 
 const ACTOR = "gMpyLo1gOJVKTz8p5";
 const TTL = 60 * 60 * 1000;
@@ -41,7 +41,15 @@ const SALIC: Record<string, number> = {
 };
 const cache = new Map<string, { at: number; value: MarketListings | null }>();
 
-export type Listing = { price: number; shipping: number | null };
+/** A listing's delivered cost: item, postage and (from abroad) estimated import fees. */
+export type Listing = {
+  price: number;
+  shipping: number | null;
+  import_fees: number;
+  total: number;
+  /** Where the item is, when outside the collector's country (e.g. "United States"). */
+  from: string | null;
+};
 export type MarketListings = {
   currency: string;
   lowest_worldwide: Listing | null;
@@ -97,7 +105,8 @@ function isTheCard(x: ScrapedItem, number: string, condition: Condition): boolea
   return classifySale(title, number) === "raw";
 }
 
-/** The cheapest listing that is really this card (at or above the floor). */
+/** The cheapest listing that is really this card (at or above the floor), by delivered cost:
+ *  item + postage + estimated import fees for items from abroad (listing pages leave those out). */
 export function pickLowest(
   items: ScrapedItem[],
   number: string,
@@ -113,8 +122,18 @@ export function pickLowest(
     if (opts.local && !isDomestic(x.itemLocation, market)) continue;
     if (!isTheCard(x, number, condition)) continue;
     const shipping = typeof x.shippingCost === "number" ? x.shippingCost : null;
-    if (!best || price + (shipping ?? 0) < best.price + (best.shipping ?? 0))
-      best = { price, shipping };
+    const rate = importFeeRate(market, x.itemLocation);
+    const cents = (v: number) => Math.round(v * 100) / 100;
+    const fees = cents((price + (shipping ?? 0)) * rate);
+    const total = cents(price + (shipping ?? 0) + fees);
+    if (!best || total < best.total)
+      best = {
+        price,
+        shipping,
+        import_fees: fees,
+        total,
+        from: rate > 0 ? String(x.itemLocation) : null,
+      };
   }
   return best;
 }
@@ -206,15 +225,14 @@ export async function marketListings(
   const local = searchUrl(card, market, condition, "local", floor);
   let value: MarketListings | null = null;
   try {
-    // Two runs at once: a few cheapest listings, and up to 14 days of sales.
-    const [listed, sold] = await Promise.all([
-      runActor(token, {
-        startUrls: [{ url: world }, { url: local }],
-        mode: "active",
-        // eBay's page order is not strictly by price, so read the first 12 and take the cheapest.
-        maxItems: 12,
-        marketplace: market.ebay,
-      }),
+    // Three runs at once. eBay's page order is not strictly by price, so more rows are read than
+    // shown: 24 worldwide (overseas sellers fill the first page), 12 local, and up to 14 days of
+    // sales for the 7-day change.
+    const active = (url: string, maxItems: number) =>
+      runActor(token, { startUrls: [{ url }], mode: "active", maxItems, marketplace: market.ebay });
+    const [worldRows, localRows, sold] = await Promise.all([
+      active(world, 24),
+      active(local, 12),
       runActor(token, {
         startUrls: [{ url: searchUrl(card, market, condition, "sold") }],
         mode: "sold",
@@ -223,19 +241,28 @@ export async function marketListings(
         marketplace: market.ebay,
       }).catch(() => [] as ScrapedItem[]),
     ]);
-    // Each row says which search it came from: LH_LocatedIn is the local one.
-    const from = (url: string) => {
-      const isLocal = url.includes("LH_LocatedIn=1");
-      return listed.filter((x) => String(x.searchUrl ?? "").includes("LH_LocatedIn=1") === isLocal);
-    };
     const change = weekChange(sold, card.number, condition, market);
     value = {
       currency: market.currency,
-      lowest_worldwide: pickLowest(from(world), card.number, condition, market, {
-        local: false,
-        ...(floor ? { floor } : {}),
-      }),
-      lowest_local: pickLowest(from(local), card.number, condition, market, {
+      // Worldwide includes local sellers: whichever is cheapest delivered, fees included.
+      // A local seller's listing can show a different postage quote in the worldwide search, so
+      // local sellers come from the local search only (when it ran).
+      lowest_worldwide: pickLowest(
+        [
+          ...worldRows.filter(
+            (r) => !localRows.length || importFeeRate(market, r.itemLocation) > 0,
+          ),
+          ...localRows,
+        ],
+        card.number,
+        condition,
+        market,
+        {
+          local: false,
+          ...(floor ? { floor } : {}),
+        },
+      ),
+      lowest_local: pickLowest(localRows, card.number, condition, market, {
         local: true,
         ...(floor ? { floor } : {}),
       }),

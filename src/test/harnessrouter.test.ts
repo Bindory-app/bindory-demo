@@ -791,12 +791,18 @@ describe("Today's listings and the 7-day change", () => {
     expect(pickLowest(items, "161", "nm", au, { local: false })).toEqual({
       price: 1300,
       shipping: 8,
+      import_fees: 163.5,
+      total: 1471.5,
+      from: "United States",
     });
     expect(pickLowest(items, "161", "nm", au, { local: true })).toEqual({
       price: 1466.7,
       shipping: 8,
+      import_fees: 0,
+      total: 1474.7,
+      from: null,
     });
-    expect(pickLowest(items, "161", "nm", au, { local: true, floor: 1500 })).toEqual({
+    expect(pickLowest(items, "161", "nm", au, { local: true, floor: 1500 })).toMatchObject({
       price: 1674.7,
       shipping: 8,
     });
@@ -822,5 +828,48 @@ describe("Today's listings and the 7-day change", () => {
     expect(
       weekChange([sale(1100, "Nov 26, 2026")], "161", "nm", MARKETS["AU"]!, now).pct,
     ).toBeNull();
+  });
+});
+
+describe("Import fees on listings from abroad", () => {
+  it("estimates import fees by the collector's country, none at home or within the EU", async () => {
+    const { MARKETS, importFeeRate } = await import("@/lib/market");
+    expect(importFeeRate(MARKETS["AU"]!, "United States")).toBe(0.125);
+    expect(importFeeRate(MARKETS["AU"]!, null)).toBe(0);
+    expect(importFeeRate(MARKETS["AU"]!, "Australia")).toBe(0);
+    expect(importFeeRate(MARKETS["GB"]!, "United States")).toBe(0.2);
+    expect(importFeeRate(MARKETS["DE"]!, "France")).toBe(0);
+    expect(importFeeRate(MARKETS["DE"]!, "United Kingdom")).toBe(0.19);
+  });
+  it("picks the cheapest delivered: an overseas listing loses once import fees are added", async () => {
+    const { pickLowest } = await import("@/lib/ebay-listings.server");
+    const { MARKETS } = await import("@/lib/market");
+    const row = (priceValue: number, shippingCost: number, itemLocation: string | null) => ({
+      priceValue,
+      price: "AU " + priceValue,
+      currency: "AUD",
+      shippingCost,
+      itemLocation,
+      title: "Umbreon ex 161/131 Prismatic Evolutions",
+    });
+    // The real case: US A$1,327.89 + A$48.91 postage vs Australia A$1,466.70 + A$8.26.
+    const best = pickLowest(
+      [row(1327.89, 48.91, "United States"), row(1466.7, 8.26, null)],
+      "161",
+      "nm",
+      MARKETS["AU"]!,
+      { local: false },
+    );
+    expect(best).toEqual({
+      price: 1466.7,
+      shipping: 8.26,
+      import_fees: 0,
+      total: 1474.96,
+      from: null,
+    });
+    const us = pickLowest([row(1327.89, 48.91, "United States")], "161", "nm", MARKETS["AU"]!, {
+      local: false,
+    });
+    expect(us).toMatchObject({ import_fees: 172.1, total: 1548.9, from: "United States" });
   });
 });
