@@ -11,17 +11,14 @@ import { chatPhotos, dataUrlBytes, saveOrderPhotos } from "./mori-order-photos.s
 import { TOOL_STATUS, type MoriStreamEvent } from "./mori-tools";
 import { AGENT_NAMES, isMoriAgent, routeMoriMessage, type MoriAgent } from "./mori-agents";
 import { marketFor } from "./market";
+import { answerText, HRError, type HRResponse, type OutputItem } from "./harnessrouter.server";
 import {
-  answerText,
   harnessIdFor,
   getTurns,
-  HRError,
   runStreamedTask,
   uploadFile,
   MoriStopped,
-  type HRResponse,
-  type OutputItem,
-} from "./harnessrouter.server";
+} from "./harnessrouter-chat.server";
 import { readSignedRows, sealCollector, stripRowBlocks } from "./mori-mcp-auth.server";
 import { priceCardRow } from "./mori-prices.server";
 import { finishMoriTurn } from "./mori-turn.server";

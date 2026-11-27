@@ -8,7 +8,8 @@ import {
   signRows,
   stripRowBlocks,
 } from "@/lib/mori-mcp-auth.server";
-import { answerText, parseSSE } from "@/lib/harnessrouter.server";
+import { answerText } from "@/lib/harnessrouter.server";
+import { parseSSE } from "@/lib/harnessrouter-chat.server";
 import { moriToolName } from "@/lib/mori-harness.server";
 
 const jwt = (exp: number) =>
