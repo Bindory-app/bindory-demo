@@ -400,7 +400,7 @@ export async function runMoriHarness(
   const market = marketFor(country);
   const rate =
     market.currency === "USD" ? 1 : await (await import("./fx.server")).usdTo(market.currency);
-  const marketNote = `[App note: the collector is in ${market.name}. Show every price in ${market.currency} (${market.symbol}), never US$${market.currency === "USD" ? "" : " unless asked"}; their eBay site is ${market.ebay}. Pass currency "${market.currency}" to get_card_prices and quote its \`local\` numbers. Today 1 US$ = ${rate} ${market.currency}; set_order prices are in US$, so convert the collector's ${market.currency} price at that rate.]\n`;
+  const marketNote = `[App note: the collector is in ${market.name} (country code ${market.country}). Show every price in ${market.currency} (${market.symbol}), never US$${market.currency === "USD" ? "" : " unless asked"}; their eBay site is ${market.ebay}. Pass currency "${market.currency}" to get_card_prices and quote its \`local\` numbers. Today 1 US$ = ${rate} ${market.currency}; set_order prices are in US$, so convert the collector's ${market.currency} price at that rate.]\n`;
   let hrIds: { response_id: string; session_id: string; agent: MoriAgent } | undefined;
   let cardsOnly = false;
   try {

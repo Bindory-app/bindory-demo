@@ -657,6 +657,37 @@ describe("Last 3 and last 10 sold averages", () => {
       actorInput({ name: "Umbreon ex", number: "161" }, MARKETS["AU"]!, "lp").aspectFilter,
     ).toEqual({ "Card Condition": "Lightly Played (Excellent)" });
   });
+  it("keeps only sales from the collector's own country", async () => {
+    const { actorInput, isDomestic, summarise } = await import("@/lib/ebay-sold.server");
+    const { MARKETS } = await import("@/lib/market");
+    const au = MARKETS["AU"]!;
+    expect(actorInput({ name: "Umbreon ex", number: "161" }, au)).toMatchObject({
+      ebaySite: "ebay.com.au",
+      sellerCountry: "AU",
+      daysToScrape: 90,
+    });
+    expect(isDomestic(null, au)).toBe(true);
+    expect(isDomestic("Australia", au)).toBe(true);
+    expect(isDomestic("United States", au)).toBe(false);
+    expect(isDomestic("United Kingdom", MARKETS["GB"]!)).toBe(true);
+    const sale = (p: string, d: string, loc: string | null) => ({
+      title: "Umbreon ex 161/131",
+      soldPrice: p,
+      soldCurrency: "AUD",
+      endedAt: d,
+      itemLocation: loc,
+    });
+    const r = summarise(
+      [
+        sale("1300", "2026-11-26", null),
+        sale("2000", "2026-11-25", "United States"),
+        sale("1500", "2026-11-24", null),
+      ],
+      "161",
+      au,
+    );
+    expect(r.raw).toMatchObject({ n: 2, avg_last_10: 1400 });
+  });
   it("reads the collector's condition and keeps only that condition's sales", async () => {
     const { toCondition, titleCondition, summarise } = await import("@/lib/ebay-sold.server");
     const { MARKETS } = await import("@/lib/market");

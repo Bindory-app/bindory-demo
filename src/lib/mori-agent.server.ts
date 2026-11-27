@@ -120,7 +120,7 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
         sold_listings: {
           type: "array",
           description:
-            "The raw (ungraded) sold listings you read with the eBay sold listings actor for this card, exactly as it returned them (title, soldPrice, soldCurrency, endedAt).",
+            "The raw (ungraded) sold listings you read with the eBay sold listings actor for this card, exactly as it returned them (title, soldPrice, soldCurrency, endedAt, itemLocation).",
           items: {
             type: "object",
             properties: {
@@ -128,6 +128,9 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
               soldPrice: str("Sold price, as the actor returned it"),
               soldCurrency: str("Currency, e.g. AUD"),
               endedAt: str("Date the sale ended"),
+              itemLocation: str(
+                "Where the item was, exactly as the actor returned it (null or empty for the collector's own country)",
+              ),
             },
           },
         },
@@ -571,9 +574,13 @@ export async function marketPrices(
       endedAt?: string;
     } => Boolean(x) && typeof x === "object",
   );
-  const local = sales.length
-    ? summarise(sales.slice(0, 60), card.number, market, condition)
-    : await localSoldPrices(card, market, condition);
+  // Without item locations the sales can't be limited to the collector's country, so the server
+  // looks them up itself instead.
+  const located = sales.some((x) => "itemLocation" in x);
+  const local =
+    sales.length && located
+      ? summarise(sales.slice(0, 60), card.number, market, condition)
+      : await localSoldPrices(card, market, condition);
   // The pooled fallback is near mint only, so it is never shown for another condition.
   const pooled = local || condition !== "nm" ? null : await ebaySoldPrices(card.id);
   const label = CONDITIONS[condition].label;

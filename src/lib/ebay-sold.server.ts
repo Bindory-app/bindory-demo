@@ -3,7 +3,7 @@
  * in that site's currency, from the Apify actor "eBay Sold Listings Search" (caffein.dev,
  * oTtB3VgfuE9GtxQt2). The Price Check agent runs the actor itself on HarnessRouter and passes the
  * sales to get_card_prices; when no sales are passed, the server runs it (APIFY_TOKEN, never in the
- * browser). Either way it is one search for the 10 newest RAW sales from the last 30 days: eBay's
+ * browser). Either way it is one search for the 10 newest RAW sales from the last 90 days, from sellers in the collector's own country: eBay's
  * trading-card singles category (183454), condition "Ungraded" (4000), and words like custom,
  * proxy and PSA excluded. The server's lookup is cached for 6 hours per card and site.
  *
@@ -77,12 +77,14 @@ export type Sale = {
   soldPrice?: string | number;
   soldCurrency?: string;
   endedAt?: string;
+  /** Where the item was, as eBay shows it (e.g. "United States"); empty for the site's own country. */
+  itemLocation?: string | null;
 };
 
 const GRADED =
   /\b(PSA|BGS|CGC|TAG|SGC|ACE|BECKETT|CGA|GMA|AGS|PCA|MNT)\b\s*(GEM\s*(MINT|MT)\s*)?(\d{1,2}(\.5)?)?/i;
 const SKIP =
-  /\b(lot|bundle|proxy|orica|custom|replica|fan\s*art|metal|gold\s*foil|digital|code\s*card|japanese|japan|jp|korean|chinese|s-?chinese|t-?chinese|thai|indonesian|empty|case\s*only|sleeve)\b|\bx\s?[2-9]\b|\b[2-9]\s?x\b/i;
+  /\b(lot|bundle|proxy|orica|custom|replica|mystery|fan\s*art|metal|gold\s*foil|digital|code\s*card|japanese|japan|jp|korean|chinese|s-?chinese|t-?chinese|thai|indonesian|empty|case\s*only|sleeve)\b|\bx\s?[2-9]\b|\b[2-9]\s?x\b/i;
 
 /** Which bucket a sale's title belongs to, or null to leave it out. */
 export function classifySale(title: string, number: string): "raw" | "psa9" | "psa10" | null {
@@ -118,6 +120,16 @@ export function stat(newestFirst: number[]): SoldStat {
   };
 }
 
+/** True when a sale's item location is the collector's own country (or not given). */
+export function isDomestic(itemLocation: unknown, market: Market): boolean {
+  const loc = String(itemLocation ?? "")
+    .trim()
+    .toLowerCase();
+  if (!loc) return true;
+  const home = market.name.replace(/^the\s+/i, "").toLowerCase();
+  return loc === home || loc.endsWith(`, ${home}`);
+}
+
 export function summarise(
   sales: Sale[],
   number: string,
@@ -135,6 +147,8 @@ export function summarise(
     const key = `${s.title}|${price}|${s.endedAt}`;
     if (seen.has(key)) continue; // the same sale can come back from more than one search
     seen.add(key);
+    // Only sales from the collector's own country: eBay leaves the location off for those.
+    if (!isDomestic(s.itemLocation, market)) continue;
     const title = String(s.title ?? "");
     // A title that names another condition is not this condition's sale.
     const named = titleCondition(title);
@@ -173,6 +187,7 @@ export const EXCLUDE = [
   "slab",
   "lot",
   "japanese",
+  "mystery",
 ];
 
 /** The actor's input for one card: one search for the 10 newest raw (ungraded) sales in one
@@ -189,7 +204,10 @@ export function actorInput(
     categoryId: "183454",
     conditionId: 4000,
     count: 10,
-    daysToScrape: 30,
+    // Sellers in the collector's own country only (eBay puts them first; any from elsewhere that
+    // fill up the 10 are dropped by summarise). 90 days, since local sales are fewer.
+    sellerCountry: market.country,
+    daysToScrape: 90,
     sortOrder: "endedRecently",
     aspectFilter: { "Card Condition": CONDITIONS[condition].ebay },
   };
