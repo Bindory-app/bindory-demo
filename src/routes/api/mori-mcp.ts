@@ -97,7 +97,7 @@ async function handle(req: RpcRequest, request: Request): Promise<object | null>
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  const { executeMoriTool } = await import("@/lib/mori-agent.server");
+  const { executeMoriTool } = await import("@/lib/mori-execute.server");
   try {
     const out = await executeMoriTool(db, who.userId, name, args, {
       message: last.data?.content ?? "",

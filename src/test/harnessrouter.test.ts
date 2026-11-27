@@ -403,7 +403,7 @@ describe("Event tickets", () => {
     expect(routeMoriMessage("Help me buy tickets for East Bay Card Show")).toBe("ask");
   });
   it("shows the organiser's ticket page with its options, never a bad link", async () => {
-    const { executeMoriTool } = await import("@/lib/mori-agent.server");
+    const { executeMoriTool } = await import("@/lib/mori-execute.server");
     const ctx = { seenIds: null, message: "" } as never;
     const ok = await executeMoriTool(
       null as never,
