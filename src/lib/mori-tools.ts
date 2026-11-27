@@ -37,8 +37,6 @@ export const TOOL_STATUS: Record<string, string> = {
   web_fetch: "Reading the page",
 };
 
-export const POINTS = { card_added: 10, memory_saved: 25 } as const;
-
 export type ProposalCard = {
   tcgdex_id: string;
   name: string;
