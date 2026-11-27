@@ -4,8 +4,8 @@ import type { Database } from "@/integrations/supabase/types";
 import { agentMayUse, isMoriAgent } from "@/lib/mori-agents";
 
 /**
- * Mori's tools as an MCP server (Streamable HTTP, stateless, JSON answers) for the HarnessRouter
- * "Ask Mori" harness. Only that harness can call it (bearer derived from MORI_MCP_SECRET), and each
+ * Mori's tools as an MCP server (Streamable HTTP, stateless, JSON answers) for the Mori chat
+ * harnesses. Requests require their shared bearer (derived from MORI_MCP_SECRET), and each
  * call acts as the collector whose sealed session HarnessRouter relays in X-Mori-User, so every
  * query runs under that collector's own Row Level Security. Writing tools only build confirmation
  * cards; nothing is saved until the collector taps Confirm in the app.

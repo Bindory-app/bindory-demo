@@ -18,7 +18,7 @@ export function collectrSyncBinder(message: string): { name: string; new: boolea
   return m?.[2]?.trim() ? { name: m[2].trim(), new: /new/i.test(m[1] ?? "") } : null;
 }
 
-/** A public Collectr link (https, getcollectr.com), or null. */
+/** True for an HTTPS link to getcollectr.com or one of its subdomains. */
 export function isCollectrLink(link: string): boolean {
   try {
     const u = new URL(link);

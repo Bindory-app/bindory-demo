@@ -1,6 +1,6 @@
 /**
- * Ask Mori on HarnessRouter (MORI_RUNTIME=harnessrouter). One collector message is one task on the
- * "Ask Mori" harness; later messages in the same chat continue its session. The harness reaches
+ * Ask Mori on HarnessRouter (MORI_RUNTIME=harnessrouter). Each specialist and the general agent
+ * continues its own session for this chat; a hand-off can start a second task. Each harness reaches
  * Mori's tools through /api/mori-mcp with the collector's sealed session, and the chat cards those
  * tools produce come back signed inside the tool outputs, so this server saves exactly what the
  * tools built. Instructions live on the harness (harnessrouter.json), not in this file.
@@ -348,7 +348,6 @@ export async function runMoriHarness(
 
     let agent = first;
     let r = await run(agent, "");
-    // A specialist that gets something outside its job hands the message to Ask Mori.
     // A specialist that gets a teammate's job names that teammate ("role_mismatch grade"); the
     // message goes there with the hand-off, or to Ask Mori when no teammate is named.
     const mismatch = /^\s*role_mismatch\b[ \t]*([a-z]+)?/i.exec(answerText(r));
@@ -407,8 +406,6 @@ export async function runMoriHarness(
       }
     }
 
-    // A price check shows the real market points on a scale, read here from TCGdex (not from the
-    // agent).
     // The same format every time, whichever agent answered: an answer that prices exactly one
     // card and shows no other card (order, wishlist, grade, photos...) is a price check.
     const singlePriceCheck =

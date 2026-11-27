@@ -96,7 +96,6 @@ export async function marketPrices(
 /** 7-day vs 30-day average price change for these cards, biggest rise first. A few lookups at a
  *  time, retrying once, so a busy moment at TCGdex does not lose them all. */
 export async function priceMoves(ids: string[]) {
-  // A few lookups at a time, retrying once, so a busy moment at TCGdex does not lose them all.
   const lookup = (id: string) =>
     getCardPricing(id).catch(() =>
       new Promise((r) => setTimeout(r, 400)).then(() => getCardPricing(id).catch(() => null)),
@@ -122,7 +121,7 @@ export async function priceMoves(ids: string[]) {
   return moves;
 }
 
-/** The price card for one card: TCGplayer's lowest listing, market price and mid price (US$). */
+/** A chat card with delivered listings and recent raw sales in the collector's currency. */
 export async function priceCardRow(
   cardId: string,
   market: Market,
@@ -167,8 +166,8 @@ export async function priceCardRow(
     listings_read?: boolean;
   } | null;
   if (!pts && !sold && !lst) return null;
-  // The headline is what the card is selling for here: the last 5 sales, else today's cheapest
-  // local listing; the converted overseas market price only when there is nothing else.
+  // Prefer the average of the last 3 sales, then the pooled fallback. Without a sold price, use
+  // the lowest local listing, then worldwide, then the converted market price.
   const headline =
     sold?.["raw"]?.avg_last_3 ??
     sold?.["raw"]?.value ??
