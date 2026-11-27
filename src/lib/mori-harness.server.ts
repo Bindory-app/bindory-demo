@@ -365,7 +365,12 @@ export async function priceCardRow(
         image: cardImage(r.card.image, "low"),
       },
       // Everything here is already in the collector's currency.
-      market: { currency: market.currency, symbol: market.symbol, ebay: market.ebay },
+      market: {
+        currency: market.currency,
+        symbol: market.symbol,
+        ebay: market.ebay,
+        country: market.name.replace(/^the\s+/i, ""),
+      },
       ...(pts
         ? { scale: { low: pts["lowest_listing"], market: pts["market"], mid: pts["mid"] } }
         : {}),

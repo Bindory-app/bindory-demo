@@ -208,23 +208,27 @@
     const dot = (x) => '<i style="position:absolute;top:50%;left:' + at(x[1]) + '%;width:' + (x[0] === "Market price" ? 12 : 8) + "px;height:" + (x[0] === "Market price" ? 12 : 8) + 'px;border-radius:50%;transform:translate(-50%,-50%);background:' + (x[0] === "Market price" ? "#674fd0" : "#fff") + ';border:2px solid #674fd0;box-sizing:border-box"></i>';
     const soldVal = (x) => (x ? (typeof x.value === "number" ? x.value : typeof x.value_usd === "number" ? x.value_usd : null) : null);
     const soldText = (x) => !x ? "No recent sales" : soldVal(x) !== null ? usd(soldVal(x)) + (x.status === "thin" ? "<small>few sales</small>" : "") : typeof x.last_sale_usd === "number" ? "<small>Last sale</small>" + usd(x.last_sale_usd) : "No recent sales";
+    // Recent sales are from sellers in the collector's own country (older cards: read from the eBay site).
+    const SITE_COUNTRY = { "ebay.com": "United States", "ebay.co.uk": "United Kingdom", "ebay.de": "Germany", "ebay.fr": "France", "ebay.it": "Italy", "ebay.es": "Spain", "ebay.ca": "Canada", "ebay.com.au": "Australia" };
+    const soldCountry = p.market ? p.market.country || SITE_COUNTRY[p.market.ebay] || "" : "";
     const headline = typeof s.market === "number" ? s.market : vals.length ? vals[0] : sold && soldVal(sold.raw) !== null ? soldVal(sold.raw) : null;
     return '<div class="cp-val"><div class="cp-val-head"><small>Mori market check</small><b>' +
       esc((c.name || "") + (c.number ? " " + c.number : "")) + (headline !== null ? " · " + usd(headline) : "") + "</b><span>" + esc([c.set, c.rarity].filter(Boolean).join(" · ")) + "</span></div>" +
       (pts.length ? '<small style="display:block;margin:9px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Raw, ungraded · today</small>' +
         '<div style="position:relative;height:6px;margin:12px 12px 6px;border-radius:3px;background:linear-gradient(90deg,#e4e0ff,#9a88ef)">' + pts.map(dot).join("") + "</div>" +
         '<div class="cp-val-values">' + pts.map((x) => "<span><small>" + esc(x[0]) + "</small><b>" + usd(x[1]) + "</b></span>").join("") + "</div>" : "") +
-      (sold ? '<small style="display:block;margin:4px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Recent sales</small>' +
+      (sold ? '<small style="display:block;margin:4px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Recent sales' + (soldCountry ? " (" + esc(soldCountry) + ")" : "") + '</small>' +
         (sold.raw && ("avg_last_3" in sold.raw || "avg_last_5" in sold.raw || "avg_last_10" in sold.raw)
           // Average of the last 3 and last 5 sales (older price cards in History: last 10).
-          ? '<table class="bd-sold"><thead><tr><th>' + (sold.condition ? "Condition" : "") + '</th><th>Last 3 sold</th><th>Last ' + ("avg_last_5" in sold.raw ? 5 : 10) + ' sold</th></tr></thead><tbody>' +
+          ? '<table class="bd-sold"><thead><tr><th>' + (sold.condition ? "Condition" : "") + '</th><th>Last 3 sold</th><th>Last 5 sold</th></tr></thead><tbody>' +
             // One row per condition: the one the collector picked (older cards: raw NM and graded).
             (sold.condition ? [[esc(sold.condition), sold.raw]] : [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]]).filter(([, x]) => x).map(([label, x]) => {
-              const N = x && "avg_last_5" in x ? 5 : 10, last = x && (N === 5 ? x.avg_last_5 : x.avg_last_10);
-              const has = typeof last === "number";
+              // Always last 3 and last 5; older cards (last 10 only) show a dash for last 5.
+              const last = x && x.avg_last_5, three = x && (typeof x.avg_last_3 === "number" ? x.avg_last_3 : last);
+              const has = typeof three === "number";
               const n = x && x.sales ? x.sales : 0;
               return "<tr><th>" + label + "</th>" + (has
-                ? "<td>" + usd(typeof x.avg_last_3 === "number" ? x.avg_last_3 : last) + (n && n < 3 ? "<small>" + n + " sale" + (n === 1 ? "" : "s") + "</small>" : "") + "</td><td>" + usd(last) + (n && n < N ? "<small>" + n + " sale" + (n === 1 ? "" : "s") + "</small>" : "") + "</td>"
+                ? "<td>" + usd(three) + (n && n < 3 ? "<small>" + n + " sale" + (n === 1 ? "" : "s") + "</small>" : "") + "</td><td>" + (typeof last === "number" ? usd(last) + (n && n < 5 ? "<small>" + n + " sale" + (n === 1 ? "" : "s") + "</small>" : "") : "–") + "</td>"
                 : '<td colspan="2" class="is-none">No recent sales</td>') + "</tr>";
             }).join("") + "</tbody></table>"
           : '<div class="cp-val-values">' + [["Raw NM", sold.raw], ["PSA 9", sold.psa9], ["PSA 10", sold.psa10]].map((x) => "<span><small>" + x[0] + "</small><b>" + soldText(x[1]) + "</b></span>").join("") + "</div>") : "") +
