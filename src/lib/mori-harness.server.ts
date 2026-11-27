@@ -345,10 +345,10 @@ export async function priceCardRow(
     }
   > | null;
   const lst = (tool.listings ?? null) as {
-    lowest_worldwide?: { price: number; shipping: number | null } | null;
-    lowest_in_country?: { price: number; shipping: number | null } | null;
+    lowest_worldwide?: { price: number; shipping: number | null; total?: number } | null;
+    lowest_in_country?: { price: number; shipping: number | null; total?: number } | null;
     change_7d_pct?: number | null;
-    sales_last_7_days?: number;
+    listings_read?: boolean;
   } | null;
   if (!pts && !sold && !lst) return null;
   // The headline is what the card is selling for here: the last 5 sales, else today's cheapest
@@ -356,8 +356,8 @@ export async function priceCardRow(
   const headline =
     sold?.["raw"]?.avg_last_5 ??
     sold?.["raw"]?.value ??
-    lst?.lowest_in_country?.price ??
-    lst?.lowest_worldwide?.price ??
+    lst?.lowest_in_country?.total ??
+    lst?.lowest_worldwide?.total ??
     pts?.["market"] ??
     undefined;
   return {
@@ -387,7 +387,7 @@ export async function priceCardRow(
               world: lst.lowest_worldwide ?? null,
               local: lst.lowest_in_country ?? null,
               change7: lst.change_7d_pct ?? null,
-              sales7: lst.sales_last_7_days ?? 0,
+              read: lst.listings_read ?? false,
             },
           }
         : pts

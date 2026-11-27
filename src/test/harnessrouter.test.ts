@@ -640,7 +640,7 @@ describe("Last 3 and last 5 sold averages", () => {
     expect(r.avg_last_5).toBe(30);
     expect(r.n).toBe(5);
   });
-  it("asks the actor for one raw-only search of 6 on the collector's site", async () => {
+  it("asks the actor for one raw-only search of 5 on the collector's site", async () => {
     const { actorInput } = await import("@/lib/ebay-sold.server");
     const { MARKETS } = await import("@/lib/market");
     const input = actorInput({ name: "Umbreon ex", number: "161" }, MARKETS["AU"]!);
@@ -650,7 +650,7 @@ describe("Last 3 and last 5 sold averages", () => {
       ebaySite: "ebay.com.au",
       categoryId: "183454",
       conditionId: 4000,
-      count: 6,
+      count: 5,
       aspectFilter: { "Card Condition": "Near Mint or Better" },
     });
     expect(
@@ -762,10 +762,9 @@ describe("Today's listings and the 7-day change", () => {
       /^https:\/\/www\.ebay\.com\.au\/sch\/183454\/i\.html\?_nkw=Umbreon\+ex\+161\+-custom/,
     );
     expect(local).toContain("LH_ItemCondition=4000");
-    expect(local).toContain("Card%2520Condition=Lightly%2520Played%2520(Excellent)");
-    expect(local).toContain("LH_BIN=1&_sop=15&LH_LocatedIn=1&_salic=15&_udlo=654");
+    expect(local).toContain("Card%2520Condition=Lightly%2520Played%2520%2528Excellent%2529");
+    expect(local).toContain("LH_BIN=1&_sop=15&LH_PrefLoc=1&_udlo=654&rt=nc");
     expect(searchUrl(card, MARKETS["AU"]!, "nm", "worldwide")).toContain("LH_PrefLoc=2");
-    expect(searchUrl(card, MARKETS["AU"]!, "nm", "sold")).toContain("LH_Sold=1&LH_Complete=1");
   });
   it("picks the cheapest real card, skipping junk, other conditions and other countries", async () => {
     const { pickLowest } = await import("@/lib/ebay-listings.server");
@@ -807,27 +806,45 @@ describe("Today's listings and the 7-day change", () => {
       shipping: 8,
     });
   });
-  it("compares the median sale of the last 7 days with the 7 days before", async () => {
+  it("takes the 7-day change from the catalogue's 7-day and 30-day averages", async () => {
     const { weekChange } = await import("@/lib/ebay-listings.server");
+    expect(weekChange({ cardmarket: { avg7: 1100, avg30: 1000 } })).toBe(10);
+    expect(weekChange({ cardmarket: { avg7: 1100 } })).toBeNull();
+    expect(weekChange(null)).toBeNull();
+  });
+  it("reads the agent's rows: price, postage and location as eBay shows them", async () => {
+    const { lowestListings, moneyValue } = await import("@/lib/ebay-listings.server");
     const { MARKETS } = await import("@/lib/market");
-    const now = Date.parse("Nov 27, 2026 12:00");
-    const sale = (p: number, d: string) => ({
-      priceValue: p,
-      currency: "AUD",
-      title: "Umbreon ex 161/131",
-      soldDate: "Sold  " + d,
+    expect(moneyValue("AU $1,493.89")).toBe(1493.89);
+    expect(moneyValue("Free delivery")).toBe(0);
+    expect(Number.isNaN(moneyValue("AU $6.93 to AU $42.18"))).toBe(true);
+    const r = lowestListings({ number: "161" }, MARKETS["AU"]!, "nm", {
+      worldwide: [
+        {
+          title: "Umbreon ex 161/131 SIR",
+          price: "AU $1,327.89",
+          shipping: "+AU $48.91 delivery",
+          location: "from United States",
+        },
+      ],
+      // eBay fills an empty "Australia only" page with international sellers: never local.
+      local: [
+        {
+          title: "Umbreon ex 161/131 Prismatic Evolutions",
+          price: "AU $1,466.70",
+          shipping: "+AU $8.26 delivery",
+          location: "",
+        },
+        {
+          title: "Umbreon ex 161/131 SIR",
+          price: "AU $1,400.00",
+          shipping: "+AU $80 delivery",
+          location: "from Canada",
+        },
+      ],
     });
-    const sales = [
-      sale(1100, "Nov 26, 2026"),
-      sale(1100, "Nov 24, 2026"),
-      sale(17, "Nov 23, 2026"),
-      sale(1000, "Nov 18, 2026"),
-      sale(1000, "Nov 15, 2026"),
-    ];
-    expect(weekChange(sales, "161", "nm", MARKETS["AU"]!, now)).toEqual({ pct: 10, n: 2, prev: 2 });
-    expect(
-      weekChange([sale(1100, "Nov 26, 2026")], "161", "nm", MARKETS["AU"]!, now).pct,
-    ).toBeNull();
+    expect(r.lowest_local).toMatchObject({ price: 1466.7, total: 1474.96, from: null });
+    expect(r.lowest_worldwide).toMatchObject({ total: 1474.96 });
   });
 });
 

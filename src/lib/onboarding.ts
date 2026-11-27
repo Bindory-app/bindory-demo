@@ -1,7 +1,14 @@
 export type OnboardingKey = "reason" | "first_card" | "love";
-export type OnboardingStep = { key: OnboardingKey; question: string; chips: string[]; reply: (answer: string) => string; cardSearch?: boolean };
+export type OnboardingStep = {
+  key: OnboardingKey;
+  question: string;
+  chips: string[];
+  reply: (answer: string) => string;
+  cardSearch?: boolean;
+};
 
-export const ONBOARDING_GREETING = "Hi, I am Mori, your Bindory Agent. I help you keep your cards and the stories behind them.";
+export const ONBOARDING_GREETING =
+  "Hi, I am Mori, your Bindory Agent. I help you keep your cards and the stories behind them.";
 
 export const onboardingSteps: OnboardingStep[] = [
   {
@@ -9,16 +16,21 @@ export const onboardingSteps: OnboardingStep[] = [
     question: "First, what brings you to Bindory?",
     chips: ["Organise my cards", "Remember the stories", "Find collectors like me"],
     reply: (a) =>
-      a === "Organise my cards" ? "Then I will help you keep every card in its place."
-      : a === "Find collectors like me" ? "Then I will help you meet collectors who love what you love."
-      : "Then I will help you keep the why behind every card.",
+      a === "Organise my cards"
+        ? "Then I will help you keep every card in its place."
+        : a === "Find collectors like me"
+          ? "Then I will help you meet collectors who love what you love."
+          : "Then I will help you keep the why behind every card.",
   },
   {
     key: "first_card",
     question: "Which card started it all for you?",
     chips: ["Charizard V", "Umbreon VMAX", "I am just starting"],
     cardSearch: true,
-    reply: (a) => a === "I am just starting" ? "Welcome! Your first card will be a special one. I will remember it." : `${a}. A lovely place to start. I will remember it.`,
+    reply: (a) =>
+      a === "I am just starting"
+        ? "Welcome! Your first card will be a special one. I will remember it."
+        : `${a}. A lovely place to start. I will remember it.`,
   },
   {
     key: "love",

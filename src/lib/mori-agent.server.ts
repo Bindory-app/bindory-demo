@@ -61,7 +61,7 @@ Rules:
 - Never invent data. Every card, set, artist, price, memory or collector you mention must come from a tool result or a photo in this conversation. If a tool returns nothing, say so and offer a next step.
 - Card ids are TCGdex ids such as "swsh7-215". Find them with search_catalogue first (search by the Pokémon/card name, then pick the result whose number matches); never guess an id. Never show ids to the collector; name cards by name and number (e.g. **Umbreon VMAX 215/203**).
 - Photos: when the user sends card photos, read the card name and the collector number printed at the bottom left (e.g. 125/094), then search_catalogue by name and pick the result whose number matches. Never claim to identify a photo you have not seen.
-- Prices: only quote prices from get_card_prices, always called with the collector's country and currency from the App note; every number it returns is already in that currency. Lead with recent sales (below), then today's listings: listings.lowest_worldwide is the cheapest listing from sellers anywhere and listings.lowest_in_country the cheapest from sellers in the collector's country, both by delivered cost: total = price + shipping + import_fees, where import_fees is an estimate for items from abroad (from says where; listing pages leave these fees out, checkout adds them). Quote totals, and when the cheapest is from abroad say it includes estimated import fees, and listings.change_7d_pct how much the typical sale price moved in the last 7 days against the 7 days before (null when there were too few sales). Example: "Near mint copies sold for **A$1,141** on average over the last 3 sales and **A$1,309** over the last 5. The cheapest delivered is **A$1,475** from a seller in Australia, cheaper than any overseas listing once import fees are added, and prices are up **3.8%** this week." price_points is only a rough reference converted from overseas prices: use it for value maths (trade-ups, orders) or when there are no sales or listings, never as the price in a price check. recent_sold.raw holds recent raw (ungraded) sold prices from the collector's own eBay site in the condition named by recent_sold.condition (near mint or better, lightly, moderately or heavily played): avg_last_3 is the average of the last 3 sales and avg_last_5 of the last 5 (sales says how many there were). Quote both as recent sales in that condition (e.g. "lightly played copies sold for an average of **A$1,410** over the last 3 sales and **A$1,420** over the last 5"), say "few sales" when status is thin, and "no recent sales" when empty. Always pass get_card_prices the condition the collector asked about ("LP" or "lightly played" is lightly_played, "MP" moderately_played, "HP" or "damaged" heavily_played, otherwise near_mint). There is no graded sold data. Never name marketplaces, data providers or sources, even when asked: if the collector asks where prices come from, say they are today's market prices and recent sales, updated daily. If there is no price data, say so. Without a recent_sold value for a grade, you may estimate that graded value only as a clearly labelled rough estimate based on the raw price, never as data.
+- Prices: only quote prices from get_card_prices, always called with the collector's country and currency from the App note; every number it returns is already in that currency. Lead with recent sales (below), then today's listings: listings.lowest_worldwide is the cheapest listing from sellers anywhere and listings.lowest_in_country the cheapest from sellers in the collector's country, both by delivered cost: total = price + shipping + import_fees, where import_fees is an estimate for items from abroad (from says where; listing pages leave these fees out, checkout adds them). Quote totals, and when the cheapest is from abroad say it includes estimated import fees, and listings.change_7d_pct how much the card's 7-day average sale price differs from its 30-day average (null when unknown); when listings_read is false nobody read today's listings, so do not mention them. Example: "Near mint copies sold for **A$1,141** on average over the last 3 sales and **A$1,309** over the last 5. The cheapest delivered is **A$1,475** from a seller in Australia, cheaper than any overseas listing once import fees are added, and its 7-day average is **3.8%** above the 30-day average." price_points is only a rough reference converted from overseas prices: use it for value maths (trade-ups, orders) or when there are no sales or listings, never as the price in a price check. recent_sold.raw holds recent raw (ungraded) sold prices from the collector's own eBay site in the condition named by recent_sold.condition (near mint or better, lightly, moderately or heavily played): avg_last_3 is the average of the last 3 sales and avg_last_5 of the last 5 (sales says how many there were). Quote both as recent sales in that condition (e.g. "lightly played copies sold for an average of **A$1,410** over the last 3 sales and **A$1,420** over the last 5"), say "few sales" when status is thin, and "no recent sales" when empty. Always pass get_card_prices the condition the collector asked about ("LP" or "lightly played" is lightly_played, "MP" moderately_played, "HP" or "damaged" heavily_played, otherwise near_mint). There is no graded sold data. Never name marketplaces, data providers or sources, even when asked: if the collector asks where prices come from, say they are today's market prices and recent sales, updated daily. If there is no price data, say so. Without a recent_sold value for a grade, you may estimate that graded value only as a clearly labelled rough estimate based on the raw price, never as data.
 - Pre-grading (only when the collector asks for a pre-grade or whether to grade; never for a plain price check): only from photos you have seen; if there are no photos, call request_card_photos with purpose grade (it shows Take a photo and Upload buttons). Identify the card, call get_card_prices, then call pre_grade_report exactly once with: the three most likely whole PSA-scale grades (e.g. 10, 9, 8, or 9, 8, 7; no half grades) with probabilities that add up to 100 and a short visible reason each; subgrade scores (0-100) for centering, corners, edges and surface as PSA, CGC, BGS and TAG would see them; the overall grade each company would likely give; your confidence (0-100, lower when glare or angle hides detail); a short notes line (e.g. "60/40 back · light corner whitening"); and Mori's take: start with a clear verdict ("Worth sending." or "Sell it raw." or "Keep it raw."), then one short sentence why, weighing the likely grade against the raw price and a typical grading fee plus shipping (about US$25-150). Be realistic: a PSA 10 is rarely the most likely outcome from photos. After pre_grade_report, reply with one short sentence at most (it already shows the full report).
 - Should I grade it (without new photos): compare the raw price range with the likely graded outcome after a typical grading fee, and recommend clearly.
 - Buy or sell orders: you need buy or sell, the card, and a price in US$. Ask for anything missing. Check get_card_prices so you can say how the price compares with the market, then call set_order. Orders are watch alerts in this demo: Mori notifies the collector when a matching listing appears; nothing is bought or sold automatically. The collector can change buy/sell, the price and how long it stays open (7, 30 or 90 days) on the card before confirming. For their open orders, or to cancel one, call list_my_orders: the orders appear as cards with a Cancel button, so reply in one short line and never claim you cancelled an order yourself.
@@ -101,9 +101,29 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
   },
   {
     type: "function",
+    name: "ebay_listing_pages",
+    description:
+      "The two eBay search pages of today's cheapest raw listings for a card in the collector's condition, on their own eBay site: worldwide and in their country. Read both with firecrawl_scrape, then pass the listings to get_card_prices.",
+    strict: false,
+    parameters: {
+      type: "object",
+      properties: {
+        card_id: str("TCGdex card id"),
+        country: str("The collector's country code from the App note, e.g. AU"),
+        condition: {
+          type: "string",
+          enum: ["near_mint", "lightly_played", "moderately_played", "heavily_played"],
+          description: "The condition the collector asked about; near_mint when they did not say.",
+        },
+      },
+      required: ["card_id"],
+    },
+  },
+  {
+    type: "function",
     name: "get_card_prices",
     description:
-      "A card's prices for the collector's market, all in their currency: today's raw market points (lowest listing, market, mid) and recent raw sold prices in the condition asked about, from their own eBay site. Pass the country and currency from the App note.",
+      "A card's prices for the collector's market, all in their currency: recent raw sold prices in the condition asked about from their own eBay site, today's lowest listings (from the listings you pass) and the 7-day change. Pass the country and currency from the App note.",
     strict: false,
     parameters: {
       type: "object",
@@ -116,6 +136,34 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
           enum: ["near_mint", "lightly_played", "moderately_played", "heavily_played"],
           description:
             "The raw card's condition the collector asked about; near_mint (near mint or better) when they did not say.",
+        },
+        listings_worldwide: {
+          type: "array",
+          description:
+            "Every listing you read on the ebay_listing_pages worldwide page, in page order",
+          items: {
+            type: "object",
+            properties: {
+              title: str("Listing title"),
+              price: str("Price as shown, e.g. AU $1,466.70"),
+              shipping: str("Postage as shown, e.g. +AU $8.26 delivery or Free delivery"),
+              location: str("'from <country>' as shown; empty when the page shows none"),
+            },
+          },
+        },
+        listings_in_country: {
+          type: "array",
+          description:
+            "Every listing you read on the ebay_listing_pages in-country page, in page order",
+          items: {
+            type: "object",
+            properties: {
+              title: str("Listing title"),
+              price: str("Price as shown, e.g. AU $1,466.70"),
+              shipping: str("Postage as shown, e.g. +AU $8.26 delivery or Free delivery"),
+              location: str("'from <country>' as shown; empty when the page shows none"),
+            },
+          },
         },
         sold_listings: {
           type: "array",
@@ -557,6 +605,8 @@ export async function marketPrices(
   agentSales?: unknown[],
   /** The raw card's condition; sold prices are for this condition only. */
   condition: import("./ebay-sold.server").Condition = "nm",
+  /** Listings the agent read (Firecrawl) from the two ebay_listing_pages pages. */
+  agentListings?: { worldwide?: unknown[]; local?: unknown[] },
 ) {
   const { usdTo } = await import("./fx.server");
   const { localSoldPrices, summarise, CONDITIONS } = await import("./ebay-sold.server");
@@ -584,15 +634,25 @@ export async function marketPrices(
   // The pooled fallback is near mint only, so it is never shown for another condition.
   const pooled = local || condition !== "nm" ? null : await ebaySoldPrices(card.id);
   const label = CONDITIONS[condition].label;
-  // Today's listings (lowest worldwide and in their country) and the 7-day change, priced from
-  // the card's recent sold average (else the converted US market price) so junk listings drop out.
-  const { marketListings } = await import("./ebay-listings.server");
-  const listings = await marketListings(
-    card,
-    market,
-    condition,
-    local?.raw.avg_last_5 ?? x(scale?.market) ?? null,
-  ).catch(() => null);
+  // Today's lowest listings (worldwide and in their country) from the pages the agent read, with a
+  // floor at half the recent sold average (else 40% of the converted market price) so skins,
+  // cases and fan art drop out; the 7-day change from the catalogue. No Apify here.
+  const { lowestListings, weekChange } = await import("./ebay-listings.server");
+  const ref = local?.raw.avg_last_5 ? local.raw.avg_last_5 * 0.5 : (x(scale?.market) ?? 0) * 0.4;
+  const read = Boolean(agentListings?.worldwide?.length || agentListings?.local?.length);
+  const lowest = read
+    ? lowestListings(card, market, condition, agentListings ?? {}, ref || undefined)
+    : null;
+  const change7 = weekChange(pricing);
+  const listings =
+    lowest || change7 !== null
+      ? {
+          lowest_worldwide: lowest?.lowest_worldwide ?? null,
+          lowest_local: lowest?.lowest_local ?? null,
+          read,
+          change_7d_pct: change7,
+        }
+      : null;
   const soldOut = (v: {
     value: number | null;
     status: string;
@@ -619,8 +679,8 @@ export async function marketPrices(
             condition: label,
             lowest_worldwide: listings.lowest_worldwide,
             lowest_in_country: listings.lowest_local,
+            listings_read: listings.read,
             change_7d_pct: listings.change_7d_pct,
-            sales_last_7_days: listings.sales_7d,
           }
         : null,
       price_points: scale
@@ -658,6 +718,25 @@ async function runReadTool(db: DB, name: string, a: Args): Promise<unknown> {
             note: "No cards found. Try the name alone, or check the number with the collector.",
           };
     }
+    case "ebay_listing_pages": {
+      const r = await getCardPricing(s(a["card_id"]) ?? "");
+      if (!r) return { error: "Card not found" };
+      const market = marketFromArgs(a);
+      const condition = toCondition(a["condition"]) ?? "nm";
+      const { searchUrl } = await import("./ebay-listings.server");
+      const { usdTo } = await import("./fx.server");
+      const rate = market.currency === "USD" ? 1 : await usdTo(market.currency);
+      const mkt = priceScale(r.pricing)?.market;
+      // A floor below any real copy, so skins, cases and A$5 fakes are not on the page at all.
+      const floor = typeof mkt === "number" ? mkt * rate * 0.4 : undefined;
+      const card = { name: r.card.name, number: r.card.localId };
+      return {
+        worldwide_url: searchUrl(card, market, condition, "worldwide", floor),
+        in_country_url: searchUrl(card, market, condition, "local", floor),
+        scrape_location_country: market.country,
+        note: "Read both pages with firecrawl_scrape (formats markdown, onlyMainContent true, location country as given), at the same time. From each page copy the first 12 listings in page order (they are cheapest first): title, price, shipping (postage/delivery text) and location (the 'from <country>' text, empty when none). Skip 'Shop on eBay' placeholders. Pass them to get_card_prices as listings_worldwide and listings_in_country.",
+      };
+    }
     case "get_card_prices": {
       const r = await getCardPricing(s(a["card_id"]) ?? "");
       if (!r) return { error: "Card not found" };
@@ -668,6 +747,14 @@ async function runReadTool(db: DB, name: string, a: Args): Promise<unknown> {
         marketFromArgs(a),
         Array.isArray(a["sold_listings"]) ? (a["sold_listings"] as unknown[]) : undefined,
         toCondition(a["condition"]) ?? "nm",
+        {
+          worldwide: Array.isArray(a["listings_worldwide"])
+            ? (a["listings_worldwide"] as unknown[])
+            : [],
+          local: Array.isArray(a["listings_in_country"])
+            ? (a["listings_in_country"] as unknown[])
+            : [],
+        },
       );
       return {
         card: { ...card, set: r.card.set.name, rarity: r.card.rarity },

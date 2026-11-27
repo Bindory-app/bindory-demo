@@ -4783,15 +4783,17 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     const kicker = (t) => '<small style="display:block;margin:9px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">' + t + "</small>";
     const scaleBar = pts.length > 1 ? '<div style="position:relative;height:6px;margin:12px 12px 6px;border-radius:3px;background:linear-gradient(90deg,#e4e0ff,#9a88ef)">' + pts.map(dot).join("") + "</div>" : "";
     const ch = L && typeof L.change7 === "number" ? L.change7 : null;
+    // "None listed" only when today's listings were read and none was the card; "–" when not read.
+    const none = L && L.read === false ? "–" : "None listed";
     const delivered = (x) => !x || typeof x.total !== "number" ? "" : '<em style="display:block;font-style:normal;font-size:6.5px;line-height:1.3;margin-top:2px;color:var(--mori-muted,#6b7090)">' + (x.import_fees > 0 ? "from " + esc(x.from || "overseas") + ", incl. postage + est. import fees" : "incl. postage") + "</em>";
     const listed = L
       ? kicker("Listed today" + (sold && sold.condition ? " · " + esc(sold.condition) : "")) + scaleBar +
         (pts.length > 1 ? '<p style="margin:0 12px 2px;font-size:7px;color:var(--mori-muted,#6b7090)"><b style="color:#674fd0">●</b> Last 5 sold &nbsp; <b style="color:#674fd0">○</b> Lowest listings, delivered</p>' : "") +
         '<div class="cp-val-values">' +
         // Delivered prices: item + postage, plus estimated import fees for items from abroad.
-        "<span><small>Lowest listing<br>(worldwide)</small><b>" + (L.world ? usd(L.world.total || L.world.price) : "None") + "</b>" + delivered(L.world) + "</span>" +
-        "<span><small>Lowest in<br>" + esc(country0 || "your country") + "</small><b>" + (L.local ? usd(L.local.total || L.local.price) : "None") + "</b>" + delivered(L.local) + "</span>" +
-        "<span><small>Price change<br>last 7 days</small><b" + (ch === null ? "" : ' style="color:' + (ch > 0 ? "#1f9d55" : ch < 0 ? "#d64545" : "inherit") + '"') + ">" + (ch === null ? "–" : (ch > 0 ? "+" : ch < 0 ? "−" : "") + Math.abs(ch).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "%") + "</b></span></div>"
+        "<span><small>Lowest listing<br>(worldwide)</small><b>" + (L.world ? usd(L.world.total || L.world.price) : none) + "</b>" + delivered(L.world) + "</span>" +
+        "<span><small>Lowest in<br>" + esc(country0 || "your country") + "</small><b>" + (L.local ? usd(L.local.total || L.local.price) : none) + "</b>" + delivered(L.local) + "</span>" +
+        "<span><small>Price change<br>last 7 days</small><b" + (ch === null ? "" : ' style="color:' + (ch > 0 ? "#1f9d55" : ch < 0 ? "#d64545" : "inherit") + '"') + ">" + (ch === null ? "–" : (ch > 0 ? "+" : ch < 0 ? "−" : "") + Math.abs(ch).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "%") + "</b>" + (ch === null ? "" : '<em style="display:block;font-style:normal;font-size:6.5px;line-height:1.3;margin-top:2px;color:var(--mori-muted,#6b7090)">7-day vs 30-day average sale</em>') + "</span></div>"
       : "";
     return '<div class="cp-val"><div class="cp-val-head"><small>Mori market check</small><b>' +
       esc((c.name || "") + (c.number ? " " + c.number : "")) + (headline !== null ? " · " + usd(headline) : "") + "</b><span>" + esc([c.set, c.rarity].filter(Boolean).join(" · ")) + "</span></div>" +

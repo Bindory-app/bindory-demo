@@ -201,8 +201,7 @@ export function actorInput(
     ebaySite: market.ebay,
     categoryId: "183454",
     conditionId: 4000,
-    // One spare in case a custom or look-alike gets through and is dropped; at most 5 are shown.
-    count: 6,
+    count: 5,
     // Sellers in the collector's own country only (eBay puts them first; any from elsewhere that
     // fill up the 10 are dropped by summarise). 90 days, since local sales are fewer.
     sellerCountry: market.country,
