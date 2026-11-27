@@ -13,7 +13,6 @@ export const isMoriAgent = (v: unknown): v is MoriAgent =>
 export const AGENT_TOOLS: Record<Exclude<MoriAgent, "ask">, readonly string[]> = {
   price: [
     "search_catalogue",
-    "ebay_listing_pages",
     "get_card_prices",
     "find_related_cards",
     "list_my_cards",

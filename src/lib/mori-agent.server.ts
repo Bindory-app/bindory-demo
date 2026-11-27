@@ -101,29 +101,9 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
   },
   {
     type: "function",
-    name: "ebay_listing_pages",
-    description:
-      "The two eBay search pages of today's cheapest raw listings for a card in the collector's condition, on their own eBay site: worldwide and in their country. Read both with firecrawl_scrape, then pass the listings to get_card_prices.",
-    strict: false,
-    parameters: {
-      type: "object",
-      properties: {
-        card_id: str("TCGdex card id"),
-        country: str("The collector's country code from the App note, e.g. AU"),
-        condition: {
-          type: "string",
-          enum: ["near_mint", "lightly_played", "moderately_played", "heavily_played"],
-          description: "The condition the collector asked about; near_mint when they did not say.",
-        },
-      },
-      required: ["card_id"],
-    },
-  },
-  {
-    type: "function",
     name: "get_card_prices",
     description:
-      "A card's prices for the collector's market, all in their currency: recent raw sold prices in the condition asked about from their own eBay site, today's lowest listings (from the listings you pass) and the 7-day change. Pass the country and currency from the App note.",
+      "A card's prices for the collector's market, all in their currency: recent raw sold prices in the condition asked about from their own eBay site, today's lowest listings worldwide and in their country. Pass the country and currency from the App note.",
     strict: false,
     parameters: {
       type: "object",
@@ -136,34 +116,6 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
           enum: ["near_mint", "lightly_played", "moderately_played", "heavily_played"],
           description:
             "The raw card's condition the collector asked about; near_mint (near mint or better) when they did not say.",
-        },
-        listings_worldwide: {
-          type: "array",
-          description:
-            "Every listing you read on the ebay_listing_pages worldwide page, in page order",
-          items: {
-            type: "object",
-            properties: {
-              title: str("Listing title"),
-              price: str("Price as shown, e.g. AU $1,466.70"),
-              shipping: str("Postage as shown, e.g. +AU $8.26 delivery or Free delivery"),
-              location: str("'from <country>' as shown; empty when the page shows none"),
-            },
-          },
-        },
-        listings_in_country: {
-          type: "array",
-          description:
-            "Every listing you read on the ebay_listing_pages in-country page, in page order",
-          items: {
-            type: "object",
-            properties: {
-              title: str("Listing title"),
-              price: str("Price as shown, e.g. AU $1,466.70"),
-              shipping: str("Postage as shown, e.g. +AU $8.26 delivery or Free delivery"),
-              location: str("'from <country>' as shown; empty when the page shows none"),
-            },
-          },
         },
         sold_listings: {
           type: "array",
@@ -605,8 +557,6 @@ export async function marketPrices(
   agentSales?: unknown[],
   /** The raw card's condition; sold prices are for this condition only. */
   condition: import("./ebay-sold.server").Condition = "nm",
-  /** Listings the agent read (Firecrawl) from the two ebay_listing_pages pages. */
-  agentListings?: { worldwide?: unknown[]; local?: unknown[] },
 ) {
   const { usdTo } = await import("./fx.server");
   const { localSoldPrices, summarise, CONDITIONS } = await import("./ebay-sold.server");
@@ -634,25 +584,19 @@ export async function marketPrices(
   // The pooled fallback is near mint only, so it is never shown for another condition.
   const pooled = local || condition !== "nm" ? null : await ebaySoldPrices(card.id);
   const label = CONDITIONS[condition].label;
-  // Today's lowest listings (worldwide and in their country) from the pages the agent read, with a
-  // floor at half the recent sold average (else 40% of the converted market price) so skins,
-  // cases and fan art drop out; the 7-day change from the catalogue. No Apify here.
-  const { lowestListings, weekChange } = await import("./ebay-listings.server");
-  const ref = local?.raw.avg_last_5 ? local.raw.avg_last_5 * 0.5 : (x(scale?.market) ?? 0) * 0.4;
-  const read = Boolean(agentListings?.worldwide?.length || agentListings?.local?.length);
-  const lowest = read
-    ? lowestListings(card, market, condition, agentListings ?? {}, ref || undefined)
-    : null;
-  const change7 = weekChange(pricing);
-  const listings =
-    lowest || change7 !== null
-      ? {
-          lowest_worldwide: lowest?.lowest_worldwide ?? null,
-          lowest_local: lowest?.lowest_local ?? null,
-          read,
-          change_7d_pct: change7,
-        }
-      : null;
+  // Today's lowest listings (worldwide and in their country) from eBay's own Browse API, with a
+  // floor at half the recent sold average (else 40% of the converted market price) so skins, cases
+  // and fan art drop out. No scraping and no Apify here.
+  const { browseLowest } = await import("./ebay-browse.server");
+  const ref = local?.raw.avg_last_3 ? local.raw.avg_last_3 * 0.5 : (x(scale?.market) ?? 0) * 0.4;
+  const lowest = await browseLowest(card, market, condition, ref || undefined).catch(() => null);
+  // Without listings (no keys yet, or eBay unavailable) the card still shows its new layout, with
+  // "–" in place of the listing prices.
+  const listings = {
+    lowest_worldwide: lowest?.lowest_worldwide ?? null,
+    lowest_local: lowest?.lowest_local ?? null,
+    read: Boolean(lowest),
+  };
   const soldOut = (v: {
     value: number | null;
     status: string;
@@ -717,25 +661,6 @@ async function runReadTool(db: DB, name: string, a: Args): Promise<unknown> {
             note: "No cards found. Try the name alone, or check the number with the collector.",
           };
     }
-    case "ebay_listing_pages": {
-      const r = await getCardPricing(s(a["card_id"]) ?? "");
-      if (!r) return { error: "Card not found" };
-      const market = marketFromArgs(a);
-      const condition = toCondition(a["condition"]) ?? "nm";
-      const { searchUrl } = await import("./ebay-listings.server");
-      const { usdTo } = await import("./fx.server");
-      const rate = market.currency === "USD" ? 1 : await usdTo(market.currency);
-      const mkt = priceScale(r.pricing)?.market;
-      // A floor below any real copy, so skins, cases and A$5 fakes are not on the page at all.
-      const floor = typeof mkt === "number" ? mkt * rate * 0.4 : undefined;
-      const card = { name: r.card.name, number: r.card.localId };
-      return {
-        worldwide_url: searchUrl(card, market, condition, "worldwide", floor),
-        in_country_url: searchUrl(card, market, condition, "local", floor),
-        scrape_location_country: market.country,
-        note: "Read both pages with firecrawl_scrape (formats markdown, onlyMainContent true, location country as given), at the same time. From each page copy the first 12 listings in page order (they are cheapest first): title, price, shipping (postage/delivery text) and location (the 'from <country>' text, empty when none). Skip 'Shop on eBay' placeholders. Pass them to get_card_prices as listings_worldwide and listings_in_country.",
-      };
-    }
     case "get_card_prices": {
       const r = await getCardPricing(s(a["card_id"]) ?? "");
       if (!r) return { error: "Card not found" };
@@ -746,14 +671,6 @@ async function runReadTool(db: DB, name: string, a: Args): Promise<unknown> {
         marketFromArgs(a),
         Array.isArray(a["sold_listings"]) ? (a["sold_listings"] as unknown[]) : undefined,
         toCondition(a["condition"]) ?? "nm",
-        {
-          worldwide: Array.isArray(a["listings_worldwide"])
-            ? (a["listings_worldwide"] as unknown[])
-            : [],
-          local: Array.isArray(a["listings_in_country"])
-            ? (a["listings_in_country"] as unknown[])
-            : [],
-        },
       );
       return {
         card: { ...card, set: r.card.set.name, rarity: r.card.rarity },
