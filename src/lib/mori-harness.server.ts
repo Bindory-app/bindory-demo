@@ -23,7 +23,7 @@ import {
 } from "./harnessrouter.server";
 import { readSignedRows, sealCollector, stripRowBlocks } from "./mori-mcp-auth.server";
 import { priceCardRow } from "./mori-prices.server";
-import { finishMoriTurn } from "./mori-agent.server";
+import { finishMoriTurn } from "./mori-turn.server";
 import { tools } from "./mori-prompt.server";
 
 const TOOL_NAMES = tools.map((t) => t.name);

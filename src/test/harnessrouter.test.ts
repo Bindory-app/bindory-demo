@@ -241,7 +241,7 @@ describe("Bare card names are price checks", () => {
   });
 });
 
-import { replyParts } from "@/lib/mori-agent.server";
+import { replyParts } from "@/lib/mori-turn.server";
 
 describe("Reply bubbles", () => {
   it("splits a multi-part reply on --- lines, one bubble each", () => {
@@ -451,7 +451,7 @@ describe("Answers to tap", () => {
     return { db: db as never, saved };
   };
   it("turns a Choices line into answers and drops the general suggestions", async () => {
-    const { finishMoriTurn } = await import("@/lib/mori-agent.server");
+    const { finishMoriTurn } = await import("@/lib/mori-turn.server");
     const { db, saved } = fakeDb();
     await finishMoriTurn(
       db,
@@ -467,7 +467,7 @@ describe("Answers to tap", () => {
     expect(saved.some((r) => r.kind === "suggest")).toBe(false);
   });
   it("keeps Suggestions when no question was asked", async () => {
-    const { finishMoriTurn } = await import("@/lib/mori-agent.server");
+    const { finishMoriTurn } = await import("@/lib/mori-turn.server");
     const { db, saved } = fakeDb();
     await finishMoriTurn(
       db,
