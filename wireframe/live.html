@@ -195,26 +195,45 @@
       '<div class="cp-mori-actions"><button class="cp-mori-go" data-bd-confirm="' + id + '"' + (done ? " disabled" : "") + ">" + (p.status === "confirmed" ? "Saved" : "Confirm") + '</button><button data-bd-edit="' + id + '"' + (done ? " disabled" : "") + ">Change details</button></div></div>";
   }
 
-  // A live price check: today's market points (lowest listing, market price, mid price) on one
-  // scale, then recent sold prices raw and graded.
+  // A live price check, all in the collector's currency. Today: the cheapest listing worldwide, the
+  // cheapest in their country and the 7-day change, with both listings and the last-5-sold average
+  // on one scale. Then recent sales in their country (last 3 and last 5).
+  // Older cards (before listings) kept the converted US points: lowest listing, market, mid.
   function priceCardHTML(p) {
-    const s = p.scale || {}, c = p.card || {}, sold = p.sold;
-    const pts = [["Lowest listing", s.low], ["Market price", s.market], ["Mid price", s.mid]].filter((x) => typeof x[1] === "number");
-    if (!pts.length && !sold) return "";
+    const s = p.scale || {}, c = p.card || {}, sold = p.sold, L = p.listings;
+    const country0 = p.market ? p.market.country || "" : "";
+    const last5 = sold && sold.raw && typeof sold.raw.avg_last_5 === "number" ? sold.raw.avg_last_5 : null;
+    const pts = L
+      ? [["Lowest listing (worldwide)", L.world && L.world.price], ["Lowest in " + (country0 || "your country"), L.local && L.local.price], ["Last 5 sold", last5]].filter((x) => typeof x[1] === "number")
+      : [["Lowest listing", s.low], ["Market price", s.market], ["Mid price", s.mid]].filter((x) => typeof x[1] === "number");
+    if (!pts.length && !sold && !L) return "";
     // New cards carry prices already in the collector's currency (p.market); older ones are US$.
     const usd = (n) => localMoney(n, p.market ? { symbol: p.market.symbol, rate: 1 } : MKT);
     const vals = pts.map((x) => x[1]), lo = Math.min(...vals), hi = Math.max(...vals), span = hi - lo || 1;
     const at = (v) => 4 + Math.round(((v - lo) / span) * 92);
-    const dot = (x) => '<i style="position:absolute;top:50%;left:' + at(x[1]) + '%;width:' + (x[0] === "Market price" ? 12 : 8) + "px;height:" + (x[0] === "Market price" ? 12 : 8) + 'px;border-radius:50%;transform:translate(-50%,-50%);background:' + (x[0] === "Market price" ? "#674fd0" : "#fff") + ';border:2px solid #674fd0;box-sizing:border-box"></i>';
+    // The big dot is the typical price: the last 5 sales (older cards: the market price).
+    const isMain = (x) => x[0] === "Market price" || x[0] === "Last 5 sold";
+    const dot = (x) => '<i title="' + esc(x[0]) + '" style="position:absolute;top:50%;left:' + at(x[1]) + '%;width:' + (isMain(x) ? 12 : 8) + "px;height:" + (isMain(x) ? 12 : 8) + 'px;border-radius:50%;transform:translate(-50%,-50%);background:' + (isMain(x) ? "#674fd0" : "#fff") + ';border:2px solid #674fd0;box-sizing:border-box;z-index:' + (isMain(x) ? 2 : 1) + '"></i>';
     const soldVal = (x) => (x ? (typeof x.value === "number" ? x.value : typeof x.value_usd === "number" ? x.value_usd : null) : null);
     const soldText = (x) => !x ? "No recent sales" : soldVal(x) !== null ? usd(soldVal(x)) + (x.status === "thin" ? "<small>few sales</small>" : "") : typeof x.last_sale_usd === "number" ? "<small>Last sale</small>" + usd(x.last_sale_usd) : "No recent sales";
     // Recent sales are from sellers in the collector's own country (older cards: read from the eBay site).
     const SITE_COUNTRY = { "ebay.com": "United States", "ebay.co.uk": "United Kingdom", "ebay.de": "Germany", "ebay.fr": "France", "ebay.it": "Italy", "ebay.es": "Spain", "ebay.ca": "Canada", "ebay.com.au": "Australia" };
     const soldCountry = p.market ? p.market.country || SITE_COUNTRY[p.market.ebay] || "" : "";
-    const headline = typeof s.market === "number" ? s.market : vals.length ? vals[0] : sold && soldVal(sold.raw) !== null ? soldVal(sold.raw) : null;
+    const headline = typeof p.headline === "number" ? p.headline : typeof s.market === "number" ? s.market : vals.length ? vals[0] : sold && soldVal(sold.raw) !== null ? soldVal(sold.raw) : null;
+    const kicker = (t) => '<small style="display:block;margin:9px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">' + t + "</small>";
+    const scaleBar = pts.length > 1 ? '<div style="position:relative;height:6px;margin:12px 12px 6px;border-radius:3px;background:linear-gradient(90deg,#e4e0ff,#9a88ef)">' + pts.map(dot).join("") + "</div>" : "";
+    const ch = L && typeof L.change7 === "number" ? L.change7 : null;
+    const listed = L
+      ? kicker("Listed today" + (sold && sold.condition ? " · " + esc(sold.condition) : "")) + scaleBar +
+        (pts.length > 1 ? '<p style="margin:0 12px 2px;font-size:7px;color:var(--mori-muted,#6b7090)"><b style="color:#674fd0">●</b> Last 5 sold &nbsp; <b style="color:#674fd0">○</b> Lowest listings</p>' : "") +
+        '<div class="cp-val-values">' +
+        "<span><small>Lowest listing<br>(worldwide)</small><b>" + (L.world ? usd(L.world.price) : "None") + "</b></span>" +
+        "<span><small>Lowest in<br>" + esc(country0 || "your country") + "</small><b>" + (L.local ? usd(L.local.price) : "None") + "</b></span>" +
+        "<span><small>Price change<br>last 7 days</small><b" + (ch === null ? "" : ' style="color:' + (ch > 0 ? "#1f9d55" : ch < 0 ? "#d64545" : "inherit") + '"') + ">" + (ch === null ? "–" : (ch > 0 ? "+" : ch < 0 ? "−" : "") + Math.abs(ch).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "%") + "</b></span></div>"
+      : "";
     return '<div class="cp-val"><div class="cp-val-head"><small>Mori market check</small><b>' +
       esc((c.name || "") + (c.number ? " " + c.number : "")) + (headline !== null ? " · " + usd(headline) : "") + "</b><span>" + esc([c.set, c.rarity].filter(Boolean).join(" · ")) + "</span></div>" +
-      (pts.length ? '<small style="display:block;margin:9px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Raw, ungraded · today</small>' +
+      listed + (!L && pts.length ? '<small style="display:block;margin:9px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Raw, ungraded · today</small>' +
         '<div style="position:relative;height:6px;margin:12px 12px 6px;border-radius:3px;background:linear-gradient(90deg,#e4e0ff,#9a88ef)">' + pts.map(dot).join("") + "</div>" +
         '<div class="cp-val-values">' + pts.map((x) => "<span><small>" + esc(x[0]) + "</small><b>" + usd(x[1]) + "</b></span>").join("") + "</div>" : "") +
       (sold ? '<small style="display:block;margin:4px 10px 0;font-size:7.5px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#6853d3">Recent sales' + (soldCountry ? " (" + esc(soldCountry) + ")" : "") + '</small>' +
@@ -1170,8 +1189,9 @@
       const p = r.payload || {};
       if (r.kind === "price" && p.card && p.card.name && !seenPrice.has(p.card.name)) {
         seenPrice.add(p.card.name);
-        const v = p.scale && p.scale.market;
-        items.push({ k: "Price checks", t: p.card.name + (p.card.number ? " " + p.card.number : ""), sub: v ? "US$" + Number(v).toLocaleString("en-US") + " market price" : "Price check", at: r.created_at, act: 'data-mori-panel-ask="' + esc("Price check: " + p.card.name + (p.card.number ? " " + p.card.number : "")) + '"' });
+        const v = typeof p.headline === "number" ? p.headline : p.scale && p.scale.market;
+        const sym = p.market && p.market.symbol ? p.market.symbol : "US$";
+        items.push({ k: "Price checks", t: p.card.name + (p.card.number ? " " + p.card.number : ""), sub: v ? sym + Math.round(Number(v)).toLocaleString("en-US") + (typeof p.headline === "number" ? " recent sales" : " market price") : "Price check", at: r.created_at, act: 'data-mori-panel-ask="' + esc("Price check: " + p.card.name + (p.card.number ? " " + p.card.number : "")) + '"' });
       }
       if (r.kind === "tickets" && p.url) items.push({ k: "Tickets", t: p.event || "Tickets", sub: [p.date, p.venue].filter(Boolean).join(" · "), at: r.created_at, act: 'data-bd-lib-url="' + esc(p.url) + '"' });
       if (r.kind === "video" && p.title) items.push({ k: "Videos", t: p.title, sub: "Video plan, " + ((p.frames || []).length) + " scenes", at: r.created_at, act: "" });

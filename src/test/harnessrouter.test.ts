@@ -751,3 +751,76 @@ describe("Last 3 and last 5 sold averages", () => {
     expect(r.raw).toMatchObject({ n: 3, avg_last_3: 1500 });
   });
 });
+
+describe("Today's listings and the 7-day change", () => {
+  it("builds eBay searches with the site's own location, condition and price floor", async () => {
+    const { searchUrl } = await import("@/lib/ebay-listings.server");
+    const { MARKETS } = await import("@/lib/market");
+    const card = { name: "Umbreon ex", number: "161" };
+    const local = searchUrl(card, MARKETS["AU"]!, "lp", "local", 654.5);
+    expect(local).toMatch(
+      /^https:\/\/www\.ebay\.com\.au\/sch\/183454\/i\.html\?_nkw=Umbreon\+ex\+161\+-custom/,
+    );
+    expect(local).toContain("LH_ItemCondition=4000");
+    expect(local).toContain("Card%2520Condition=Lightly%2520Played%2520(Excellent)");
+    expect(local).toContain("LH_BIN=1&_sop=15&LH_LocatedIn=1&_salic=15&_udlo=654");
+    expect(searchUrl(card, MARKETS["AU"]!, "nm", "worldwide")).toContain("LH_PrefLoc=2");
+    expect(searchUrl(card, MARKETS["AU"]!, "nm", "sold")).toContain("LH_Sold=1&LH_Complete=1");
+  });
+  it("picks the cheapest real card, skipping junk, other conditions and other countries", async () => {
+    const { pickLowest } = await import("@/lib/ebay-listings.server");
+    const { MARKETS } = await import("@/lib/market");
+    const au = MARKETS["AU"]!;
+    const row = (priceValue: number, title: string, extra: Record<string, unknown> = {}) => ({
+      priceValue,
+      price: "AU " + priceValue,
+      currency: "AUD",
+      shippingCost: 8,
+      title,
+      itemLocation: null,
+      ...extra,
+    });
+    const items = [
+      row(6.64, "Umbreon ex PRE 161/131 CREDIT CARD SKIN"),
+      row(8.13, "Umbreon ex 161/131 EXTENDED ART CASE", { price: "AU 8.13  to  AU 41.33" }),
+      row(1200, "LP Umbreon ex 161/131"),
+      row(1300, "Umbreon ex 161/131 SIR", { itemLocation: "United States" }),
+      row(1466.7, "Umbreon ex 161/131 Prismatic Evolutions"),
+      row(1674.7, "Umbreon ex 161/131 Special Illustration"),
+    ];
+    expect(pickLowest(items, "161", "nm", au, { local: false })).toEqual({
+      price: 1300,
+      shipping: 8,
+    });
+    expect(pickLowest(items, "161", "nm", au, { local: true })).toEqual({
+      price: 1466.7,
+      shipping: 8,
+    });
+    expect(pickLowest(items, "161", "nm", au, { local: true, floor: 1500 })).toEqual({
+      price: 1674.7,
+      shipping: 8,
+    });
+  });
+  it("compares the median sale of the last 7 days with the 7 days before", async () => {
+    const { weekChange } = await import("@/lib/ebay-listings.server");
+    const { MARKETS } = await import("@/lib/market");
+    const now = Date.parse("Nov 27, 2026 12:00");
+    const sale = (p: number, d: string) => ({
+      priceValue: p,
+      currency: "AUD",
+      title: "Umbreon ex 161/131",
+      soldDate: "Sold  " + d,
+    });
+    const sales = [
+      sale(1100, "Nov 26, 2026"),
+      sale(1100, "Nov 24, 2026"),
+      sale(17, "Nov 23, 2026"),
+      sale(1000, "Nov 18, 2026"),
+      sale(1000, "Nov 15, 2026"),
+    ];
+    expect(weekChange(sales, "161", "nm", MARKETS["AU"]!, now)).toEqual({ pct: 10, n: 2, prev: 2 });
+    expect(
+      weekChange([sale(1100, "Nov 26, 2026")], "161", "nm", MARKETS["AU"]!, now).pct,
+    ).toBeNull();
+  });
+});

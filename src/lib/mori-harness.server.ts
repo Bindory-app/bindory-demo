@@ -321,6 +321,7 @@ export async function priceCardRow(
       ? (fromTool as {
           price_points?: Record<string, number | null> | null;
           recent_sold?: Record<string, unknown> | null;
+          listings?: Record<string, unknown> | null;
         })
       : (
           await marketPrices(
@@ -343,18 +344,26 @@ export async function priceCardRow(
       status: string;
     }
   > | null;
-  if (!pts && !sold) return null;
+  const lst = (tool.listings ?? null) as {
+    lowest_worldwide?: { price: number; shipping: number | null } | null;
+    lowest_in_country?: { price: number; shipping: number | null } | null;
+    change_7d_pct?: number | null;
+    sales_last_7_days?: number;
+  } | null;
+  if (!pts && !sold && !lst) return null;
+  // The headline is what the card is selling for here: the last 5 sales, else today's cheapest
+  // local listing; the converted overseas market price only when there is nothing else.
   const headline =
-    pts?.["market"] ??
-    pts?.["mid"] ??
-    pts?.["lowest_listing"] ??
     sold?.["raw"]?.avg_last_5 ??
     sold?.["raw"]?.value ??
+    lst?.lowest_in_country?.price ??
+    lst?.lowest_worldwide?.price ??
+    pts?.["market"] ??
     undefined;
   return {
     role: "mori",
     kind: "price",
-    content: `Price check: ${r.card.name} ${r.card.localId}${typeof headline === "number" ? `, market ${market.symbol}${headline}` : ""}`,
+    content: `Price check: ${r.card.name} ${r.card.localId}${typeof headline === "number" ? `, ${market.symbol}${Math.round(headline)}` : ""}`,
     payload: {
       card: {
         id: r.card.id,
@@ -371,9 +380,19 @@ export async function priceCardRow(
         ebay: market.ebay,
         country: market.name.replace(/^the\s+/i, ""),
       },
-      ...(pts
-        ? { scale: { low: pts["lowest_listing"], market: pts["market"], mid: pts["mid"] } }
-        : {}),
+      ...(typeof headline === "number" ? { headline } : {}),
+      ...(lst
+        ? {
+            listings: {
+              world: lst.lowest_worldwide ?? null,
+              local: lst.lowest_in_country ?? null,
+              change7: lst.change_7d_pct ?? null,
+              sales7: lst.sales_last_7_days ?? 0,
+            },
+          }
+        : pts
+          ? { scale: { low: pts["lowest_listing"], market: pts["market"], mid: pts["mid"] } }
+          : {}),
       ...(sold
         ? {
             sold: {
