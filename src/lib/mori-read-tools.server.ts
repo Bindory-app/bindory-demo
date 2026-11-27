@@ -62,9 +62,6 @@ export async function runReadTool(db: DB, name: string, a: Args): Promise<unknow
         card: { ...card, set: r.card.set.name, rarity: r.card.rarity },
         // Every price below is in this currency, for the collector's market.
         ...m.forTool,
-        ...(m.forTool.price_points || m.forTool.recent_sold || m.forTool.listings
-          ? {}
-          : { note: "No price data for this card" }),
       };
     }
     case "web_search": {

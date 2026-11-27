@@ -75,14 +75,12 @@ export async function marketPrices(
     forTool: {
       currency: market.currency,
       ebay_site: market.ebay,
-      listings: listings
-        ? {
-            condition: label,
-            lowest_worldwide: listings.lowest_worldwide,
-            lowest_in_country: listings.lowest_local,
-            listings_read: listings.read,
-          }
-        : null,
+      listings: {
+        condition: label,
+        lowest_worldwide: listings.lowest_worldwide,
+        lowest_in_country: listings.lowest_local,
+        listings_read: listings.read,
+      },
       price_points: scale
         ? { lowest_listing: x(scale.low), market: x(scale.market), mid: x(scale.mid) }
         : null,

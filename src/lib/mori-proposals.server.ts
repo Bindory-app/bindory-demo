@@ -82,7 +82,7 @@ export async function buildProposal(
     };
   }
   if (name === "create_binder") {
-    const list = Array.isArray(a["cards"]) ? (a["cards"] as Args[]) : [];
+    const list = a["cards"] as Args[];
     const { data: owned, error } = await db.from("cards").select("tcgdex_id");
     if (error) throw error;
     if (list.some((c) => !owned.some((card) => card.tcgdex_id === c["card_id"])))
@@ -90,13 +90,11 @@ export async function buildProposal(
         error:
           "Use only cards the collector owns. Suggest unowned cards separately, never add them to their collection.",
       };
-    const matched = await Promise.all(
+    const cards = await Promise.all(
       list.map((c) => briefCard(stringArg(c["card_id"]) ?? "", stringArg(c["reason"]))),
     );
-    if (matched.some((c) => !c))
+    if (!cards.every((c): c is ProposalCard => Boolean(c)))
       return { error: "Some cards were not found. Ask the collector to clarify." };
-    const cards = matched.filter((c): c is ProposalCard => Boolean(c));
-    if (!cards.length) return { error: "None of those cards were found in the catalogue" };
     return {
       tool: "create_binder",
       name: stringArg(a["name"]) ?? "New binder",
@@ -127,41 +125,38 @@ export async function buildProposal(
       })(),
     };
   }
-  if (name === "save_memory") {
-    if (!ownPhotoPath(stringArg(a["photo_path"]), userId))
-      return { error: "Photo must belong to the collector." };
-    // Cards are optional: keep only ones Mori actually looked up, so a guessed id never shows the wrong card.
-    const cid = stringArg(a["card_id"]);
-    const tid = stringArg(a["traded_card_id"]);
-    const card =
-      cid && (!seen || seen.has(cid)) ? ((await briefCard(cid)) ?? undefined) : undefined;
-    const traded_card =
-      tid && (!seen || seen.has(tid)) ? ((await briefCard(tid)) ?? undefined) : undefined;
-    // From the fill-in template, the story is exactly what the collector wrote (facts, feelings, ratings).
-    const fromTemplate = message.endsWith(TEMPLATE_END);
-    const story = fromTemplate
-      ? message.slice(0, -TEMPLATE_END.length).trim()
-      : (stringArg(a["story"]) ?? "");
-    const date = stringArg(a["date"]) ?? (fromTemplate ? templateDate(message) : undefined);
-    // A trade card the agent passed only by name ("Charizard 125/094") is looked up here, so the
-    // memory shows the real card whenever the catalogue has exactly one match.
-    const resolvedCard = card ?? (await cardFromLabel(stringArg(a["card_name"])));
-    const resolvedTraded = traded_card ?? (await cardFromLabel(stringArg(a["traded_card_name"])));
-    return {
-      tool: "save_memory",
-      title: stringArg(a["title"]) ?? "A memory",
-      story,
-      place: stringArg(a["place"]),
-      with_whom: stringArg(a["with_whom"]),
-      date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined,
-      card: resolvedCard,
-      traded_card: resolvedTraded,
-      card_name: resolvedCard ? undefined : stringArg(a["card_name"])?.slice(0, 160),
-      traded_card_name: resolvedTraded ? undefined : stringArg(a["traded_card_name"])?.slice(0, 160),
-      photo_path: stringArg(a["photo_path"]),
-    };
-  }
-  return { error: "Unknown tool" };
+  if (!ownPhotoPath(stringArg(a["photo_path"]), userId))
+    return { error: "Photo must belong to the collector." };
+  // Cards are optional: keep only ones Mori actually looked up, so a guessed id never shows the wrong card.
+  const cid = stringArg(a["card_id"]);
+  const tid = stringArg(a["traded_card_id"]);
+  const card =
+    cid && (!seen || seen.has(cid)) ? ((await briefCard(cid)) ?? undefined) : undefined;
+  const traded_card =
+    tid && (!seen || seen.has(tid)) ? ((await briefCard(tid)) ?? undefined) : undefined;
+  // From the fill-in template, the story is exactly what the collector wrote (facts, feelings, ratings).
+  const fromTemplate = message.endsWith(TEMPLATE_END);
+  const story = fromTemplate
+    ? message.slice(0, -TEMPLATE_END.length).trim()
+    : (stringArg(a["story"]) ?? "");
+  const date = stringArg(a["date"]) ?? (fromTemplate ? templateDate(message) : undefined);
+  // A trade card the agent passed only by name ("Charizard 125/094") is looked up here, so the
+  // memory shows the real card whenever the catalogue has exactly one match.
+  const resolvedCard = card ?? (await cardFromLabel(stringArg(a["card_name"])));
+  const resolvedTraded = traded_card ?? (await cardFromLabel(stringArg(a["traded_card_name"])));
+  return {
+    tool: name,
+    title: stringArg(a["title"]) ?? "A memory",
+    story,
+    place: stringArg(a["place"]),
+    with_whom: stringArg(a["with_whom"]),
+    date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined,
+    card: resolvedCard,
+    traded_card: resolvedTraded,
+    card_name: resolvedCard ? undefined : stringArg(a["card_name"])?.slice(0, 160),
+    traded_card_name: resolvedTraded ? undefined : stringArg(a["traded_card_name"])?.slice(0, 160),
+    photo_path: stringArg(a["photo_path"]),
+  };
 }
 
 /** Checks and tidies the model's pre-grade report before it is shown. */
