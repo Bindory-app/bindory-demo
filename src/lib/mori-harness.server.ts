@@ -24,7 +24,8 @@ import {
 import { readSignedRows, sealCollector, stripRowBlocks } from "./mori-mcp-auth.server";
 import { cardImage, getCardPricing, priceScale } from "./tcgdex";
 import { ebaySoldPrices } from "./silphco.server";
-import { finishMoriTurn, tools, type MoriRowDraft } from "./mori-agent.server";
+import { finishMoriTurn, type MoriRowDraft } from "./mori-agent.server";
+import { tools } from "./mori-prompt.server";
 
 type DB = SupabaseClient<Database>;
 const TOOL_NAMES = tools.map((t) => t.name);

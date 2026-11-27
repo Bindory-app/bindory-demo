@@ -49,7 +49,7 @@ async function handle(req: RpcRequest, request: Request): Promise<object | null>
   // Each harness's MCP URL names its agent (?agent=price ...); it only sees and calls its own tools.
   const agent = new URL(request.url).searchParams.get("agent") ?? "ask";
   if (!isMoriAgent(agent)) return fail(id, -32602, "Unknown agent");
-  const tools = (await import("@/lib/mori-agent.server")).tools.filter((t) =>
+  const tools = (await import("@/lib/mori-prompt.server")).tools.filter((t) =>
     agentMayUse(agent, t.name),
   );
   if (method === "tools/list")
