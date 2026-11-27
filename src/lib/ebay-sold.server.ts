@@ -173,7 +173,7 @@ export function summarise(
 }
 
 /** Words eBay leaves out of the search: graded slabs, customs, proxies and look-alikes. */
-export const EXCLUDE = [
+const EXCLUDE = [
   "custom",
   "proxy",
   "orica",

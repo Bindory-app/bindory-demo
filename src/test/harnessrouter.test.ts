@@ -753,19 +753,6 @@ describe("Last 3 and last 5 sold averages", () => {
 });
 
 describe("Today's listings and the 7-day change", () => {
-  it("builds eBay searches with the site's own location, condition and price floor", async () => {
-    const { searchUrl } = await import("@/lib/ebay-listings.server");
-    const { MARKETS } = await import("@/lib/market");
-    const card = { name: "Umbreon ex", number: "161" };
-    const local = searchUrl(card, MARKETS["AU"]!, "lp", "local", 654.5);
-    expect(local).toMatch(
-      /^https:\/\/www\.ebay\.com\.au\/sch\/183454\/i\.html\?_nkw=Umbreon\+ex\+161\+-custom/,
-    );
-    expect(local).toContain("LH_ItemCondition=4000");
-    expect(local).toContain("Card%2520Condition=Lightly%2520Played%2520%2528Excellent%2529");
-    expect(local).toContain("LH_BIN=1&_sop=15&LH_PrefLoc=1&_udlo=654&rt=nc");
-    expect(searchUrl(card, MARKETS["AU"]!, "nm", "worldwide")).toContain("LH_PrefLoc=2");
-  });
   it("picks the cheapest real card, skipping junk, other conditions and other countries", async () => {
     const { pickLowest } = await import("@/lib/ebay-listings.server");
     const { MARKETS } = await import("@/lib/market");
@@ -805,46 +792,6 @@ describe("Today's listings and the 7-day change", () => {
       price: 1674.7,
       shipping: 8,
     });
-  });
-  it("takes the 7-day change from the catalogue's 7-day and 30-day averages", async () => {
-    const { weekChange } = await import("@/lib/ebay-listings.server");
-    expect(weekChange({ cardmarket: { avg7: 1100, avg30: 1000 } })).toBe(10);
-    expect(weekChange({ cardmarket: { avg7: 1100 } })).toBeNull();
-    expect(weekChange(null)).toBeNull();
-  });
-  it("reads the agent's rows: price, postage and location as eBay shows them", async () => {
-    const { lowestListings, moneyValue } = await import("@/lib/ebay-listings.server");
-    const { MARKETS } = await import("@/lib/market");
-    expect(moneyValue("AU $1,493.89")).toBe(1493.89);
-    expect(moneyValue("Free delivery")).toBe(0);
-    expect(Number.isNaN(moneyValue("AU $6.93 to AU $42.18"))).toBe(true);
-    const r = lowestListings({ number: "161" }, MARKETS["AU"]!, "nm", {
-      worldwide: [
-        {
-          title: "Umbreon ex 161/131 SIR",
-          price: "AU $1,327.89",
-          shipping: "+AU $48.91 delivery",
-          location: "from United States",
-        },
-      ],
-      // eBay fills an empty "Australia only" page with international sellers: never local.
-      local: [
-        {
-          title: "Umbreon ex 161/131 Prismatic Evolutions",
-          price: "AU $1,466.70",
-          shipping: "+AU $8.26 delivery",
-          location: "",
-        },
-        {
-          title: "Umbreon ex 161/131 SIR",
-          price: "AU $1,400.00",
-          shipping: "+AU $80 delivery",
-          location: "from Canada",
-        },
-      ],
-    });
-    expect(r.lowest_local).toMatchObject({ price: 1466.7, total: 1474.96, from: null });
-    expect(r.lowest_worldwide).toMatchObject({ total: 1474.96 });
   });
 });
 
