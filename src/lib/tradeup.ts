@@ -14,8 +14,6 @@ import { createHash } from "node:crypto";
 export const MAX_CARDS_PER_SIDE = 10;
 export const MAX_TOTAL_USD = 5000;
 
-export const cents = (usd: number) => Math.round(usd * 100);
-
 /** Chance the starter gets Option B, so the trade is fair on average: p·B + (1-p)·A = S. Null
  *  unless A < S < B. */
 export function optionBChance(startUsd: number, aUsd: number, bUsd: number): number | null {
@@ -37,14 +35,6 @@ export function decideOption(
   return { draw, chanceB: p, option: draw < p ? ("b" as const) : ("a" as const) };
 }
 
-/** Each side's chance of winning: its share of the combined value. */
-export function winChances(hostUsd: number, guestUsd: number): { host: number; guest: number } {
-  const total = hostUsd + guestUsd;
-  if (!(hostUsd > 0) || !(guestUsd > 0) || !(total > 0)) return { host: 0, guest: 0 };
-  const host = hostUsd / total;
-  return { host, guest: 1 - host };
-}
-
 export const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 
 /** A secret is 32 random bytes as hex; its commitment is the hash. */
@@ -52,17 +42,11 @@ export const isSecret = (v: unknown): v is string =>
   typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
 export const isCommit = isSecret;
 
-/** The draw: a number in [0, 1) from both secrets. The host wins when it falls below the host's chance. */
+/** A repeatable draw in [0, 1) from both secrets; decideOption compares it with B's chance. */
 export function drawFrom(hostSecret: string, guestSecret: string): number {
   const h = sha256(`bindory-tradeup:${hostSecret}:${guestSecret}`);
   // 52 bits keep the number exact in a double.
   return parseInt(h.slice(0, 13), 16) / 2 ** 52;
-}
-
-export function decide(hostUsd: number, guestUsd: number, hostSecret: string, guestSecret: string) {
-  const draw = drawFrom(hostSecret, guestSecret);
-  const { host } = winChances(hostUsd, guestUsd);
-  return { draw, winner: draw < host ? ("host" as const) : ("guest" as const) };
 }
 
 /** A 6-digit join code. */

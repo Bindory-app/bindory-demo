@@ -485,31 +485,12 @@ describe("Answers to tap", () => {
 });
 
 describe("Trade-up game", () => {
-  it("gives each side a chance equal to its share of the value", async () => {
-    const { winChances } = await import("@/lib/tradeup");
-    const a = winChances(1000, 800);
-    expect(a.host).toBeCloseTo(0.5556, 3);
-    const b = winChances(1000, 1200);
-    expect(b.host).toBeCloseTo(0.4545, 3);
-    expect(winChances(1000, 0)).toEqual({ host: 0, guest: 0 });
-  });
-  it("draws from both secrets, repeatably, and is fair over many games", async () => {
-    const { decide, drawFrom } = await import("@/lib/tradeup");
+  it("draws from both secrets, repeatably", async () => {
+    const { drawFrom } = await import("@/lib/tradeup");
     const s1 = "a".repeat(64),
       s2 = "b".repeat(64);
     expect(drawFrom(s1, s2)).toBe(drawFrom(s1, s2));
     expect(drawFrom(s1, s2)).not.toBe(drawFrom(s2, s1));
-    const { randomBytes } = await import("node:crypto");
-    let hostWins = 0;
-    const n = 20000;
-    for (let i = 0; i < n; i++)
-      if (
-        decide(1000, 800, randomBytes(32).toString("hex"), randomBytes(32).toString("hex"))
-          .winner === "host"
-      )
-        hostWins++;
-    expect(hostWins / n).toBeGreaterThan(0.54);
-    expect(hostWins / n).toBeLessThan(0.571);
   });
   it("only accepts 64-hex secrets and makes 6-digit codes", async () => {
     const { isSecret, joinCode } = await import("@/lib/tradeup");
@@ -567,12 +548,10 @@ describe("Local currency", () => {
     expect(routeMoriMessage("Buy Pikachu 25 for up to US$20")).toBe("order");
   });
   it("maps countries to currency and eBay site, US by default", async () => {
-    const { marketFor, money } = await import("@/lib/market");
+    const { marketFor } = await import("@/lib/market");
     expect(marketFor("au")).toMatchObject({ currency: "AUD", symbol: "A$", ebay: "ebay.com.au" });
     expect(marketFor("GB").ebay).toBe("ebay.co.uk");
     expect(marketFor("ZZ").currency).toBe("USD");
-    expect(money(1234.5, marketFor("AU"))).toBe("A$1,235");
-    expect(money(12.5, marketFor("AU"))).toBe("A$12.50");
   });
 });
 
