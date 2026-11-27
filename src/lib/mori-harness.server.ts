@@ -6,7 +6,8 @@
  * tools built. Instructions live on the harness (harnessrouter.json), not in this file.
  */
 import type { Json } from "@/integrations/supabase/types";
-import type { DB, MoriRowDraft } from "./mori-context.server";
+import { asObject, type DB, type MoriRowDraft } from "./mori-context.server";
+import { chatPhotos, dataUrlBytes, saveOrderPhotos } from "./mori-order-photos.server";
 import { TOOL_STATUS, type MoriStreamEvent } from "./mori-tools";
 import { AGENT_NAMES, isMoriAgent, routeMoriMessage, type MoriAgent } from "./mori-agents";
 import { marketFor } from "./market";
@@ -35,9 +36,6 @@ export function moriToolName(raw: string | undefined): string | null {
   if (TOOL_NAMES.includes(n)) return n;
   return TOOL_NAMES.find((t) => new RegExp(`(^|[._:/-])${t}$`).test(n)) ?? null;
 }
-
-const asObject = (v: unknown): Record<string, unknown> =>
-  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
 function parseJson(text: string | undefined): unknown {
   try {
@@ -212,11 +210,6 @@ async function cardOutcomes(db: DB, since: string) {
     .join("; ")}.]\n`;
 }
 
-function dataUrlBytes(url: string): { bytes: Uint8Array; type: string } | null {
-  const m = /^data:([\w/+.-]+);base64,(.+)$/s.exec(url);
-  return m?.[1] && m[2] ? { bytes: Buffer.from(m[2], "base64"), type: m[1] } : null;
-}
-
 async function buildInput(text: string, images: string[]) {
   if (!images.length) return text;
   const names = ["card-front.jpg", "card-back.jpg"];
@@ -234,47 +227,6 @@ async function buildInput(text: string, images: string[]) {
         ? `\n[Card photo attached as a file in your working directory: ${names[0]} (the front). Open it and look before you answer.]`
         : "";
   return [{ role: "user", content: [{ type: "input_text", text: text + note }, ...files] }];
-}
-
-/** Saves the collector's front and back photos for a sell order in their own private folder
- *  (owner-only storage rules), so the order and its marketplace listing can use them. */
-async function saveOrderPhotos(db: DB, userId: string, images: string[]) {
-  const parts = images.slice(0, 2).map(dataUrlBytes);
-  if (parts.length < 2 || parts.some((x) => !x)) return null;
-  const id = crypto.randomUUID();
-  const paths = {
-    front: `${userId}/orders/${id}-front.jpg`,
-    back: `${userId}/orders/${id}-back.jpg`,
-  };
-  const bucket = db.storage.from("memory-photos");
-  for (const [i, path] of [paths.front, paths.back].entries()) {
-    const img = parts[i]!;
-    const { error } = await bucket.upload(path, img.bytes, {
-      contentType: img.type,
-      upsert: false,
-    });
-    if (error) {
-      console.error("Order photo upload failed", error.message);
-      return null;
-    }
-  }
-  return paths;
-}
-
-/** The latest order photos saved in this chat, if any. */
-async function chatPhotos(db: DB, userId: string, since?: string) {
-  let q = db
-    .from("mori_messages")
-    .select("payload")
-    .eq("role", "mori")
-    .eq("kind", "status")
-    .not("payload->photos", "is", null);
-  if (since) q = q.gt("created_at", since);
-  const { data } = await q.order("created_at", { ascending: false }).limit(1).maybeSingle();
-  const ph = asObject(asObject(data?.payload)["photos"]);
-  const ok = (v: unknown): v is string =>
-    typeof v === "string" && v.startsWith(`${userId}/orders/`) && !v.includes("..");
-  return ok(ph["front"]) && ok(ph["back"]) ? { front: ph["front"], back: ph["back"] } : null;
 }
 
 /** Tool calls of a finished task, paired with their outputs (from the turn if the response lacks them). */
