@@ -354,7 +354,7 @@ export async function priceCardRow(
   // The headline is what the card is selling for here: the last 5 sales, else today's cheapest
   // local listing; the converted overseas market price only when there is nothing else.
   const headline =
-    sold?.["raw"]?.avg_last_5 ??
+    sold?.["raw"]?.avg_last_3 ??
     sold?.["raw"]?.value ??
     lst?.lowest_in_country?.total ??
     lst?.lowest_worldwide?.total ??

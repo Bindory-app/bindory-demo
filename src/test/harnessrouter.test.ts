@@ -640,7 +640,7 @@ describe("Last 3 and last 5 sold averages", () => {
     expect(r.avg_last_5).toBe(30);
     expect(r.n).toBe(5);
   });
-  it("asks the actor for one raw-only search of 5 on the collector's site", async () => {
+  it("asks the actor for one raw-only search of 3 on the collector's site", async () => {
     const { actorInput } = await import("@/lib/ebay-sold.server");
     const { MARKETS } = await import("@/lib/market");
     const input = actorInput({ name: "Umbreon ex", number: "161" }, MARKETS["AU"]!);
@@ -650,7 +650,7 @@ describe("Last 3 and last 5 sold averages", () => {
       ebaySite: "ebay.com.au",
       categoryId: "183454",
       conditionId: 4000,
-      count: 5,
+      count: 3,
       aspectFilter: { "Card Condition": "Near Mint or Better" },
     });
     expect(
