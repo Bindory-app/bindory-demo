@@ -19,6 +19,14 @@
   /* Tablets and desktops: a phone-sized app, centred, on the Bindory background. */
   body.bd-app.bd-wide #clickable-prototype .cp-shell { align-items: center; background: radial-gradient(circle at 30% 20%, #ece8ff, #f6f5fc 60%) !important; }
   body.bd-app.bd-wide #clickable-prototype .cp-app { border-radius: var(--bd-radius, 0px) !important; box-shadow: 0 20px 60px rgba(40, 30, 90, .18), 0 0 0 1px rgba(40, 30, 90, .06) !important; overflow: hidden; }
+  /* Ask Mori: keep the top bar (menu, New chat) in view while the chat scrolls. The bar is pulled over the
+     screen's own 19px/17px padding so nothing shows above or beside it, and fades out along its bottom edge.
+     Sticky offsets are measured from inside that padding, hence the negative top. */
+  body.bd-app #clickable-prototype .cp-mori-top {
+    position: sticky; top: -19px; z-index: 13; margin: -19px -17px 0; padding: 19px 17px 10px;
+    background: linear-gradient(var(--theme-fdfdff, #fdfdff) calc(100% - 10px), #fdfdff00);
+  }
+  body.bd-app[data-mode="dark"] #clickable-prototype .cp-mori-top { background: linear-gradient(var(--theme-25213a, #25213a) calc(100% - 10px), #25213a00); }
   @media (prefers-color-scheme: dark) {
     body.bd-app.bd-wide #clickable-prototype .cp-shell { background: radial-gradient(circle at 30% 20%, #262040, #171426 60%) !important; }
     body.bd-app, body.bd-app #clickable-prototype { background: #171426 !important; }
