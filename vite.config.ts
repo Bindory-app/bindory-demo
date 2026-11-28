@@ -31,6 +31,7 @@ export default defineConfig(({ command, mode }) => {
         vercel: {
           functionRules: {
             "/api/mori-chat": { maxDuration: 60 },
+            "/api/whatsapp-webhook": { maxDuration: 60 },
           },
         },
       }),

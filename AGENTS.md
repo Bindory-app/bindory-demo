@@ -13,7 +13,7 @@
 - Apply `setup/015_order_confirmation.sql` before deploying the order UI/server. Proposals store the original price and quoted rate alongside canonical `price_usd`. The editor uses the locked quote, and both the HTTP endpoint and direct RPC enforce the sell-photo rule. Older USD-only pending proposals remain editable.
 - Apply `setup/016_pending_orders.sql` after 015 for payment-gated orders. Confirm saves a pending order; `connect_order_payment` explicitly opens the owner's unexpired pending orders for their chosen duration. The wallet is a demo label, not a payment credential. Existing open orders are unchanged.
 - Only **Sync from Collectr** uses HarnessRouter. The `collectr` setup in `harnessrouter.json` reads the public collection; `collectr-sync.server.ts` stores a signed task and `/api/mori-sync` polls it. Bindory, not the harness, applies the collector's approved import. Use `Collectr sync: <instruction>` to continue the latest finished sync in this chat.
-- `HR_API_KEY` and `MORI_MCP_SECRET` (the task signing secret) are server-only and needed only for sync. See `.env.example` for placeholder configuration.
+- `HR_API_KEY` is server-only for sync. `MORI_MCP_SECRET` signs sync tasks and WhatsApp capabilities with separate HKDF labels. See `.env.example` for placeholder configuration.
 <!-- harnessrouter:end -->
 
 - Price card: "Listing and Sold · <condition>" shows the lowest worldwide listing, the lowest listing in the collector's country, and the last three sales. Sold prices come from the server, never from the model. The headline prefers recent raw sales and falls back to listings or the market reference when sales are missing.

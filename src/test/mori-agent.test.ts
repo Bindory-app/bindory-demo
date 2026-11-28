@@ -84,7 +84,7 @@ function chat(rows: Row[] = []) {
     message: string,
     opts: Pick<
       Parameters<typeof runMori>[0],
-      "images" | "location" | "country" | "intent" | "timing" | "signal"
+      "images" | "location" | "country" | "intent" | "timing" | "signal" | "selectionOnly"
     > = {},
   ) =>
     runMori({
@@ -147,6 +147,38 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+it("never invokes the gateway for a stored printing pick, even if the printing is unavailable", async () => {
+  vi.mocked(getCardPricing).mockResolvedValueOnce(null);
+  const { send, rows } = chat();
+  await send("Chosen printing", {
+    selectionOnly: true,
+    intent: { kind: "price_check", card: { id: "base1-25" } },
+  });
+  expect(requests).toHaveLength(0);
+  expect(rows.some((r) => r.content.includes("try another printing"))).toBe(true);
+});
+
+it("uses only the condition model on a selected sell printing with its own photos", async () => {
+  const { send, rows, upload } = chat();
+  gateway(call("read_order_condition", { overall: "Near mint" }));
+  await send("Chosen printing", {
+    selectionOnly: true,
+    images,
+    intent: {
+      kind: "order",
+      side: "sell",
+      card: { id: "base1-25" },
+      price: { amount: 10, currency: "USD" },
+    },
+  });
+  expect(requests).toHaveLength(1);
+  expect(requests[0]?.tools?.map((t) => t.name)).toEqual(["read_order_condition"]);
+  expect(upload).toHaveBeenCalledTimes(2);
+  const p = asObject(rows.find((r) => r.kind === "confirm")?.payload);
+  expect(p["tool"]).toBe("set_order");
+  expect(p["condition"]).toMatchObject({ overall: "Near mint" });
+  expect(p["photos"]).toBeDefined();
+});
 describe("structured pre-grading", () => {
   const candidate = {
     id: "base1-25",

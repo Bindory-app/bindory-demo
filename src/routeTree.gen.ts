@@ -17,6 +17,9 @@ import { Route as ApiMoriConfirmRouteImport } from './routes/api/mori-confirm'
 import { Route as ApiMoriLocateRouteImport } from './routes/api/mori-locate'
 import { Route as ApiMoriSyncRouteImport } from './routes/api/mori-sync'
 import { Route as ApiTradeupRouteImport } from './routes/api/tradeup'
+import { Route as ApiWhatsappLinkRouteImport } from './routes/api/whatsapp-link'
+import { Route as ApiWhatsappPaymentRouteImport } from './routes/api/whatsapp-payment'
+import { Route as ApiWhatsappWebhookRouteImport } from './routes/api/whatsapp-webhook'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -58,6 +61,21 @@ const ApiTradeupRoute = ApiTradeupRouteImport.update({
   path: '/api/tradeup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiWhatsappLinkRoute = ApiWhatsappLinkRouteImport.update({
+  id: '/api/whatsapp-link',
+  path: '/api/whatsapp-link',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiWhatsappPaymentRoute = ApiWhatsappPaymentRouteImport.update({
+  id: '/api/whatsapp-payment',
+  path: '/api/whatsapp-payment',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiWhatsappWebhookRoute = ApiWhatsappWebhookRouteImport.update({
+  id: '/api/whatsapp-webhook',
+  path: '/api/whatsapp-webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -68,6 +86,9 @@ export interface FileRoutesByFullPath {
   '/api/mori-locate': typeof ApiMoriLocateRoute
   '/api/mori-sync': typeof ApiMoriSyncRoute
   '/api/tradeup': typeof ApiTradeupRoute
+  '/api/whatsapp-link': typeof ApiWhatsappLinkRoute
+  '/api/whatsapp-payment': typeof ApiWhatsappPaymentRoute
+  '/api/whatsapp-webhook': typeof ApiWhatsappWebhookRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -78,6 +99,9 @@ export interface FileRoutesByTo {
   '/api/mori-locate': typeof ApiMoriLocateRoute
   '/api/mori-sync': typeof ApiMoriSyncRoute
   '/api/tradeup': typeof ApiTradeupRoute
+  '/api/whatsapp-link': typeof ApiWhatsappLinkRoute
+  '/api/whatsapp-payment': typeof ApiWhatsappPaymentRoute
+  '/api/whatsapp-webhook': typeof ApiWhatsappWebhookRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -89,6 +113,9 @@ export interface FileRoutesById {
   '/api/mori-locate': typeof ApiMoriLocateRoute
   '/api/mori-sync': typeof ApiMoriSyncRoute
   '/api/tradeup': typeof ApiTradeupRoute
+  '/api/whatsapp-link': typeof ApiWhatsappLinkRoute
+  '/api/whatsapp-payment': typeof ApiWhatsappPaymentRoute
+  '/api/whatsapp-webhook': typeof ApiWhatsappWebhookRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -101,6 +128,9 @@ export interface FileRouteTypes {
     | '/api/mori-locate'
     | '/api/mori-sync'
     | '/api/tradeup'
+    | '/api/whatsapp-link'
+    | '/api/whatsapp-payment'
+    | '/api/whatsapp-webhook'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -111,6 +141,9 @@ export interface FileRouteTypes {
     | '/api/mori-locate'
     | '/api/mori-sync'
     | '/api/tradeup'
+    | '/api/whatsapp-link'
+    | '/api/whatsapp-payment'
+    | '/api/whatsapp-webhook'
   id:
     | '__root__'
     | '/'
@@ -121,6 +154,9 @@ export interface FileRouteTypes {
     | '/api/mori-locate'
     | '/api/mori-sync'
     | '/api/tradeup'
+    | '/api/whatsapp-link'
+    | '/api/whatsapp-payment'
+    | '/api/whatsapp-webhook'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -132,6 +168,9 @@ export interface RootRouteChildren {
   ApiMoriLocateRoute: typeof ApiMoriLocateRoute
   ApiMoriSyncRoute: typeof ApiMoriSyncRoute
   ApiTradeupRoute: typeof ApiTradeupRoute
+  ApiWhatsappLinkRoute: typeof ApiWhatsappLinkRoute
+  ApiWhatsappPaymentRoute: typeof ApiWhatsappPaymentRoute
+  ApiWhatsappWebhookRoute: typeof ApiWhatsappWebhookRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -192,6 +231,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTradeupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/whatsapp-link': {
+      id: '/api/whatsapp-link'
+      path: '/api/whatsapp-link'
+      fullPath: '/api/whatsapp-link'
+      preLoaderRoute: typeof ApiWhatsappLinkRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/whatsapp-payment': {
+      id: '/api/whatsapp-payment'
+      path: '/api/whatsapp-payment'
+      fullPath: '/api/whatsapp-payment'
+      preLoaderRoute: typeof ApiWhatsappPaymentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/whatsapp-webhook': {
+      id: '/api/whatsapp-webhook'
+      path: '/api/whatsapp-webhook'
+      fullPath: '/api/whatsapp-webhook'
+      preLoaderRoute: typeof ApiWhatsappWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -204,6 +264,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMoriLocateRoute: ApiMoriLocateRoute,
   ApiMoriSyncRoute: ApiMoriSyncRoute,
   ApiTradeupRoute: ApiTradeupRoute,
+  ApiWhatsappLinkRoute: ApiWhatsappLinkRoute,
+  ApiWhatsappPaymentRoute: ApiWhatsappPaymentRoute,
+  ApiWhatsappWebhookRoute: ApiWhatsappWebhookRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -40,6 +40,7 @@ export async function runMori({
   userId,
   message,
   intent: rawIntent,
+  selectionOnly = false,
   emit,
   signal,
   oidcToken,
@@ -53,6 +54,8 @@ export async function runMori({
   userId: string;
   message: string;
   intent?: unknown;
+  /** A stored printing pick is deterministic, including on a failed catalogue lookup. */
+  selectionOnly?: boolean;
   emit: (event: MoriStreamEvent) => void;
   signal?: AbortSignal;
   oidcToken?: string | null;
@@ -111,8 +114,8 @@ export async function runMori({
       emit({ type: "done", rows: [ins.data as unknown as MoriRow] });
       if (ownTimer) timer.flush("done");
       return;
-    } catch (e) {
-      console.error("Collectr sync failed to start", e instanceof Error ? e.message : e);
+    } catch {
+      console.error("Collectr sync failed to start");
       const done = await finishMoriTurn(
         db,
         [],
@@ -169,6 +172,11 @@ export async function runMori({
 
   // Structured flows make at most one forced call each; it is timed like a loop turn (turn 0).
   const callTool: IntentTools["callTool"] = async (tool, instructions, callInput, options) => {
+    if (
+      selectionOnly &&
+      !(intent?.kind === "order" && intent.side === "sell" && tool.name === "read_order_condition")
+    )
+      throw new Error("No model for a stored selection");
     const started = Date.now();
     let model = "";
     const record = (ok: boolean, code?: string) =>
@@ -235,6 +243,8 @@ export async function runMori({
     const answer = await runIntent(intent);
     if (answer) return finishAnswer(answer);
   }
+  if (selectionOnly)
+    return finishAnswer({ text: "I couldn't finish that selection. Please try another printing." });
 
   // Successful structured turns never need to load the conversation. Exclude this turn's
   // already-persisted question when entering the general loop (including fallbacks).
@@ -453,7 +463,7 @@ export async function runMori({
     }
     console.error(
       "Mori gateway error",
-      e instanceof GatewayError ? { code: e.code, ids: e.ids } : e,
+      e instanceof GatewayError ? { code: e.code, ids: e.ids } : { code: "internal" },
     );
     if (ownTimer) timer.flush("error", e instanceof GatewayError ? e.code : "internal");
     throw e;
