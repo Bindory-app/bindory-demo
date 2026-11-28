@@ -1,3 +1,4 @@
+import { GatewayError } from "./ai-gateway.server";
 import { asObject } from "./mori-context.server";
 import { resolveIntentCard, type IntentAnswer, type IntentTools } from "./mori-intent-card.server";
 import { conditionParameters } from "./mori-prompt.server";
@@ -26,7 +27,7 @@ async function readCondition({ images, emit, signal, callTool }: IntentTools) {
     const result = orderCondition.safeParse(raw);
     return result.success ? result.data : undefined;
   } catch (error) {
-    if (signal?.aborted) throw error;
+    if (signal?.aborted || error instanceof GatewayError) throw error;
     return undefined;
   }
 }

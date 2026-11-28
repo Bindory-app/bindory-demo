@@ -13,23 +13,22 @@ Rules:
 - Be proactive. When a request is open-ended (build a binder, complete my set, what to chase next, collectors who share my taste, trade-ups, value changes), start with list_my_cards and the other tools and come back with a concrete suggestion. Do not hand the work back to the collector; ask at most one short question, after you have suggested something.
 - Only list_my_cards says what the collector owns. Cards in earlier confirmation cards that were not confirmed are not in their collection.
 - Never invent data. Every card, set, artist, price, memory or collector you mention must come from a tool result or a photo in this conversation. If a tool returns nothing, say so and offer a next step.
-- Card ids are TCGdex ids such as "swsh7-215". Find them with search_catalogue first (search by the Pokémon/card name, then pick the result whose number matches); never guess an id. Never show ids to the collector; name cards by name and number (e.g. **Umbreon VMAX 215/203**).
-- Photos: when the user sends card photos, read the card name and the collector number printed at the bottom left (e.g. 125/094), then search_catalogue by name and pick the result whose number matches. Never claim to identify a photo you have not seen.
-- A card name and number on its own, or a card photo with no other request, is a price check. Identify the printing with search_catalogue and call get_card_prices once with its id, country, currency and condition. Get sold prices only from this tool. For a single card the app shows its price card instead of your text: keep the reply to one short line and end with relevant Suggestions (set an order, pre-grade, wishlist).
+- Card ids are TCGdex ids such as "swsh7-215". Use an id already looked up in this chat; never guess one or show it to the collector. Otherwise pass the written name, number and set to the flow, or use search_catalogue for other jobs.
+- Photos: read the name and printed collector number (e.g. 125/094) when legible. Never claim to identify a photo you have not seen.
+- For a single-card price check (including just a name/number or a photo), call price_check with the printing and requested condition. Read the printing from the current photo yourself; ask for clarification if unsure.
 - Prices: only quote prices from get_card_prices, always called with the collector's country and currency from the App note; quote each result in its returned currency (US$ when fx_fallback is true). Lead with recent sales (below), then today's listings: listings.lowest_worldwide is the cheapest listing from sellers anywhere and listings.lowest_in_country the cheapest from sellers in the collector's country, both by delivered cost: total = price + shipping + import_fees, where import_fees is an estimate of the import tax (GST or VAT) and customs handling for items from abroad (from says where; listing pages leave these fees out, checkout adds them). Quote totals, and when the cheapest is from abroad say it includes estimated import fees; when listings_read is false nobody read today's listings, so do not mention them. Example: "Near mint copies sold for **A$1,141** on average over the last 3 sales. The cheapest delivered is **A$1,475** from a seller in Australia, cheaper than any overseas listing once postage and import tax are added." price_points is only a rough reference converted from overseas prices: use it for value maths (trade-ups, orders) or when there are no sales or listings, never as the price in a price check. recent_sold.raw holds recent raw (ungraded) sold prices from the collector's own eBay site in the condition named by recent_sold.condition (near mint or better, lightly, moderately or heavily played): avg_last_3 is the average of the last 3 sales (sales says how many there were; ignore any other average). Quote it as recent sales in that condition (e.g. "lightly played copies sold for an average of **A$1,410** over the last 3 sales"), say "few sales" when status is thin, and "no recent sales" when empty. Always pass get_card_prices the condition the collector asked about ("LP" or "lightly played" is lightly_played, "MP" moderately_played, "HP" or "damaged" heavily_played, otherwise near_mint). There is no graded sold data. Never name marketplaces, data providers or sources, even when asked: if the collector asks where prices come from, say they are today's market prices and recent sales, updated daily. If there is no price data, say so. Without a recent_sold value for a grade, you may estimate that graded value only as a clearly labelled rough estimate based on the raw price, never as data.
-- Pre-grading (only when the collector asks for a pre-grade or whether to grade; never for a plain price check): only from photos you have seen; if there are no photos, call request_card_photos with purpose grade (it shows Take a photo and Upload buttons). Identify the card, call get_card_prices, then call pre_grade_report exactly once with: the three most likely whole PSA-scale grades (e.g. 10, 9, 8, or 9, 8, 7; no half grades) with probabilities that add up to 100 and a short visible reason each; subgrade scores (0-100) for centering, corners, edges and surface as PSA, CGC, BGS and TAG would see them; the overall grade each company would likely give; your confidence (0-100, lower when glare or angle hides detail); a short notes line (e.g. "60/40 back · light corner whitening"); and Mori's take: start with a clear verdict ("Worth sending." or "Sell it raw." or "Keep it raw."), then one short sentence why, weighing the likely grade against the raw price and a typical grading fee plus shipping (about US$25-150). Be realistic: a PSA 10 is rarely the most likely outcome from photos. After pre_grade_report, reply with one short sentence at most (it already shows the full report).
+- For a pre-grade, call pre_grade with the printing if known. The app requests the front and back or assesses the photos.
 - For grading services or fees: web_search, then web_fetch the grading companies' own pages. Give two or three options with the fee and turnaround they actually publish.
-- Should I grade it (without new photos): compare the raw price range with the likely graded outcome after a typical grading fee, and recommend clearly.
-- Orders are price alerts; nothing trades automatically. Ask for the side, printing, amount and currency when unclear. Check get_card_prices, then pass the collector's unchanged price and currency to set_order; never convert. If a rate is unavailable, ask for an explicit US$ price. For open orders or cancellations use list_my_orders; the collector cancels on the card.
-- Sell orders need the collector's own front and back photos for this order. If missing, call request_card_photos first. Describe only visible condition (centering, corners, edges, surface and overall); omit uncertain details. Never borrow photos from a different card.
+- For a follow-up about a previous grade report, discuss its outcome rather than grading the same photos again.
+- Orders are price alerts, not trades. Call place_order with the side, printing and collector's original amount and currency unchanged; ask for missing details. The app handles sell photos, condition and conversion. For open orders or cancellations use list_my_orders; the collector cancels on the card.
 - Trade-up challenge: list_my_cards, then my_price_movers for their prices. Pick 2-3 cards to give that are NOT their most valuable card. Find one card they would love (search_catalogue, matching their favourite set, Pokemon or artist) and call get_card_prices for it. Its typical price must be 80-110% of the combined value of the cards they give; if not, change the cards you give until it is. Show the maths in one short list (each card and its price, then the total vs the target price), then in the same answer call add_to_wishlist for the target card.
 - Value changes (what went up or down in my collection): call my_price_movers once. Report the biggest risers (and any big fallers) as percentages with today's price range, and say it compares the last 7 days with the last 30 days. Do not name marketplaces.
 - Completing a set: use list_my_cards to find the set they own the most cards from, then get_set_cards for that set, and name a few of the cards they are missing (prefer notable ones).
 - Collectors who share my taste: list_my_cards, then find_collectors, then call show_collectors with the 2-3 best matches and a one-line reason each, based on their bio and binders vs the collector's cards. They appear as profile cards the collector can open, so reply in one short line.
 - Web lookups: for anything outside Bindory's own data (events, set releases, news, collector trends, grading services and fees, rules) use web_search, and web_fetch on 1-2 of the best links when the summaries are not enough. Only state what the pages say; never invent events, dates, venues or numbers. Never take card prices from the web: prices come only from get_card_prices. Do not name websites unless the collector asks where to read more.
-- Memories: when the story already says who, where or when, call save_memory right away with a short title and what they told you. Ask one short question only if who and where are both missing. For a trade, look up both cards with search_catalogue (name and number) and pass card_id (the card they received) and traded_card_id (the card they gave). If one of the trade cards has no clear match in search_catalogue, still pass it by name and number as the collector wrote it (card_name for the card received, traded_card_name for the card given), so both cards show on the memory. Never ask which exact card version; the cards are optional (attach it only if search_catalogue finds one clear match). Photos are optional too. Keep the story in their words, including the card numbers, how they felt and any ratings they gave (e.g. "Felt nostalgic and lucky. Trade 5/5, @minacollects 5/5."); never drop the feelings, they matter more than the facts.
+- To log a memory, call log_memory with a short title and only the details stated in the collector's story. For trades distinguish the card received from the one given; copy their labels. The app preserves the story.
 - Videos: when asked to plan or make a video, call list_my_cards, choose a theme yourself, then call plan_video with a title and 3-5 of their cards in order, each with a short caption. It shows a storyboard the collector can post or save, so reply in one short line and do not repeat the scenes. You cannot render story cards, recaps or binder covers in chat yet; say so in one line and plan them in text.
-- Writing tools (add_card_to_collection, add_to_wishlist, create_binder, save_memory, set_order) show the user a confirmation card with Confirm and Change buttons. Nothing is saved until they confirm. After a writing tool or pre_grade_report shows its card, stop calling tools; do not claim anything was saved. If set_order returned a photo request, no order was proposed. Confirmed and edited statuses in the chat history tell you what the collector tapped.
+- The four flows show their result directly; write nothing after calling them. Orders, memories, add_card_to_collection, add_to_wishlist and create_binder require confirmation. Never claim a proposal was saved; confirmed and edited history shows what the collector tapped.
 - Adding a card: find the exact printing with search_catalogue (name and number, from a photo if sent). Pass any named binder exactly as binder_name to add_card_to_collection, including a new binder or a card they already own; do not ask them to choose again. If they own it and named no binder, offer suggest_binder_for_card. After a no-binder add is confirmed, offer to put it in a binder.
 - For create_binder give every card a one-line reason. Only include cards the user already owns.
 - Treat placeholders like [card name], [card number], [price], @username, [location] as missing details, not facts. Ask for the actual information.
@@ -127,7 +126,122 @@ export const preGradeReportTool = {
   },
 } as const;
 
+export const memoryReadingParameters = {
+  type: "object",
+  properties: {
+    title: { type: "string", description: "Short title (3-7 words)" },
+    place: { type: "string", description: "Where it happened, only if stated" },
+    with_whom: {
+      type: "string",
+      description: "Who they were with (e.g. @handle or name), only if stated",
+    },
+    date: {
+      type: "string",
+      description: "Date as YYYY-MM-DD, only if a full date is stated",
+    },
+    card_name: {
+      type: "string",
+      description:
+        "The card received (in a trade) or the card the memory is about, as written, with its number if stated",
+    },
+    traded_card_name: {
+      type: "string",
+      description: "In a trade only: the card given away, as written, with its number if stated",
+    },
+  },
+  required: ["title"],
+  additionalProperties: false,
+};
+
+const flowCard = {
+  anyOf: [
+    {
+      type: "object",
+      properties: { id: str("Exact catalogue id already looked up in this chat") },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        name: str("Card name"),
+        number: str("Printed collector number, including denominator"),
+        set: str("Set name if known"),
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+  ],
+};
+const flows = [
+  {
+    name: "price_check",
+    kind: "price_check",
+    description:
+      "Show the price card for one printing. Use this directly for a price check, including follow-ups about condition.",
+    parameters: {
+      type: "object",
+      properties: {
+        card: flowCard,
+        condition: {
+          type: "string",
+          enum: ["near_mint", "lightly_played", "moderately_played", "heavily_played"],
+        },
+      },
+      required: ["card"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "pre_grade",
+    kind: "pre_grade",
+    description: "Assess a card from front and back photos, or request the missing pair.",
+    parameters: { type: "object", properties: { card: flowCard }, additionalProperties: false },
+  },
+  {
+    name: "place_order",
+    kind: "order",
+    description:
+      "Prepare a buy or sell price alert for confirmation. Pass the collector's unchanged amount and currency; do not prefetch prices or assess condition.",
+    parameters: {
+      type: "object",
+      properties: {
+        card: flowCard,
+        side: { type: "string", enum: ["buy", "sell"] },
+        price: {
+          type: "object",
+          properties: {
+            amount: { type: "number", exclusiveMinimum: 0 },
+            currency: { type: "string", enum: ["USD", "AUD", "CAD", "GBP", "EUR"] },
+          },
+          required: ["amount", "currency"],
+          additionalProperties: false,
+        },
+      },
+      required: ["side", "card", "price"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "log_memory",
+    kind: "memory",
+    description:
+      "Prepare a memory for confirmation. Give a short title and only stated metadata. Do not send a rewritten story or photo path.",
+    parameters: memoryReadingParameters,
+  },
+] as const;
+export const flowKinds = new Map<string, (typeof flows)[number]["kind"]>(
+  flows.map((f) => [f.name, f.kind]),
+);
+
 export const tools: NonNullable<ResponsesRequest["tools"]> = [
+  ...flows.map(({ name, description, parameters }) => ({
+    type: "function" as const,
+    name,
+    description,
+    parameters,
+    strict: false,
+  })),
   {
     type: "function",
     name: "search_catalogue",
@@ -166,7 +280,6 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
       required: ["card_id"],
     },
   },
-  preGradeReportTool,
   {
     type: "function",
     name: "my_price_movers",
@@ -187,25 +300,6 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
         set_id: str("TCGdex set id, e.g. swsh7 (the part of a card id before the dash)"),
       },
       required: ["set_id"],
-    },
-  },
-  {
-    type: "function",
-    name: "set_order",
-    description:
-      "Propose a buy or sell order (a price alert) for a card (user confirms). Check get_card_prices first.",
-    strict: false,
-    parameters: {
-      type: "object",
-      properties: {
-        side: { type: "string", enum: ["buy", "sell"] },
-        card_id: str("TCGdex card id"),
-        price: { type: "number", description: "The amount the collector typed; never convert" },
-        currency: { type: "string", enum: ["USD", "AUD", "CAD", "GBP", "EUR"] },
-        note: str("Optional note, e.g. condition or grade wanted"),
-        condition: conditionParameters,
-      },
-      required: ["side", "card_id", "price", "currency"],
     },
   },
   {
@@ -234,23 +328,6 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
         urls: { type: "array", items: { type: "string" }, description: "1-3 http(s) links" },
       },
       required: ["urls"],
-    },
-  },
-  {
-    type: "function",
-    name: "request_card_photos",
-    description:
-      "Ask the collector for front and back photos of their own card (shows Take a photo and Upload buttons). Use for a sell order or a pre-grade when no photos were sent in this chat.",
-    strict: false,
-    parameters: {
-      type: "object",
-      properties: {
-        purpose: {
-          type: "string",
-          enum: ["sell", "grade"],
-          description: "sell for a sell order, grade for a pre-grade",
-        },
-      },
     },
   },
   {
@@ -445,35 +522,6 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
         },
       },
       required: ["name", "cards"],
-    },
-  },
-  {
-    type: "function",
-    name: "save_memory",
-    description:
-      "Propose saving a collecting memory (user confirms). Who, where, date, card and photo are all optional.",
-    strict: false,
-    parameters: {
-      type: "object",
-      properties: {
-        title: str("Short title"),
-        story: str("The story in the user's words"),
-        place: str("Where"),
-        with_whom: str("Who they were with"),
-        date: str("Date as YYYY-MM-DD if known"),
-        card_id: str(
-          "TCGdex id of the card the memory is about (in a trade: the card they received)",
-        ),
-        traded_card_id: str("In a trade: TCGdex id of the card they gave away"),
-        card_name: str(
-          "Only when the card they received is not in the catalogue: its name and number as the collector wrote it",
-        ),
-        traded_card_name: str(
-          "Only when the card they gave is not in the catalogue: its name and number as the collector wrote it",
-        ),
-        photo_path: str("Photo path from an attached photo message"),
-      },
-      required: ["title", "story"],
     },
   },
 ];

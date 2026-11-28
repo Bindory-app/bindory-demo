@@ -36,7 +36,12 @@ export async function history(
             ? `[Confirmation: ${JSON.stringify(m.payload)}]`
             : m.kind === "choices"
               ? `[Choices: ${JSON.stringify(m.payload)}]`
-              : m.content;
+              : m.kind === "photos" &&
+                  m.payload &&
+                  typeof m.payload === "object" &&
+                  "intent" in m.payload
+                ? `[Requested photos: ${JSON.stringify(m.payload["intent"])}]`
+                : m.content;
       return { role: "assistant", content: [{ type: "output_text", text, annotations: [] }] };
     });
 }
