@@ -1,6 +1,6 @@
 import { SYSTEM, tools } from "./mori-prompt.server";
 import { parseMoriIntent } from "./mori-validation";
-import type { IntentAnswer, IntentTools } from "./mori-intent-card.server";
+import type { IntentTools } from "./mori-intent-card.server";
 import { runPreGrade } from "./mori-pre-grade.server";
 import { runPriceCheck } from "./mori-price-check.server";
 import { runOrder, PHOTO_INSTRUCTIONS } from "./mori-order.server";
@@ -195,28 +195,29 @@ export async function runMori({
     }
   };
 
-  const options: IntentTools = { images, market, runTool, emit, signal, callTool };
-  let structured: Promise<IntentAnswer | null> | undefined;
   switch (intent?.kind) {
-    case "price_check":
-      structured = runPriceCheck(intent, options);
-      break;
-    case "order":
-      structured = runOrder(intent, options);
-      break;
     case "pre_grade":
-      structured = runPreGrade(intent, options);
+    case "price_check":
+    case "order": {
+      const options: IntentTools = { images, market, runTool, emit, signal, callTool };
+      const answer = await (
+        intent.kind === "pre_grade"
+          ? runPreGrade(intent, options)
+          : intent.kind === "order"
+            ? runOrder(intent, options)
+            : runPriceCheck(intent, options)
+      ).catch((error: unknown) => {
+        if (signal?.aborted) throw error;
+        console.warn("Structured Mori request unavailable; continuing in chat");
+        return null;
+      });
+      if (answer) {
+        if (answer.row) rows.push(answer.row);
+        const done = await finishMoriTurn(db, rows, answer.text, askedAt, emit, answer.cardsOnly);
+        if (ownTimer) timer.flush("done");
+        return done;
+      }
       break;
-  }
-  if (structured) {
-    const answer = await structured.catch((error: unknown) => {
-      if (signal?.aborted) throw error;
-      console.warn("Structured Mori request unavailable; continuing in chat");
-      return null;
-    });
-    if (answer) {
-      if (answer.row) rows.push(answer.row);
-      return finishMoriTurn(db, rows, answer.text, askedAt, emit, answer.cardsOnly);
     }
   }
 
