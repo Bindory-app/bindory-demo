@@ -32,7 +32,8 @@ function setup(uid = "collector", pending = true, push = true) {
     from: (table: string) => {
       queries.push(table);
       return {
-        select() {
+        select(columns: string) {
+          filters.push([table, "select", columns]);
           return this;
         },
         eq(key: string, value: string) {
@@ -47,7 +48,10 @@ function setup(uid = "collector", pending = true, push = true) {
         maybeSingle: async () => ({
           data: { alert_push: push, alert_email: false, wallet: "paypal" },
         }),
-        limit: async () => ({ data: pending ? [{ id: "first" }] : [] }),
+        limit: async (n: number) => {
+          filters.push([table, "limit", n]);
+          return { data: pending ? [{ id: "first" }] : [] };
+        },
       };
     },
   };
@@ -290,10 +294,13 @@ describe("pending payment steps", () => {
     expect(first.app.querySelectorAll('[data-bd-payment-step="reminder"]')).toHaveLength(1);
     expect(first.queries).toEqual(["order_settings", "market_orders"]);
     expect(first.filters).toEqual([
+      ["order_settings", "select", "alert_push, alert_email, wallet"],
       ["order_settings", "eq", "user_id", "collector"],
+      ["market_orders", "select", "id"],
       ["market_orders", "eq", "user_id", "collector"],
       ["market_orders", "eq", "status", "pending"],
       ["market_orders", "gt", "expires_at", expect.stringMatching(/^\d{4}-\d\d-\d\dT/)],
+      ["market_orders", "limit", 1],
     ]);
     first.click("wallet");
     expect(first.app.querySelector('[data-bd-payment="connect"]')).not.toBeNull();
@@ -319,7 +326,7 @@ describe("pending payment steps", () => {
     vi.stubGlobal("Notification", Object.assign(notify, { permission: "granted" }));
     const t = setup();
     const sheet = document.createElement("div");
-    sheet.dataset.authSheet = "";
+    sheet.setAttribute("data-auth-sheet", "");
     sheet.className = "is-open";
     t.app.append(sheet);
     const thread = document.createElement("div");
