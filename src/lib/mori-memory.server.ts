@@ -76,20 +76,25 @@ function checkAborted(signal: AbortSignal | undefined) {
 }
 
 /** Extract memory metadata in one small text call and propose saving the collector's story verbatim.
- *  Returns null to continue the same turn in general chat if images are attached or extraction fails. */
+ *  A routing model has already seen the message and any images. Reuse its reading without
+ *  uploading chat photos; only an existing, collector-owned photo path can enter the proposal. */
 export async function runMemory(
   intent: MemoryIntent,
   { message, images, runTool, emit, callTool, signal }: IntentTools,
+  readyReading?: Args,
 ): Promise<IntentAnswer | null> {
   checkAborted(signal);
   // Structured extraction is text-only; keep attached photos intact by falling through to chat.
-  if (images.length > 0) return null;
+  if (!readyReading && images.length > 0) return null;
   const story = memoryStory(message);
   if (!story || story.length > 2000) return null;
-  emit({ type: "status", name: "extract_memory", text: "Reading your memory" });
-  const raw = await callTool(EXTRACT_MEMORY_TOOL, EXTRACT_INSTRUCTIONS, [
-    { role: "user", content: story },
-  ]);
+  let raw: unknown = readyReading;
+  if (!readyReading) {
+    emit({ type: "status", name: "extract_memory", text: "Reading your memory" });
+    raw = await callTool(EXTRACT_MEMORY_TOOL, EXTRACT_INSTRUCTIONS, [
+      { role: "user", content: story },
+    ]);
+  }
   checkAborted(signal);
   const parsed = extractedMemory.safeParse(raw);
   if (!parsed.success) return null;
