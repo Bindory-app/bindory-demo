@@ -34,11 +34,12 @@ function chat(rows: Row[] = []) {
       select: () => {
         const q = {
           gt: () => q,
+          lt: () => q,
           order: () => q,
           eq: () => q,
           not: () => q,
           limit: () => q,
-          range: async () => ({ data: [...rows], error: null }),
+          range: async () => ({ data: rows.slice(0, -1), error: null }),
           maybeSingle: async () => ({
             data:
               [...rows]

@@ -3,6 +3,41 @@ import { z } from "zod";
 const text = z.string().trim().min(1).max(2000);
 const cardId = z.string().trim().min(1).max(100);
 const short = z.string().trim().min(1).max(160);
+
+const namedCard = z
+  .object({
+    name: short,
+    number: z
+      .string()
+      .trim()
+      .min(1)
+      .max(24)
+      .regex(/^[a-z0-9]+(?:\s*\/\s*[a-z0-9]+)?$/i)
+      .optional(),
+  })
+  .strict();
+const priceCheckIntent = z
+  .object({
+    kind: z.literal("price_check"),
+    // Omit only when asking to identify an attached photo.
+    card: z
+      .union([namedCard, z.object({ id: cardId.regex(/^[a-z\d.-]+-[a-z\d.-]+$/i) }).strict()])
+      .optional(),
+    condition: z
+      .enum(["near_mint", "lightly_played", "moderately_played", "heavily_played"])
+      .optional(),
+  })
+  .strict();
+export type PriceCheckIntent = z.infer<typeof priceCheckIntent>;
+
+export function parseMoriIntent(raw: unknown, hasPhotos: boolean) {
+  if (raw === undefined) return null;
+  const parsed = priceCheckIntent.safeParse(raw);
+  if (parsed.success && (parsed.data.card || hasPhotos)) return parsed.data;
+  // Never log the message, catalogue fields or image data.
+  console.warn("Invalid or unsupported Mori intent; using chat");
+  return null;
+}
 /** A sell order's condition, read from the collector's front and back photos. */
 export const orderCondition = z.object({
   overall: short,

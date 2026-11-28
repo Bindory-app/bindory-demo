@@ -1,4 +1,6 @@
 import { SYSTEM, tools } from "./mori-prompt.server";
+import { parseMoriIntent } from "./mori-validation";
+import { runPriceCheck } from "./mori-price-check.server";
 import { marketFor } from "./market";
 import { usdTo } from "./fx.server";
 import { toCondition, type Condition } from "./ebay-sold.server";
@@ -33,6 +35,7 @@ export async function runMori({
   db,
   userId,
   message,
+  intent: rawIntent,
   emit,
   signal,
   oidcToken,
@@ -45,6 +48,7 @@ export async function runMori({
   db: DB;
   userId: string;
   message: string;
+  intent?: unknown;
   emit: (event: MoriStreamEvent) => void;
   signal?: AbortSignal;
   oidcToken?: string | null;
@@ -60,9 +64,7 @@ export async function runMori({
   const stored = images.length
     ? `${message}\n[Sent ${images.length === 1 ? "a card photo: the front" : `${images.length} card photos: front and back`}]`
     : message;
-  const historyStarted = Date.now();
-  const past = await history(db, since);
-  timer.recordStage("history", Date.now() - historyStarted);
+  const intent = parseMoriIntent(rawIntent, images.length > 0);
   const ins = await db
     .from("mori_messages")
     // The chat this message belongs to (its start time, sent by the app), so History lists one
@@ -74,10 +76,10 @@ export async function runMori({
   const askedAt = Date.parse(ins.data.created_at);
   // "Sync from Collectr" runs on its own harness in the background (collectr-sync.server.ts);
   // only an explicit follow-up can continue a finished task.
-  const collectr = collectrSyncLink(message);
+  const collectr = rawIntent === undefined ? collectrSyncLink(message) : null;
   const { startSync, latestSync } = await import("./collectr-sync.server");
   const priorSync =
-    collectr === null && !images.length && isCollectrFollowUp(message)
+    rawIntent === undefined && collectr === null && !images.length && isCollectrFollowUp(message)
       ? await latestSync(db, userId, since)
       : null;
   if (collectr !== null || priorSync) {
@@ -149,6 +151,58 @@ export async function runMori({
     orderPhotos,
     timing: timer,
   };
+  const runTool = async (name: string, args: Args) => {
+    const content = TOOL_STATUS[name] ?? "Working on it";
+    emit({ type: "status", name, text: content });
+    const status: MoriRowDraft = {
+      role: "mori",
+      kind: "status",
+      content,
+      payload: { name, input: args as Json },
+    };
+    rows.push(status);
+    const toolStarted = Date.now();
+    const out = await executeMoriTool(db, userId, name, args, ctx);
+    const failed =
+      out.result &&
+      typeof out.result === "object" &&
+      !Array.isArray(out.result) &&
+      "error" in out.result;
+    timer.recordTool({ name, ms: Date.now() - toolStarted, ok: !failed });
+    // What is stored and what the model reads back are the same bounded, valid JSON.
+    const serialized = serializeToolResult(out.result);
+    status.payload = { name, input: args as Json, output: JSON.parse(serialized) as Json };
+    rows.push(...out.rows);
+    return { ...out, serialized };
+  };
+
+  switch (intent?.kind) {
+    case "price_check": {
+      const answer = await runPriceCheck(intent, {
+        images,
+        market,
+        runTool,
+        emit,
+        signal,
+        oidcToken,
+      }).catch((error: unknown) => {
+        if (signal?.aborted) throw error;
+        console.warn("Structured price check unavailable; continuing in chat");
+        return null;
+      });
+      if (answer) {
+        rows.push(answer.row);
+        return finishMoriTurn(db, rows, answer.text, askedAt, emit, answer.cardsOnly);
+      }
+      break;
+    }
+  }
+
+  // Successful structured turns never need to load the conversation. Exclude this turn's
+  // already-persisted question when entering the general loop (including fallbacks).
+  const historyStarted = Date.now();
+  const past = await history(db, since, ins.data.created_at);
+  timer.recordStage("history", Date.now() - historyStarted);
   // Card ids Mori has actually looked up in this chat, so it never proposes a card from a guessed id.
   for (const id of JSON.stringify(past).match(/[a-z0-9.]+-[a-z0-9]+(?=\\?")/gi) ?? [])
     ctx.seenIds.add(id);
@@ -175,6 +229,19 @@ export async function runMori({
           }
         : { role: "user", content: message },
     ];
+    // General chat can use a failed lookup instead of repeating it or asking for the same details.
+    for (const row of rows)
+      if (row.kind === "status")
+        input.push({
+          role: "assistant",
+          content: [
+            {
+              type: "output_text",
+              text: `[Tool result: ${JSON.stringify(row.payload)}]`,
+              annotations: [],
+            },
+          ],
+        });
     if (images.length >= 2 && /\bsell order\b|^(?:please |i want to )?sell\b/i.test(message))
       await orderPhotos();
     turns: for (let turn = 0; turn < 6; turn++) {
@@ -247,30 +314,13 @@ export async function runMori({
             return {};
           }
         })();
-        emit({ type: "status", name, text: TOOL_STATUS[name] ?? "Working on it" });
-        const statusRow: { role: "mori"; kind: string; content: string; payload: Json } = {
-          role: "mori",
-          kind: "status",
-          content: TOOL_STATUS[name] ?? "Working on it",
-          payload: { name, input: args as Json } as Json,
-        };
-        rows.push(statusRow);
         input.push({
           type: "function_call",
           call_id: call.call_id ?? "",
           name,
           arguments: call.arguments ?? "{}",
         });
-        const toolStarted = Date.now();
-        const out = await executeMoriTool(db, userId, name, args, ctx);
-        const toolOk = !(
-          out.result &&
-          typeof out.result === "object" &&
-          !Array.isArray(out.result) &&
-          "error" in out.result
-        );
-        timer.recordTool({ name, ms: Date.now() - toolStarted, ok: toolOk });
-        rows.push(...out.rows);
+        const out = await runTool(name, args);
         const result = out.result;
         if (name === "get_card_prices") {
           const output = asObject(result);
@@ -278,16 +328,10 @@ export async function runMori({
           if (typeof id === "string")
             priced.set(id, { output, condition: toCondition(args["condition"]) ?? "nm" });
         }
-        const serializedResult = serializeToolResult(result);
-        statusRow.payload = {
-          name,
-          input: args as Json,
-          output: JSON.parse(serializedResult) as Json,
-        };
         input.push({
           type: "function_call_output",
           call_id: call.call_id ?? "",
-          output: serializedResult,
+          output: out.serialized,
         });
         if (out.stop) {
           // A batch can contain several writes. Never execute calls after the card we showed.
