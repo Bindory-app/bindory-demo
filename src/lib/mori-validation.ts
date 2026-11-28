@@ -60,7 +60,23 @@ const preGradeIntent = z
   })
   .strict();
 export type PreGradeIntent = z.infer<typeof preGradeIntent>;
-const moriIntent = z.discriminatedUnion("kind", [priceCheckIntent, orderIntent, preGradeIntent]);
+const memoryIntent = z
+  .object({
+    kind: z.literal("memory"),
+    place: short.optional(),
+    with_whom: short.optional(),
+    date: z.string().refine(isIsoDate).optional(),
+    card_name: short.optional(),
+    traded_card_name: short.optional(),
+  })
+  .strict();
+export type MemoryIntent = z.infer<typeof memoryIntent>;
+const moriIntent = z.discriminatedUnion("kind", [
+  priceCheckIntent,
+  orderIntent,
+  preGradeIntent,
+  memoryIntent,
+]);
 
 export function parseMoriIntent(raw: unknown, hasPhotos: boolean) {
   if (raw === undefined) return null;
@@ -139,13 +155,19 @@ export function ownPhotoPath(path: string | undefined, userId: string) {
   );
 }
 
+const PHOTO_PATH_RE = /photo_path\s*["']?\s*:\s*["']?([^\]\s"',}]+)/gi;
+
+export function messagePhotoPath(message: string): string | undefined {
+  return [...message.matchAll(PHOTO_PATH_RE)][0]?.[1];
+}
+
 export function ownMessagePhotos(message: string, userId: string, photoPath?: unknown) {
   if (
     photoPath !== undefined &&
     (typeof photoPath !== "string" || !ownPhotoPath(photoPath, userId))
   )
     return false;
-  const matches = [...message.matchAll(/photo_path\s*["']?\s*:\s*["']?([^\]\s"',}]+)/gi)];
+  const matches = [...message.matchAll(PHOTO_PATH_RE)];
   return matches.every((match) => ownPhotoPath(match[1], userId));
 }
 

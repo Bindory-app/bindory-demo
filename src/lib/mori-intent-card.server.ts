@@ -7,6 +7,7 @@ import type { OrderIntent, PreGradeIntent, PriceCheckIntent } from "./mori-valid
 import type { findCards } from "./tcgdex";
 
 export type IntentTools = {
+  message: string;
   images: string[];
   market: Market;
   runTool: (name: string, args: Args) => Promise<{ result: unknown; rows: MoriRowDraft[] }>;

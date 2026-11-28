@@ -4,6 +4,7 @@ import type { IntentTools } from "./mori-intent-card.server";
 import { runPreGrade } from "./mori-pre-grade.server";
 import { runPriceCheck } from "./mori-price-check.server";
 import { runOrder, PHOTO_INSTRUCTIONS } from "./mori-order.server";
+import { runMemory } from "./mori-memory.server";
 import { marketFor } from "./market";
 import { toCondition, type Condition } from "./ebay-sold.server";
 import { priceCardRow } from "./mori-prices.server";
@@ -195,30 +196,31 @@ export async function runMori({
     }
   };
 
-  switch (intent?.kind) {
-    case "pre_grade":
-    case "price_check":
-    case "order": {
-      const options: IntentTools = { images, market, runTool, emit, signal, callTool };
-      const answer = await (
-        intent.kind === "pre_grade"
-          ? runPreGrade(intent, options)
-          : intent.kind === "order"
-            ? runOrder(intent, options)
-            : runPriceCheck(intent, options)
-      ).catch((error: unknown) => {
-        // A gateway failure would fail the chat loop too, only later; report it now.
-        if (signal?.aborted || error instanceof GatewayError) throw error;
-        console.warn("Structured Mori request unavailable; continuing in chat");
-        return null;
-      });
-      if (answer) {
-        if (answer.row) rows.push(answer.row);
-        const done = await finishMoriTurn(db, rows, answer.text, askedAt, emit, answer.cardsOnly);
-        if (ownTimer) timer.flush("done");
-        return done;
+  if (intent) {
+    const options: IntentTools = { message, images, market, runTool, emit, signal, callTool };
+    const runIntent = () => {
+      switch (intent.kind) {
+        case "price_check":
+          return runPriceCheck(intent, options);
+        case "order":
+          return runOrder(intent, options);
+        case "pre_grade":
+          return runPreGrade(intent, options);
+        case "memory":
+          return runMemory(intent, options);
       }
-      break;
+    };
+    const answer = await runIntent().catch((error: unknown) => {
+      // A gateway failure would fail the chat loop too, only later; report it now.
+      if (signal?.aborted || error instanceof GatewayError) throw error;
+      console.warn("Structured Mori request unavailable; continuing in chat");
+      return null;
+    });
+    if (answer) {
+      if (answer.row) rows.push(answer.row);
+      const done = await finishMoriTurn(db, rows, answer.text, askedAt, emit, answer.cardsOnly);
+      if (ownTimer) timer.flush("done");
+      return done;
     }
   }
 
