@@ -106,7 +106,7 @@ export async function buildProposal(
   if (name === "set_order") {
     const order = writeSchemas.set_order.parse(a);
     const money = await quoteOrder({ amount: order.price, currency: order.currency });
-    if ("error" in money) return { error: money.error! };
+    if ("error" in money) return money;
     const r = await getCardPricing(order.card_id);
     if (!r) return { error: "Card not found in the catalogue" };
     const range = usdRange(r.pricing);

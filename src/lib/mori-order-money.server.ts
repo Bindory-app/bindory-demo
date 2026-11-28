@@ -7,13 +7,19 @@ export function orderUsd(amount: number, rate: number): number | null {
   return Number.isFinite(usd) && usd > 0 && usd <= 1_000_000 ? usd : null;
 }
 
-export async function quoteOrder(price: OrderIntent["price"]) {
+export const NEED_USD =
+  "Prices are temporarily shown in US$. What US$ price would you like for this order?";
+export async function quoteOrder(
+  price: OrderIntent["price"],
+): Promise<
+  { error: string } | { price: OrderIntent["price"]; fx_rate: number; price_usd: number }
+> {
   // Use the currency of the amount, not the collector's country (e.g. US$ in Australia).
   const market = Object.values(MARKETS).find((m) => m.currency === price.currency)!;
   const { rate, fallbackToUsd } = await resolveMarketFx(market);
   if (fallbackToUsd)
     return {
-      error: "Prices are temporarily shown in US$. What US$ price would you like for this order?",
+      error: NEED_USD,
     } as const;
   const usd = orderUsd(price.amount, rate);
   return usd === null

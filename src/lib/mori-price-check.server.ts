@@ -1,12 +1,15 @@
 import { z } from "zod";
 import { callToolOnce } from "./ai-gateway.server";
 import { toCondition } from "./ebay-sold.server";
-import type { Market } from "./market";
-import { asObject, type Args, type MoriRowDraft } from "./mori-context.server";
+import { asObject } from "./mori-context.server";
 import { priceCardRow } from "./mori-prices.server";
-import type { MoriStreamEvent } from "./mori-tools";
 import type { PriceCheckIntent } from "./mori-validation";
-import type { findCards } from "./tcgdex";
+import {
+  resolveIntentCard,
+  type CardQuery,
+  type IntentTools,
+  type IntentAnswer,
+} from "./mori-intent-card.server";
 
 const photoReading = z.object({
   confidence: z.enum(["high", "low"]),
@@ -43,82 +46,20 @@ async function identify(
   return result.success && result.data.confidence === "high" ? result.data : null;
 }
 
-type Candidate = Awaited<ReturnType<typeof findCards>>[number];
-type CardQuery = { name: string; number?: string | undefined; set?: string | undefined };
-
-function plausibleMatches(query: CardQuery, result: unknown): Candidate[] {
-  if (!Array.isArray(result)) return [];
-  const matches = [...new Map((result as Candidate[]).map((c) => [c.id, c])).values()];
-  const [num, total] = (query.number ?? "").split("/").map((s) =>
-    s
-      .trim()
-      .toLowerCase()
-      .replace(/^0+(?=\d)/, ""),
-  );
-  const possible = matches.filter(
-    (c) =>
-      (!num || c.number.toLowerCase().replace(/^0+(?=\d)/, "") === num) &&
-      // The official numeric set size cannot verify a subset code such as "TG30".
-      (!total || !/^\d+$/.test(total) || !c.set_size || String(c.set_size) === total) &&
-      (!query.set || c.set.toLowerCase().includes(query.set.toLowerCase())),
-  );
-  if (!num) return possible;
-  const exact = possible.filter((c) => c.name.toLowerCase() === query.name.toLowerCase());
-  return exact.length ? exact : possible;
-}
-
 /** Return the visible answer, or null to continue the same user turn in general chat.
  *  runTool is the chat runtime's normal status/execute/transcript path. */
 export async function runPriceCheck(
   intent: PriceCheckIntent,
-  {
-    images,
-    market,
-    runTool,
-    emit,
-    signal,
-    oidcToken,
-  }: {
-    images: string[];
-    market: Market;
-    runTool: (name: string, args: Args) => Promise<{ result: unknown }>;
-    emit: (event: MoriStreamEvent) => void;
-    signal?: AbortSignal | undefined;
-    oidcToken?: string | null | undefined;
-  },
-): Promise<{ row: MoriRowDraft; text: string; cardsOnly?: boolean } | null> {
+  { images, market, runTool, emit, signal, oidcToken }: IntentTools,
+): Promise<IntentAnswer | null> {
   let card: PriceCheckIntent["card"] | CardQuery | null = intent.card;
   if (!card) {
     emit({ type: "status", name: "identify_card", text: "Reading your card photo" });
     card = await identify(images, { signal, oidcToken });
     if (!card) return null;
   }
-  let id: string;
-  if ("id" in card) id = card.id;
-  else {
-    const query = {
-      name: card.name,
-      ...(card.number ? { number: card.number } : {}),
-      ...("set" in card && card.set ? { set: card.set } : {}),
-    };
-    const matches = plausibleMatches(query, (await runTool("search_catalogue", query)).result);
-    if (!matches.length) return null;
-    if (matches.length > 1) {
-      const choices = matches.map((c) => ({
-        label: `${c.name} ${c.number}${c.set_size ? `/${c.set_size}` : ""} (${c.set})`,
-        intent: {
-          kind: "price_check",
-          card: { id: c.id },
-          ...(intent.condition ? { condition: intent.condition } : {}),
-        },
-      }));
-      return {
-        row: { role: "mori", kind: "choices", content: "", payload: { choices } },
-        text: "Which printing should I price?",
-      };
-    }
-    id = matches[0]!.id;
-  }
+  const id = await resolveIntentCard(card, intent, runTool);
+  if (typeof id !== "string") return id;
   const condition = intent.condition ?? "near_mint";
   const output = asObject(
     (

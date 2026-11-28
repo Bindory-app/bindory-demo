@@ -39,6 +39,33 @@ Rules:
   These are 2-3 short follow-ups the collector might tap next, written as the collector speaking (under 40 characters each), that you can actually help with; they carry the next steps and extras you left out of the answer. After a pre-grade report, include "Where can I send it for grading?" and "What does grading cost?".`;
 
 const str = (d: string) => ({ type: "string", description: d });
+export const conditionParameters = {
+  type: "object",
+  description:
+    "Sell orders only: the card's condition from the collector's front and back photos (open both first).",
+  properties: {
+    overall: str("Overall condition, e.g. Near mint, Lightly played"),
+    summary: str("One short line, e.g. Sharp corners, light back whitening"),
+    centering: {
+      type: "object",
+      properties: { front: str("e.g. 55/45"), back: str("e.g. 60/40") },
+    },
+    corners: {
+      type: "object",
+      description: "Each corner, front and back, e.g. Sharp or Light whitening (back)",
+      properties: {
+        top_left: str("Top left"),
+        top_right: str("Top right"),
+        bottom_left: str("Bottom left"),
+        bottom_right: str("Bottom right"),
+      },
+    },
+    edges: str("Edges, e.g. Clean, minor back whitening"),
+    surface: str("Surface, e.g. No scratches visible; glare hides part of the holo"),
+  },
+  required: ["overall"],
+};
+
 export const tools: NonNullable<ResponsesRequest["tools"]> = [
   {
     type: "function",
@@ -172,32 +199,7 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
         price: { type: "number", description: "The amount the collector typed; never convert" },
         currency: { type: "string", enum: ["USD", "AUD", "CAD", "GBP", "EUR"] },
         note: str("Optional note, e.g. condition or grade wanted"),
-        condition: {
-          type: "object",
-          description:
-            "Sell orders only: the card's condition from the collector's front and back photos (open both first).",
-          properties: {
-            overall: str("Overall condition, e.g. Near mint, Lightly played"),
-            summary: str("One short line, e.g. Sharp corners, light back whitening"),
-            centering: {
-              type: "object",
-              properties: { front: str("e.g. 55/45"), back: str("e.g. 60/40") },
-            },
-            corners: {
-              type: "object",
-              description: "Each corner, front and back, e.g. Sharp or Light whitening (back)",
-              properties: {
-                top_left: str("Top left"),
-                top_right: str("Top right"),
-                bottom_left: str("Bottom left"),
-                bottom_right: str("Bottom right"),
-              },
-            },
-            edges: str("Edges, e.g. Clean, minor back whitening"),
-            surface: str("Surface, e.g. No scratches visible; glare hides part of the holo"),
-          },
-          required: ["overall"],
-        },
+        condition: conditionParameters,
       },
       required: ["side", "card_id", "price", "currency"],
     },

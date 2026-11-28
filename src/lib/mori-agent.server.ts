@@ -1,6 +1,7 @@
 import { SYSTEM, tools } from "./mori-prompt.server";
 import { parseMoriIntent } from "./mori-validation";
 import { runPriceCheck } from "./mori-price-check.server";
+import { runOrder, PHOTO_INSTRUCTIONS } from "./mori-order.server";
 import { marketFor } from "./market";
 import { toCondition, type Condition } from "./ebay-sold.server";
 import { priceCardRow } from "./mori-prices.server";
@@ -126,14 +127,13 @@ export async function runMori({
   const onlyPrice = () => priced.size === 1 && rows.every((row) => row.kind === "status");
   let cardsOnly = false;
   let finalText = "";
-  // Save an explicitly attached sell pair even when the price will only arrive next turn.
-  // Otherwise leave photos ephemeral until set_order actually needs them.
+  // Structured orders only use this submission, never unbound photos from chat history.
   let saved: Awaited<ReturnType<typeof saveOrderPhotos>> | undefined;
   const orderPhotos = async () => {
-    if (!images.length) return since ? chatPhotos(db, userId, since) : null;
+    if (!images.length) return !intent && since ? chatPhotos(db, userId, since) : null;
     if (saved === undefined) {
       saved = await saveOrderPhotos(db, userId, images);
-      if (saved)
+      if (saved && !intent)
         rows.push({
           role: "mori",
           kind: "status",
@@ -149,6 +149,7 @@ export async function runMori({
     lastCard: "",
     orderPhotos,
     timing: timer,
+    ...(intent?.kind === "order" ? { orderIntent: intent } : {}),
   };
   const runTool = async (name: string, args: Args) => {
     const content = TOOL_STATUS[name] ?? "Working on it";
@@ -176,21 +177,25 @@ export async function runMori({
   };
 
   switch (intent?.kind) {
-    case "price_check": {
-      const answer = await runPriceCheck(intent, {
+    case "price_check":
+    case "order": {
+      const options = {
         images,
         market,
         runTool,
         emit,
         signal,
         oidcToken,
-      }).catch((error: unknown) => {
+      };
+      const answer = await (
+        intent.kind === "order" ? runOrder(intent, options) : runPriceCheck(intent, options)
+      ).catch((error: unknown) => {
         if (signal?.aborted) throw error;
-        console.warn("Structured price check unavailable; continuing in chat");
+        console.warn("Structured Mori request unavailable; continuing in chat");
         return null;
       });
       if (answer) {
-        rows.push(answer.row);
+        if (answer.row) rows.push(answer.row);
         return finishMoriTurn(db, rows, answer.text, askedAt, emit, answer.cardsOnly);
       }
       break;
@@ -240,8 +245,6 @@ export async function runMori({
             },
           ],
         });
-    if (images.length >= 2 && /\bsell order\b|^(?:please |i want to )?sell\b/i.test(message))
-      await orderPhotos();
     turns: for (let turn = 0; turn < 6; turn++) {
       // Questions about the collector's own cards, prices or plans must look at real data first,
       // so the first step has to use a tool (the model sometimes answers from guesswork otherwise).
@@ -334,9 +337,10 @@ export async function runMori({
         if (out.stop) {
           // A batch can contain several writes. Never execute calls after the card we showed.
           // A pre-tool sentence cannot know the sell proposal was blocked.
-          finalText = out.rows.some((r) => r.kind === "photos")
-            ? "Send clear photos of the front and back on a dark, flat background with all four corners in view."
-            : text;
+          if (typeof asObject(result)["error"] === "string") {
+            priced.clear();
+            finalText = String(asObject(result)["error"]);
+          } else finalText = out.rows.some((r) => r.kind === "photos") ? PHOTO_INSTRUCTIONS : text;
           break turns;
         }
       }

@@ -4,6 +4,8 @@ import { buildProposal, gradeReport } from "./mori-proposals.server";
 import { runReadTool } from "./mori-read-tools.server";
 import { isWriteTool, proposalTitle, type ProposalPayload } from "./mori-tools";
 import type { TurnTimer } from "./mori-timing.server";
+import type { OrderIntent } from "./mori-validation";
+import { NEED_USD } from "./mori-order-money.server";
 
 export type MoriToolContext = {
   /** The collector's message this answer is for (memory templates keep their exact words). */
@@ -16,16 +18,20 @@ export type MoriToolContext = {
   orderPhotos: () => Promise<{ front: string; back: string } | null>;
   /** Optional per-turn timing recorder shared across tool calls and deterministic flows. */
   timing?: TurnTimer;
+  orderIntent?: OrderIntent;
 };
 
-function requestPhotos(purpose: "sell" | "grade") {
+function requestPhotos(purpose: "sell" | "grade", intent?: OrderIntent) {
   return {
     rows: [
       {
         role: "mori" as const,
         kind: "photos",
         content: "Front and back photos of your card",
-        payload: { for: purpose },
+        payload: {
+          for: purpose,
+          ...(purpose === "sell" && intent?.side === "sell" ? { intent } : {}),
+        },
       },
     ],
     result: {
@@ -149,7 +155,7 @@ export async function executeMoriTool(
       };
     }
   } else if (name === "request_card_photos") {
-    return requestPhotos(args["purpose"] === "grade" ? "grade" : "sell");
+    return requestPhotos(args["purpose"] === "grade" ? "grade" : "sell", ctx.orderIntent);
   } else if (name === "plan_video") {
     // Storyboard from the collector's own cards; they post or save it with a button.
     const scenes = (Array.isArray(args["scenes"]) ? (args["scenes"] as Args[]) : []).slice(0, 6);
@@ -255,10 +261,13 @@ export async function executeMoriTool(
   } else if (isWriteTool(name)) {
     const sell = name === "set_order" && args["side"] === "sell";
     const photos = sell ? await ctx.orderPhotos() : null;
-    if (sell && !photos) return requestPhotos("sell");
+    if (sell && !photos) return requestPhotos("sell", ctx.orderIntent);
     const p = await buildProposal(db, userId, name, args, ctx.message, ctx.seenIds);
-    if ("error" in p) result = p;
-    else {
+    if ("error" in p) {
+      result = p;
+      // Only the collector can provide a replacement US$ amount.
+      if (name === "set_order" && p.error === NEED_USD) stop = true;
+    } else {
       const payload: ProposalPayload = { ...p, ...(photos ? { photos } : {}), status: "pending" };
       rows.push({
         role: "mori",
