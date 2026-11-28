@@ -26,6 +26,7 @@ function setup(uid = "collector", pending = true, push = true) {
     .mockResolvedValue({ data: { activated_ids: ["first", "second"] }, error: null });
   const upsert = vi.fn().mockResolvedValue({ error: null });
   const queries: string[] = [];
+  const filters: unknown[][] = [];
   const sb = {
     rpc,
     from: (table: string) => {
@@ -34,10 +35,12 @@ function setup(uid = "collector", pending = true, push = true) {
         select() {
           return this;
         },
-        eq() {
+        eq(key: string, value: string) {
+          filters.push([table, "eq", key, value]);
           return this;
         },
-        gt() {
+        gt(key: string, value: string) {
+          filters.push([table, "gt", key, value]);
           return this;
         },
         upsert,
@@ -73,6 +76,7 @@ function setup(uid = "collector", pending = true, push = true) {
     rpc,
     upsert,
     queries,
+    filters,
     click,
     confirm: (status?: string) => api.confirm(order, status, uid),
     load: api.load,
@@ -211,6 +215,12 @@ describe("pending payment steps", () => {
     await first.load();
     expect(first.app.querySelectorAll('[data-bd-payment-step="reminder"]')).toHaveLength(1);
     expect(first.queries).toEqual(["order_settings", "market_orders"]);
+    expect(first.filters).toEqual([
+      ["order_settings", "eq", "user_id", "collector"],
+      ["market_orders", "eq", "user_id", "collector"],
+      ["market_orders", "eq", "status", "pending"],
+      ["market_orders", "gt", "expires_at", expect.stringMatching(/^\d{4}-\d\d-\d\dT/)],
+    ]);
     first.click("wallet");
     expect(first.app.querySelector('[data-bd-payment="connect"]')).not.toBeNull();
     const reopened = setup();
@@ -229,5 +239,32 @@ describe("pending payment steps", () => {
     await off.load();
     expect(off.app.textContent).toContain("You have pending orders");
     expect(notify).toHaveBeenCalledTimes(3);
+  });
+  it("waits through the email auth sheet handoff and thread reset before showing or throttling reminders", async () => {
+    const notify = vi.fn(function () {});
+    vi.stubGlobal("Notification", Object.assign(notify, { permission: "granted" }));
+    const t = setup();
+    const sheet = document.createElement("div");
+    sheet.dataset.authSheet = "";
+    sheet.className = "is-open";
+    t.app.append(sheet);
+    const thread = document.createElement("div");
+    t.app.append(thread);
+    t.P.moriUI.say = (html) =>
+      thread.insertAdjacentHTML("beforeend", '<div class="cp-mori-msg">' + html + "</div>");
+    const loading = t.load();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(thread.textContent).toBe("");
+    expect(notify).not.toHaveBeenCalled();
+    expect(localStorage.getItem("bd-payment-reminder:collector")).toBeNull();
+    // The base calls closeAuth() then resets the thread synchronously, for login and signup.
+    sheet.classList.remove("is-open");
+    thread.replaceChildren();
+    await loading;
+    await t.load();
+    expect(thread.querySelectorAll('[data-bd-payment-step="reminder"]')).toHaveLength(1);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem("bd-payment-reminder:collector")).not.toBeNull();
   });
 });

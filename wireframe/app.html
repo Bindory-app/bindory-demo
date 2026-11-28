@@ -6537,6 +6537,18 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     if (session?.user.id !== uid || orderSettingsOwner !== uid) return;
     if (settings.data) Object.assign(P.orderSettings, settings.data);
     if (!pending.data?.length) return;
+    // Email-code auth signs in before the base closes its sheet and resets Mori's thread.
+    // Mutation delivery is after that reset. Do not consume the device reminder before then.
+    const sheet = app.querySelector("[data-auth-sheet].is-open");
+    if (sheet) {
+      await new Promise(resolve => {
+        const observer = new MutationObserver(() => {
+          if (!sheet.classList.contains("is-open")) { observer.disconnect(); resolve(); }
+        });
+        observer.observe(sheet, { attributes: true, attributeFilter: ["class"] });
+      });
+      if (session?.user.id !== uid || orderSettingsOwner !== uid) return;
+    }
     pendingOrderStep("reminder", uid);
     if (!P.orderSettings.alert_push || !("Notification" in window) || Notification.permission !== "granted") return;
     try {
