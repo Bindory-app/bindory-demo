@@ -350,7 +350,7 @@ export async function handleInbound(m: Inbound, oidc?: string | null) {
       l.step.kind !== "paying";
     messages = await reply(db, l, m, oidc);
     // A failed bookkeeping read must not discard a successful answer or confirmation.
-    if (mayRemind && (await claimReminder(l).catch(() => null)))
+    if (mayRemind && messages.length < 3 && (await claimReminder(l).catch(() => null)))
       messages.push(
         buttonMessage(paymentReminder, [{ id: "pay:resume", title: "Add payment method" }]),
       );
