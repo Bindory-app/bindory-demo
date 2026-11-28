@@ -830,11 +830,41 @@
   // Stop: while Mori is answering, the send button becomes a stop button.
   let liveRun = null;
   const STOP_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>';
+  const MEMORY_TEMPLATE_END = " Help me save this memory.";
+  function memoryIntentFromTemplate(tpl) {
+    const slot = (name) => (tpl.querySelector('[data-mem-slot="' + name + '"]')?.dataset.memValue || "").trim().slice(0, 160);
+    const card = (a, b) => [slot(a), slot(b)].filter(Boolean).join(" ").slice(0, 160);
+    const intent = { kind: "memory" };
+    const place = slot("where"), who = slot("who"), got = card("got", "gotnum"), give = card("give", "givenum");
+    if (place) intent.place = place;
+    if (who) intent.with_whom = who;
+    if (got) intent.card_name = got;
+    if (give) intent.traded_card_name = give;
+    const rawWhen = tpl.querySelector('[data-mem-slot="when"]')?.dataset.memRaw;
+    if (rawWhen) {
+      try {
+        const p = JSON.parse(rawWhen), y = Number(p.y), m = Number(p.m), d = Number(p.d);
+        const dt = new Date(Date.UTC(y, m, d));
+        if (dt.getUTCFullYear() === y && dt.getUTCMonth() === m && dt.getUTCDate() === d)
+          intent.date = String(y).padStart(4, "0") + "-" + String(m + 1).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+      } catch { /* fall back to server date parsing */ }
+    }
+    return intent;
+  }
 
   document.addEventListener("click", (e) => {
     const el = e.target.closest && e.target.closest("button");
     if (!el || !app.contains(el) || el.disabled) return;
     if (el.matches("[data-mori-send]") && liveRun) { e.preventDefault(); e.stopImmediatePropagation(); liveRun.abort(); return; }
+    if (el.matches("[data-mem-save]")) {
+      const tpl = el.closest("[data-mem-tpl]");
+      if (tpl && !tpl.classList.contains("is-done")) tagIntent(e, memoryIntentFromTemplate(tpl));
+      return;
+    }
+    if (el.dataset.moriAsk && el.dataset.moriAsk.trim().endsWith(MEMORY_TEMPLATE_END)) {
+      tagIntent(e, { kind: "memory" });
+      return;
+    }
     if (el.matches('[data-mori-act="card-photo"], [data-mori-act="price-photo"]')) {
       const kind = el.dataset.moriArg || "price", camera = !/upload/i.test(el.textContent || "");
       pendingPick = { el, promise: openPicker(camera, !camera && needsBack(kind)) };
@@ -891,6 +921,8 @@
       inp.value = shotForAdd ? "Please add this card to my collection. Here is a photo of it." : "Here is a photo of my card. What is this card worth?";
     }
     if (attachedShot) shotForAdd = false;
+    if (inp && !(intentEvent && intentEvent.event === e) && inp.value.trim().endsWith(MEMORY_TEMPLATE_END))
+      tagIntent(e, { kind: "memory" });
   }, true);
 
   window.bdPhotosHTML = (shots) => '<div class="cp-mori-photos">' + shots.map((src, i) =>

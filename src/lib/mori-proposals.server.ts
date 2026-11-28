@@ -2,7 +2,8 @@ import type { Json } from "@/integrations/supabase/types";
 import { asObject, stringArg, type Args, type DB, type MoriRowDraft } from "./mori-context.server";
 import { isWriteTool, type Proposal, type ProposalCard } from "./mori-tools";
 import { cardImage, getCard, getCardPricing, findCards, usdRange } from "./tcgdex";
-import { validateWriteArgs, ownPhotoPath, writeSchemas } from "./mori-validation";
+import { isIsoDate, validateWriteArgs, ownPhotoPath, writeSchemas } from "./mori-validation";
+import { plausibleMatches } from "./mori-intent-card.server";
 import { quoteOrder } from "./mori-order-money.server";
 
 async function briefCard(id: string, reason?: string): Promise<ProposalCard | null> {
@@ -32,19 +33,29 @@ const MONTH_NUM: Record<string, string> = {
   nov: "11",
   dec: "12",
 };
-function templateDate(message: string): string | undefined {
+export function templateDate(message: string): string | undefined {
   const m = /\bon (\d{1,2}) ([A-Za-z]{3})[a-z]* (\d{4})\b/.exec(message);
   const mon = m?.[2] ? MONTH_NUM[m[2].toLowerCase()] : undefined;
-  return m && mon ? `${m[3]}-${mon}-${(m[1] ?? "").padStart(2, "0")}` : undefined;
+  const iso = m && mon ? `${m[3]}-${mon}-${(m[1] ?? "").padStart(2, "0")}` : undefined;
+  return iso && isIsoDate(iso) ? iso : undefined;
 }
 const TEMPLATE_END = " Help me save this memory.";
+
+/** Verbatim memory text from a collector message, stripping the fill-in template suffix if present. */
+export function memoryStory(message: string): string {
+  return (message.endsWith(TEMPLATE_END) ? message.slice(0, -TEMPLATE_END.length) : message).trim();
+}
 
 /** One catalogue card for a label like "Charizard 125/094" or "Pikachu ex 25/25", or undefined
  *  when there is no single clear match. */
 export async function cardFromLabel(label: string | undefined): Promise<ProposalCard | undefined> {
   const m = /^(.*?)\s+#?([A-Z]{0,3}\d{1,4}(?:\/[A-Z]{0,3}\d{1,4})?)$/i.exec(label?.trim() ?? "");
   if (!m?.[1] || !m[2]) return undefined;
-  const found = await findCards(m[1], m[2]).catch(() => []);
+  // The search keeps a lone hit whose set size differs ("4/999" finding 4/102); that is not a match.
+  const found = plausibleMatches(
+    { name: m[1], number: m[2] },
+    await findCards(m[1], m[2]).catch(() => []),
+  );
   if (found.length !== 1 || !found[0]) return undefined;
   return (await briefCard(found[0].id).catch(() => null)) ?? undefined;
 }
@@ -136,21 +147,21 @@ export async function buildProposal(
     tid && (!seen || seen.has(tid)) ? ((await briefCard(tid)) ?? undefined) : undefined;
   // From the fill-in template, the story is exactly what the collector wrote (facts, feelings, ratings).
   const fromTemplate = message.endsWith(TEMPLATE_END);
-  const story = fromTemplate
-    ? message.slice(0, -TEMPLATE_END.length).trim()
-    : (stringArg(a["story"]) ?? "");
+  const story = fromTemplate ? memoryStory(message) : (stringArg(a["story"]) ?? "");
   const date = stringArg(a["date"]) ?? (fromTemplate ? templateDate(message) : undefined);
   // A trade card the agent passed only by name ("Charizard 125/094") is looked up here, so the
   // memory shows the real card whenever the catalogue has exactly one match.
-  const resolvedCard = card ?? (await cardFromLabel(stringArg(a["card_name"])));
-  const resolvedTraded = traded_card ?? (await cardFromLabel(stringArg(a["traded_card_name"])));
+  const [resolvedCard, resolvedTraded] = await Promise.all([
+    card ? Promise.resolve(card) : cardFromLabel(stringArg(a["card_name"])),
+    traded_card ? Promise.resolve(traded_card) : cardFromLabel(stringArg(a["traded_card_name"])),
+  ]);
   return {
     tool: name,
     title: stringArg(a["title"]) ?? "A memory",
     story,
     place: stringArg(a["place"]),
     with_whom: stringArg(a["with_whom"]),
-    date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined,
+    date: date && isIsoDate(date) ? date : undefined,
     card: resolvedCard,
     traded_card: resolvedTraded,
     card_name: resolvedCard ? undefined : stringArg(a["card_name"])?.slice(0, 160),

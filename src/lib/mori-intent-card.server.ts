@@ -7,6 +7,7 @@ import type { OrderIntent, PreGradeIntent, PriceCheckIntent } from "./mori-valid
 import type { findCards } from "./tcgdex";
 
 export type IntentTools = {
+  message: string;
   images: string[];
   market: Market;
   runTool: (name: string, args: Args) => Promise<{ result: unknown; rows: MoriRowDraft[] }>;
@@ -46,7 +47,8 @@ export function confidentCardReading(raw: unknown): CardQuery | null {
   return result.success && result.data.confidence === "high" ? result.data : null;
 }
 
-function plausibleMatches(query: CardQuery, result: unknown): Candidate[] {
+/** Catalogue results that agree with the written number, set size and set name. */
+export function plausibleMatches(query: CardQuery, result: unknown): Candidate[] {
   if (!Array.isArray(result)) return [];
   const matches = [...new Map((result as Candidate[]).map((c) => [c.id, c])).values()];
   const [num, total] = (query.number ?? "").split("/").map((s) =>
