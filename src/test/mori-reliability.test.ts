@@ -109,49 +109,27 @@ describe("bounded history() in mori-turn.server", () => {
 
 describe("order photo upload cleanup", () => {
   const images = ["data:image/jpeg;base64,Zg==", "data:image/jpeg;base64,Yg=="];
+  const bothPaths = [
+    expect.stringMatching(/^u1\/orders\/.+-front\.jpg$/),
+    expect.stringMatching(/^u1\/orders\/.+-back\.jpg$/),
+  ];
 
-  it("removes the front photo when the back photo upload returns an error", async () => {
-    const upload = vi
-      .fn()
-      .mockResolvedValueOnce({ error: null })
-      .mockResolvedValueOnce({ error: { message: "storage full" } });
+  // Storage can accept a file and still report a failure, so every failed attempt removes both
+  // of its own paths rather than only the ones known to have been written.
+  it.each([
+    ["the back photo upload returns an error", { error: null }, { error: { message: "full" } }],
+    ["the back photo upload throws", { error: null }, new Error("network reset")],
+    ["the front photo upload fails", { error: { message: "denied" } }, undefined],
+  ])("removes the attempt's pair when %s", async (_name, first, second) => {
+    const upload = vi.fn().mockResolvedValueOnce(first);
+    if (second instanceof Error) upload.mockRejectedValueOnce(second);
+    else if (second) upload.mockResolvedValueOnce(second);
     const remove = vi.fn(async () => ({ data: [], error: null }));
     const db = { storage: { from: () => ({ upload, remove }) } } as unknown as DB;
 
-    const result = await saveOrderPhotos(db, "u1", images);
-    expect(result).toBeNull();
-    expect(upload).toHaveBeenCalledTimes(2);
+    expect(await saveOrderPhotos(db, "u1", images)).toBeNull();
     expect(remove).toHaveBeenCalledTimes(1);
-    const removedPaths = (remove.mock.calls[0] as unknown as [string[]])[0];
-    expect(removedPaths).toHaveLength(1);
-    expect(removedPaths[0]).toMatch(/^u1\/orders\/.+-front\.jpg$/);
-  });
-
-  it("removes the front photo when the back photo upload throws", async () => {
-    const upload = vi
-      .fn()
-      .mockResolvedValueOnce({ error: null })
-      .mockRejectedValueOnce(new Error("network reset"));
-    const remove = vi.fn(async () => ({ data: [], error: null }));
-    const db = { storage: { from: () => ({ upload, remove }) } } as unknown as DB;
-
-    const result = await saveOrderPhotos(db, "u1", images);
-    expect(result).toBeNull();
-    expect(remove).toHaveBeenCalledTimes(1);
-    const removedPaths = (remove.mock.calls[0] as unknown as [string[]])[0];
-    expect(removedPaths).toHaveLength(1);
-    expect(removedPaths[0]).toMatch(/^u1\/orders\/.+-front\.jpg$/);
-  });
-
-  it("does not call remove when the front photo upload itself fails", async () => {
-    const upload = vi.fn().mockResolvedValueOnce({ error: { message: "denied" } });
-    const remove = vi.fn(async () => ({ data: [], error: null }));
-    const db = { storage: { from: () => ({ upload, remove }) } } as unknown as DB;
-
-    const result = await saveOrderPhotos(db, "u1", images);
-    expect(result).toBeNull();
-    expect(upload).toHaveBeenCalledTimes(1);
-    expect(remove).not.toHaveBeenCalled();
+    expect(remove).toHaveBeenCalledWith(bothPaths);
   });
 });
 

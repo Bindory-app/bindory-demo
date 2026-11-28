@@ -16,13 +16,6 @@ export async function saveOrderPhotos(db: DB, userId: string, images: string[]) 
     back: `${userId}/orders/${id}-back.jpg`,
   };
   const bucket = db.storage.from("memory-photos");
-  const uploaded: string[] = [];
-  const cleanup = async () => {
-    if (!uploaded.length || typeof bucket.remove !== "function") return;
-    await bucket.remove(uploaded).catch((err: unknown) => {
-      console.error("Order photo cleanup failed", err instanceof Error ? err.message : err);
-    });
-  };
   try {
     for (const [i, path] of [paths.front, paths.back].entries()) {
       const img = parts[i]!;
@@ -30,16 +23,18 @@ export async function saveOrderPhotos(db: DB, userId: string, images: string[]) 
         contentType: img.type,
         upsert: false,
       });
-      if (error) {
-        console.error("Order photo upload failed", error.message);
-        await cleanup();
-        return null;
-      }
-      uploaded.push(path);
+      if (error) throw error;
     }
-  } catch (err) {
-    console.error("Order photo upload failed", err instanceof Error ? err.message : err);
-    await cleanup();
+  } catch {
+    // A transport failure can occur after storage accepted a file. These two new paths are
+    // unique to this attempt; do not leave a partial listing or affect another submission.
+    console.warn("Could not save the order photo pair");
+    try {
+      const { error } = await bucket.remove([paths.front, paths.back]);
+      if (error) console.warn("Could not remove incomplete order photos");
+    } catch {
+      console.warn("Could not remove incomplete order photos");
+    }
     return null;
   }
   return paths;

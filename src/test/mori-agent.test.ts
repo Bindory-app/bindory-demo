@@ -35,8 +35,11 @@ vi.mock("@/lib/mori-prices.server", async (original) => ({
 type Row = { role: string; kind: string; content: string; payload?: unknown };
 const since = "2026-11-27T00:00:00.000Z";
 function chat(rows: Row[] = []) {
-  const upload = vi.fn(async () => ({ error: null }));
-  const bucket = vi.fn(() => ({ upload }));
+  const upload = vi.fn(async (): Promise<{ error: { message: string } | null }> => ({
+    error: null,
+  }));
+  const remove = vi.fn(async () => ({ error: null }));
+  const bucket = vi.fn(() => ({ upload, remove }));
   const db = {
     from: () => ({
       select: () => {
@@ -83,7 +86,7 @@ function chat(rows: Row[] = []) {
       since,
       ...opts,
     });
-  return { send, rows, events, bucket, upload };
+  return { send, rows, events, bucket, upload, remove };
 }
 
 const call = (name: string, args: Record<string, unknown>) => ({
@@ -412,6 +415,28 @@ describe("order quotes and photo provenance", () => {
     expect(rows.some((r) => r.kind === "confirm")).toBe(false);
     expect(rows.find((r) => r.kind === "text")?.content).toContain("What US$ price");
     expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("cleans up a partial upload and asks again for the same sell order", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { send, rows, upload, remove } = chat();
+      vi.mocked(findCards).mockResolvedValue([pika]);
+      gateway(call("read_order_condition", { overall: "Near mint" }));
+      upload
+        .mockResolvedValueOnce({ error: null })
+        .mockRejectedValueOnce(new Error("connection interrupted"));
+      await send("Sell Pikachu", { intent: sell, images });
+      expect(remove).toHaveBeenCalledWith([
+        expect.stringMatching(/^collector\/orders\/.+-front.jpg$/),
+        expect.stringMatching(/^collector\/orders\/.+-back.jpg$/),
+      ]);
+      expect(rows.at(-1)).toMatchObject({ kind: "photos", payload: { intent: sell } });
+      expect(rows.some((r) => r.kind === "confirm")).toBe(false);
+      expect(requests).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
   it.each([[], images.slice(0, 1)])(
     "never substitutes another order's stored pair for missing images (%j)",
