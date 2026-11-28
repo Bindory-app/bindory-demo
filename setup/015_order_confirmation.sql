@@ -79,26 +79,8 @@ BEGIN
    o_photos, CASE WHEN o_side = 'sell' AND jsonb_typeof(p->'condition') = 'object' THEN p->'condition' END);
   p := p || jsonb_build_object('side',o_side,'price_usd',o_price,'expires_days',o_days);
   reply := 'Your ' || o_side || ' order for ' || (c->>'name') || ' at ' ||
-   CASE WHEN p->'price'->>'currency' <> 'USD' THEN (p->'price'->>'amount') || ' ' || (p->'price'->>'currency') || ' (US for ' || o_days || ' days. I will tell you as soon as a matching listing appears.';
- ELSE RAISE EXCEPTION 'Unknown proposal';
- END CASE;
- UPDATE public.mori_messages SET payload=jsonb_set(p,'{status}','"confirmed"') WHERE id=m.id;
- INSERT INTO public.mori_messages(user_id,role,content) VALUES(auth.uid(),'mori',reply) RETURNING * INTO reply_row;
- RETURN jsonb_build_object('done','confirmed','reply',to_jsonb(reply_row));
-END; $$;
-REVOKE ALL ON FUNCTION public.confirm_mori_proposal(uuid,text,jsonb) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.confirm_mori_proposal(uuid,text,jsonb) TO authenticated;
- || to_char(o_price,'FM999G999G990D00') || ')'
-    ELSE 'US for ' || o_days || ' days. I will tell you as soon as a matching listing appears.';
- ELSE RAISE EXCEPTION 'Unknown proposal';
- END CASE;
- UPDATE public.mori_messages SET payload=jsonb_set(p,'{status}','"confirmed"') WHERE id=m.id;
- INSERT INTO public.mori_messages(user_id,role,content) VALUES(auth.uid(),'mori',reply) RETURNING * INTO reply_row;
- RETURN jsonb_build_object('done','confirmed','reply',to_jsonb(reply_row));
-END; $$;
-REVOKE ALL ON FUNCTION public.confirm_mori_proposal(uuid,text,jsonb) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.confirm_mori_proposal(uuid,text,jsonb) TO authenticated;
- || to_char(o_price,'FM999G999G990D00') END || ' is live for ' || o_days || ' days. I will tell you as soon as a matching listing appears.';
+   CASE WHEN p->'price'->>'currency' <> 'USD' THEN (p->'price'->>'amount') || ' ' || (p->'price'->>'currency') || ' (US$' || to_char(o_price,'FM999G999G990D00') || ')'
+    ELSE 'US$' || to_char(o_price,'FM999G999G990D00') END || ' is live for ' || o_days || ' days. I will tell you as soon as a matching listing appears.';
  ELSE RAISE EXCEPTION 'Unknown proposal';
  END CASE;
  UPDATE public.mori_messages SET payload=jsonb_set(p,'{status}','"confirmed"') WHERE id=m.id;
