@@ -25,51 +25,8 @@ import { createTurnTimer, type TurnTimer } from "./mori-timing.server";
 import { serializeToolResult } from "./mori-tool-output";
 import { finishMoriTurn, history } from "./mori-turn.server";
 
-// Any tool-capable model ID from https://ai-gateway.vercel.sh/v1/models; override with AI_GATEWAY_MODEL.
-// Default is on the AI Gateway free tier; newer models need paid credits.
-const MODEL = process.env["AI_GATEWAY_MODEL"] || "google/gemini-2.5-flash";
-
 const NEEDS_DATA =
   /card show|chase|trade-?up|trend|went up|went down|value|worth|price|complete .*set|share my taste|collectors|binder|video|orders?\b|my cards|my collection|add .* (?:to|into) my|wishlist/i;
-
-// The AI Gateway free tier allows only a few requests per minute per model provider, and one Mori
-// answer takes several requests (tool calls). When a model is rate limited, try the next one; each
-// provider has its own limit. All of these are on the free tier and support tools and images.
-const FALLBACK_MODELS = [
-  "openai/gpt-4.1-mini",
-  "google/gemini-2.5-flash-lite",
-  "openai/gpt-5-mini",
-];
-const MODELS = [MODEL, ...FALLBACK_MODELS.filter((m) => m !== MODEL)];
-
-async function streamWithFallback(
-  input: ResponsesInputItem[],
-  signal: AbortSignal | undefined,
-  oidcToken: string | null | undefined,
-  mustUseTool = false,
-  onModel?: (model: string) => void,
-) {
-  for (let i = 0; ; i++) {
-    const model = MODELS[i] ?? MODEL;
-    onModel?.(model);
-    try {
-      return await streamResponse(
-        {
-          model,
-          instructions: SYSTEM,
-          input,
-          tools,
-          ...(mustUseTool ? { tool_choice: "required" as const } : {}),
-          max_output_tokens: 3000,
-        },
-        { ...(signal ? { signal } : {}), oidcToken: oidcToken ?? null },
-      );
-    } catch (e) {
-      if (!(e instanceof GatewayError && e.code === "rate_limited") || i >= MODELS.length - 1)
-        throw e;
-    }
-  }
-}
 
 /** Run a turn with the signed-in collector's RLS-scoped client. */
 export async function runMori({
@@ -225,12 +182,25 @@ export async function runMori({
       // so the first step has to use a tool (the model sometimes answers from guesswork otherwise).
       const mustUseTool = turn === 0 && NEEDS_DATA.test(message);
       const modelStarted = Date.now();
-      let activeModel = MODEL;
+      let activeModel = "";
       let res: ResponsesResponse | undefined;
       try {
-        const stream = await streamWithFallback(input, signal, oidcToken, mustUseTool, (m) => {
-          activeModel = m;
-        });
+        const stream = await streamResponse(
+          {
+            instructions: SYSTEM,
+            input,
+            tools,
+            ...(mustUseTool ? { tool_choice: "required" } : {}),
+            max_output_tokens: 3000,
+          },
+          {
+            signal,
+            oidcToken,
+            onModel: (m) => {
+              activeModel = m;
+            },
+          },
+        );
         const streamText = !mustUseTool && !onlyPrice();
         for await (const event of stream) {
           if (event.type === "response.output_text.delta" && streamText)
