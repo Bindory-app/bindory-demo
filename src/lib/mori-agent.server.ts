@@ -207,7 +207,8 @@ export async function runMori({
             ? runOrder(intent, options)
             : runPriceCheck(intent, options)
       ).catch((error: unknown) => {
-        if (signal?.aborted) throw error;
+        // A gateway failure would fail the chat loop too, only later; report it now.
+        if (signal?.aborted || error instanceof GatewayError) throw error;
         console.warn("Structured Mori request unavailable; continuing in chat");
         return null;
       });

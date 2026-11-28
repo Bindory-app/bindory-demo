@@ -93,10 +93,7 @@ export async function runPreGrade(
     return { text: PHOTO_INSTRUCTIONS };
   }
   const [assessment, known] = await Promise.all([
-    assessPhotos(!intent.card, tools).catch((error: unknown) => {
-      if (tools.signal?.aborted) throw error;
-      return null;
-    }),
+    assessPhotos(!intent.card, tools),
     intent.card ? priceCard(intent.card, intent, tools) : null,
   ]);
   tools.signal?.throwIfAborted();

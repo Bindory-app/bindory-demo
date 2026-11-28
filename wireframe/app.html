@@ -5072,8 +5072,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   // Each visit and each "New chat" starts a fresh conversation for Mori (the server only sends it
   // messages after this time). A few seconds back, so a slightly fast phone clock cannot hide the first message.
   let chatSince = new Date(Date.now() - 5000).toISOString();
-  app.addEventListener("click", (e) => { if (e.target.closest("[data-mori-reset]")) chatSince = new Date(Date.now() - 5000).toISOString(); }, true);
-  app.addEventListener("cp:mori-new-chat", () => { chatSince = new Date().toISOString(); });
+  app.addEventListener("click", (e) => { if (e.target.closest("[data-mori-reset]")) { chatSince = new Date(Date.now() - 5000).toISOString(); attachedShot = null; } }, true);
+  app.addEventListener("cp:mori-new-chat", () => { chatSince = new Date().toISOString(); attachedShot = null; });
 
   // Card photos: "Take a photo" opens the phone's camera, "Upload from my photos" and the photo
   // icon in the chat box open its photo album. The picker is opened in the tap itself (a capture
@@ -6173,7 +6173,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     if (intent?.kind === "order" && intent.side === "sell" && ui.photos?.length === 2) ui.sellShots = ui.photos;
     // A photo attached from the chat box goes with this message and shows in its bubble.
     const shot = attachedShot; attachedShot = null;
-    if (shot && !ui.photos && intent?.kind !== "order") {
+    if (shot && !ui.photos && intent?.kind !== "order" && intent?.kind !== "pre_grade") {
       const mine = [...app.querySelectorAll("[data-mori-thread] .cp-mori-body")].pop();
       if (mine) { mine.insertAdjacentHTML("beforeend", '<div class="cp-mori-photos"><span><img src="' + shot + '" alt="Your card"></span></div>'); ui.scrollDown(); }
       ui = Object.assign({}, ui, { photos: [shot] });

@@ -4,7 +4,11 @@ import { runMori } from "@/lib/mori-agent.server";
 import { resolveMarketFx } from "@/lib/fx.server";
 import { marketFor } from "@/lib/market";
 import type { OrderIntent } from "@/lib/mori-validation";
-import type { ResponsesRequest, ResponsesResponse } from "@/lib/ai-gateway.server";
+import {
+  GatewayError,
+  type ResponsesRequest,
+  type ResponsesResponse,
+} from "@/lib/ai-gateway.server";
 import { latestSync, startSync } from "@/lib/collectr-sync.server";
 import { marketPrices } from "@/lib/mori-prices.server";
 import { asObject, type DB } from "@/lib/mori-context.server";
@@ -284,6 +288,20 @@ describe("structured pre-grading", () => {
     expect(rows.filter((r) => r.role === "user")).toHaveLength(1);
     expect(rows.some((r) => r.kind === "grade")).toBe(false);
     expect(bucket).not.toHaveBeenCalled();
+  });
+  it("reports a gateway failure at once instead of retrying the photos in the chat loop", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { send, rows } = chat();
+      await expect(send("Pre-grade", { intent, images })).rejects.toBeInstanceOf(GatewayError);
+      // Only the forced call's own attempts reached the gateway; none carried the chat tools.
+      expect(requests.every((r) => r.tool_choice === "required" && r.tools?.length === 1)).toBe(
+        true,
+      );
+      expect(rows.some((r) => r.kind === "grade")).toBe(false);
+    } finally {
+      error.mockRestore();
+    }
   });
   it("propagates cancellation during pricing rather than persisting a report or retrying in chat", async () => {
     const controller = new AbortController();
