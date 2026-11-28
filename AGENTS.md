@@ -14,4 +14,5 @@
 - `HR_API_KEY` and `MORI_MCP_SECRET` (the task signing secret) are server-only and needed only for sync. See `.env.example` for placeholder configuration.
 <!-- harnessrouter:end -->
 
-- Sold prices and lowest listings are server data, not model input. `marketPrices` uses sold-price providers and eBay Browse for lowest listings. The price card compares worldwide and in-country listings by delivered cost (price, postage and estimated import fees) and shows recent raw sales for the selected condition.
+- Price card: "Listing and Sold · <condition>" shows the lowest worldwide listing, the lowest listing in the collector's country, and the last three sales. Sold prices come from the server, never from the model. The headline prefers recent raw sales and falls back to listings or the market reference when sales are missing.
+- Listings: the server uses eBay Browse for fixed-price raw singles in the requested condition. Local results restrict the seller country; worldwide results may include local sellers. Compare by delivered cost: price + postage + estimated import fees (`importFeeRate` in `src/lib/market.ts`). Missing listing data is shown as a dash, not a zero.

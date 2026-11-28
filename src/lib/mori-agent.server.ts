@@ -193,7 +193,7 @@ export async function runMori({
           }
         : { role: "user", content: message },
     ];
-    if (images.length >= 2 && /\bfor my sell order\b|^(?:please |i want to )?sell\b/i.test(message))
+    if (images.length >= 2 && /\bsell order\b|^(?:please |i want to )?sell\b/i.test(message))
       await orderPhotos();
     turns: for (let turn = 0; turn < 6; turn++) {
       // Questions about the collector's own cards, prices or plans must look at real data first,

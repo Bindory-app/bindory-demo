@@ -50,7 +50,7 @@ export async function executeMoriTool(
   let result: unknown;
   if (name === "pre_grade_report") {
     const report = gradeReport(args);
-    if (!("error" in report) && !report.card && ctx.lastCard) report.card = ctx.lastCard;
+    if (!("error" in report) && ctx.lastCard) report.card = ctx.lastCard;
     if ("error" in report) result = report;
     else {
       rows.push({

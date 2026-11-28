@@ -205,16 +205,20 @@ describe("the direct Mori tool loop", () => {
     ).toBe(true);
   });
 
-  it.each([false, true])(
-    "attaches the collector's private sell photos (price supplied later: %s)",
-    async (later) => {
+  it.each([
+    null,
+    "Here are photos of the front and back for my sell order.",
+    "Set a sell order for this card",
+  ])(
+    "attaches the collector's private sell photos (earlier photo message: %s)",
+    async (earlier) => {
       const { send, rows, bucket, upload } = chat();
-      if (later) {
+      if (earlier) {
         gateway(say("What price did you have in mind?"));
-        await send("Here are photos of the front and back for my sell order.", { images });
+        await send(earlier, { images });
       }
       gateway(order("sell"));
-      await send(later ? "$10" : "Set a sell order at $10", later ? {} : { images });
+      await send(earlier ? "$10" : "Set a sell order at $10", earlier ? {} : { images });
       expect(bucket).toHaveBeenCalledWith("memory-photos");
       expect(upload).toHaveBeenCalledTimes(2);
       const paths = rows.find((r) => asObject(r.payload)["photos"] && r.kind === "status")?.payload;
@@ -237,6 +241,7 @@ describe("the direct Mori tool loop", () => {
     gateway(
       priced(),
       call("pre_grade_report", {
+        card: "Stale model label",
         outcomes: [
           { grade: 9, probability: 70 },
           { grade: 8, probability: 30 },
