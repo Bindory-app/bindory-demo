@@ -158,6 +158,25 @@ it("never invokes the gateway for a stored printing pick, even if the printing i
   expect(rows.some((r) => r.content.includes("try another printing"))).toBe(true);
 });
 
+it("keeps a selected sell printing's photos but makes no optional condition model call", async () => {
+  const { send, rows, upload } = chat();
+  await send("Chosen printing", {
+    selectionOnly: true,
+    images,
+    intent: {
+      kind: "order",
+      side: "sell",
+      card: { id: "base1-25" },
+      price: { amount: 10, currency: "USD" },
+    },
+  });
+  expect(requests).toHaveLength(0);
+  expect(upload).toHaveBeenCalledTimes(2);
+  const p = asObject(rows.find((r) => r.kind === "confirm")?.payload);
+  expect(p["tool"]).toBe("set_order");
+  expect(p["condition"]).toBeUndefined();
+  expect(p["photos"]).toBeDefined();
+});
 describe("structured pre-grading", () => {
   const candidate = {
     id: "base1-25",
