@@ -110,8 +110,10 @@ function gateway(...output: NonNullable<ResponsesResponse["output"]>) {
   replies.push(output);
 }
 const priced = (id = "base1-25") => call("get_card_prices", { card_id: id, country: "US" });
+const printing = { name: "Pikachu", number: "25/102", set: "Base Set" };
+const hit = { ...printing, id: "base1-25", number: "25", set_size: 102 };
 const order = (side: "sell" | "buy") =>
-  call("set_order", { card_id: "base1-25", side, price: 10, currency: "USD" });
+  call("place_order", { card: printing, side, price: { amount: 10, currency: "USD" } });
 const images = ["data:image/jpeg;base64,Zg==", "data:image/jpeg;base64,Yg=="];
 beforeEach(() => {
   vi.clearAllMocks();
@@ -319,7 +321,203 @@ describe("structured pre-grading", () => {
   });
 });
 
+describe("model flow tools", () => {
+  it("uses the router's photo reading once and resolves the next condition and sell requests from history", async () => {
+    vi.mocked(findCards).mockResolvedValue([hit]);
+    const { send, rows } = chat();
+    gateway(say("A stray preamble."), call("price_check", { card: printing }), order("buy"));
+    await send("How much is this?", { images: images.slice(0, 1) });
+    const names = requests[0]?.tools?.map((t) => t.name);
+    for (const name of [
+      "price_check",
+      "pre_grade",
+      "place_order",
+      "log_memory",
+      "search_catalogue",
+      "get_card_prices",
+    ])
+      expect(names).toContain(name);
+    for (const retired of ["set_order", "save_memory", "pre_grade_report", "request_card_photos"])
+      expect(names).not.toContain(retired);
+    expect(rows.map((r) => r.kind).slice(1)).toEqual(["status", "status", "price", "suggest"]);
+    expect(requests).toHaveLength(1);
+    expect(JSON.stringify(requests[0]?.input)).toContain(images[0]);
+    expect(findCards).toHaveBeenCalledWith("Pikachu", "25/102", "Base Set");
+    gateway(call("price_check", { card: { id: hit.id }, condition: "lightly_played" }));
+    await send("What about lightly played?");
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[1]?.input)).toContain(hit.id);
+    expect(rows.filter((r) => r.kind === "price")).toHaveLength(2);
+    expect(vi.mocked(marketPrices).mock.calls.at(-1)?.[3]).toBe("lp");
+    gateway(
+      call("place_order", {
+        card: { id: hit.id },
+        side: "sell",
+        price: { amount: 20, currency: "USD" },
+      }),
+    );
+    await send("Make it a sell order for US$20.");
+    expect(requests).toHaveLength(3);
+    expect(rows.find((r) => r.kind === "photos")?.payload).toMatchObject({
+      for: "sell",
+      intent: { kind: "order", card: { id: hit.id } },
+    });
+    expect(findCards).toHaveBeenCalledTimes(1);
+  });
+  it("hands a typed pre-grade's pending printing to its photo reply without an extra routing call", async () => {
+    vi.mocked(findCards).mockResolvedValue([hit]);
+    const { send, rows, upload } = chat();
+    gateway(call("pre_grade", { card: printing }));
+    await send("Pre-grade my Pikachu 25/102.");
+    const pending = asObject(rows.find((r) => r.kind === "photos")?.payload)["intent"];
+    expect(pending).toEqual({ kind: "pre_grade", card: printing });
+    expect(requests).toHaveLength(1);
+    gateway(
+      call("pre_grade_report", {
+        outcomes: [
+          { grade: 9, probability: 80 },
+          { grade: 8, probability: 20 },
+        ],
+        take: "Keep it raw.",
+      }),
+    );
+    await send("Here are the photos", { images, intent: pending });
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.tools).toHaveLength(1);
+    expect(rows.filter((r) => r.kind === "grade")).toHaveLength(1);
+    expect(upload).not.toHaveBeenCalled();
+  });
+  it.each(["invalid args", "no match", "unreadable photo", "unseen id"])(
+    "returns a usable tool error for %s and stops a repeated call",
+    async (reason) => {
+      vi.mocked(findCards).mockResolvedValue([]);
+      const kind = reason === "invalid args" ? "place_order" : "price_check";
+      const args =
+        reason === "unreadable photo"
+          ? {}
+          : reason === "unseen id"
+            ? { card: { id: "guessed-25" } }
+            : { card: printing };
+      const { send, rows } = chat();
+      gateway(call(kind, args));
+      gateway(call(kind, args));
+      await send("Can you check this?", {
+        images: reason === "unreadable photo" ? images.slice(0, 1) : [],
+      });
+      expect(requests).toHaveLength(2);
+      expect(requests[1]?.tools?.some((t) => t.name === kind)).toBe(false);
+      expect(
+        requests[1]?.input.filter((i) => "type" in i && i.type === "function_call_output"),
+      ).toMatchObject([{ output: expect.stringContaining("ask the collector") }]);
+      expect(rows.find((r) => r.kind === "text")?.content).toMatch(/\?$/);
+      expect(findCards).toHaveBeenCalledTimes(reason === "no match" ? 1 : 0);
+      expect(getCardPricing).not.toHaveBeenCalled();
+    },
+  );
+  it("allows a natural clarification after a failed flow, not an unrelated price card", async () => {
+    const { send, rows } = chat();
+    gateway(priced(), call("place_order", { side: "buy" }));
+    gateway(say("What target price and currency should I use?"));
+    await send("Set a buy order");
+    expect(requests).toHaveLength(2);
+    expect(rows.some((r) => r.kind === "price")).toBe(false);
+    expect(rows.find((r) => r.kind === "text")?.content).toBe(
+      "What target price and currency should I use?",
+    );
+  });
+  it("does not donate photos from a rejected routed pre-grade to a later sell call", async () => {
+    const { send, rows, upload } = chat();
+    gateway(call("pre_grade", { card: { id: "invented-25" } }));
+    gateway(order("sell"));
+    await send("Can you grade this card?", { images });
+    expect(requests).toHaveLength(2);
+    expect(upload).not.toHaveBeenCalled();
+    expect(rows.some((r) => r.kind === "confirm")).toBe(false);
+    expect(rows.at(-1)).toMatchObject({ kind: "photos", payload: { for: "sell" } });
+  });
+  it("rejects retired internal tool names even if a model emits one", async () => {
+    const { send, rows } = chat();
+    gateway(call("save_memory", { title: "Bogus", story: "Not what I said." }));
+    gateway(say("What would you like to remember?"));
+    await send("Help with memories");
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[1]?.input)).toContain("Tool unavailable");
+    expect(rows.some((r) => r.kind === "confirm")).toBe(false);
+  });
+  it("reports a required pre-grade gateway failure without asking the router to retry", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { send, rows, upload } = chat();
+      vi.mocked(findCards).mockResolvedValue([hit]);
+      gateway(call("pre_grade", { card: printing }));
+      await expect(send("Pre-grade Pikachu", { images })).rejects.toBeInstanceOf(GatewayError);
+      expect(
+        requests
+          .slice(1)
+          .every((r) => r.tools?.length === 1 && r.tools[0]?.name === "pre_grade_report"),
+      ).toBe(true);
+      expect(upload).not.toHaveBeenCalled();
+      expect(rows.some((r) => r.kind === "grade")).toBe(false);
+    } finally {
+      log.mockRestore();
+    }
+  });
+  it("still proposes a sell without condition when its optional read fails at the gateway", async () => {
+    const { send, rows, upload } = chat();
+    vi.mocked(findCards).mockResolvedValue([hit]);
+    const timing = createTurnTimer(Date.now, () => {});
+    gateway(order("sell"));
+    await send("Sell Pikachu for US$10", { images, timing });
+    expect(timing.finish("done").models).toMatchObject([
+      { turn: 1, ok: true },
+      { turn: 0, ok: false },
+    ]);
+    expect(upload).toHaveBeenCalledTimes(2);
+    const p = rows.find((r) => r.kind === "confirm")?.payload;
+    expect(p).toMatchObject({ tool: "set_order", side: "sell" });
+    expect(asObject(p)["condition"]).toBeUndefined();
+    expect(rows.find((r) => r.kind === "text")?.content).toContain("couldn't assess condition");
+  });
+  it("propagates cancellation during the sell condition read without uploading or proposing", async () => {
+    const { send, rows, upload } = chat();
+    const controller = new AbortController();
+    vi.mocked(findCards).mockResolvedValue([hit]);
+    gateway(order("sell"));
+    const normal = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch)
+      .mockImplementationOnce(normal)
+      .mockImplementationOnce(async (_url, init) => {
+        requests.push(JSON.parse(String(init?.body)) as ResponsesRequest);
+        controller.abort();
+        throw controller.signal.reason;
+      });
+    await expect(
+      send("Sell Pikachu for US$10", { images, signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(requests).toHaveLength(2);
+    expect(upload).not.toHaveBeenCalled();
+    expect(rows.some((r) => r.kind === "confirm")).toBe(false);
+  });
+  it("rethrows an abort after routing, without finishing the answer", async () => {
+    const ctl = new AbortController();
+    const { send, rows } = chat();
+    gateway(call("price_check", { card: printing }));
+    vi.mocked(findCards).mockImplementationOnce(async () => {
+      ctl.abort();
+      return [hit];
+    });
+    await expect(send("Price check", { signal: ctl.signal })).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(requests).toHaveLength(1);
+    expect(rows.some((r) => r.kind === "price")).toBe(false);
+  });
+});
+
 describe("the direct Mori tool loop", () => {
+  beforeEach(() => {
+    vi.mocked(findCards).mockResolvedValue([hit]);
+  });
   it("sends the market, location and prior outcomes but no conversion arithmetic to the model", async () => {
     const { send } = chat(
       ["confirmed", "edited"].map((status) => ({
@@ -387,8 +585,17 @@ describe("the direct Mori tool loop", () => {
     expect(rows.find((r) => r.kind === "confirm")).toBeUndefined();
     expect(rows.find((r) => r.kind === "text")?.content).toContain("front and back");
     expect(rows.find((r) => r.kind === "status")?.payload).toMatchObject({
-      name: "set_order",
+      name: "request_card_photos",
       output: { card: "photo_request", order_proposed: false },
+    });
+    expect(rows.find((r) => r.kind === "photos")?.payload).toMatchObject({
+      for: "sell",
+      intent: {
+        kind: "order",
+        side: "sell",
+        card: printing,
+        price: { amount: 10, currency: "USD" },
+      },
     });
     gateway(say("I need the front and back."));
     await send("What are you waiting for?");
@@ -401,6 +608,16 @@ describe("the direct Mori tool loop", () => {
           i.content.some((c) => c.text.includes('"order_proposed":false')),
       ),
     ).toBe(true);
+    const pending = asObject(rows.find((r) => r.kind === "photos")?.payload)["intent"];
+    gateway(call("read_order_condition", { overall: "Near mint" }));
+    await send("Here are the front and back.", { intent: pending, images });
+    expect(requests).toHaveLength(3);
+    expect(requests[2]?.tools?.map((t) => t.name)).toEqual(["read_order_condition"]);
+    expect(rows.at(-1)?.payload).toMatchObject({
+      tool: "set_order",
+      side: "sell",
+      price: { amount: 10, currency: "USD" },
+    });
   });
 
   it("keeps free-text sell photos only when a sell tool actually requests them", async () => {
@@ -409,7 +626,9 @@ describe("the direct Mori tool loop", () => {
     await send("Set a sell order", { images });
     expect(upload).not.toHaveBeenCalled();
     gateway(order("sell"));
+    gateway(call("read_order_condition", { overall: "Near mint" }));
     await send("Sell at US$10", { images });
+    expect(requests).toHaveLength(3); // earlier plain question, then routing plus condition
     expect(upload).toHaveBeenCalledTimes(2);
     expect(rows.find((r) => r.kind === "confirm")?.payload).toMatchObject({
       side: "sell",
@@ -422,8 +641,8 @@ describe("the direct Mori tool loop", () => {
 
   it("does not save photos sent only for pre-grading; the grade keeps the last priced card label", async () => {
     const { send, rows, upload } = chat();
+    gateway(call("pre_grade", { card: printing }), order("buy"));
     gateway(
-      priced(),
       call("pre_grade_report", {
         card: "Stale model label",
         outcomes: [
@@ -432,9 +651,9 @@ describe("the direct Mori tool loop", () => {
         ],
         take: "Keep it raw.",
       }),
-      order("buy"),
     );
     await send("Can you pre-grade this card?", { images });
+    expect(requests).toHaveLength(2);
     expect(upload).not.toHaveBeenCalled();
     expect(rows.find((r) => r.kind === "grade")?.payload).toMatchObject({
       card: "Pikachu 25 (Base Set)",
@@ -446,7 +665,9 @@ describe("the direct Mori tool loop", () => {
     const { send, rows } = chat();
     gateway(order("buy"), order("buy"), order("sell"));
     await send("Set a buy order");
-    expect(rows.filter((r) => r.kind === "status")).toHaveLength(1);
+    expect(rows.filter((r) => r.kind === "status").map((r) => asObject(r.payload)["name"])).toEqual(
+      ["search_catalogue", "get_card_prices", "set_order"],
+    );
     expect(rows.filter((r) => r.kind === "confirm")).toHaveLength(1);
     expect(requests).toHaveLength(1);
   });
@@ -675,19 +896,26 @@ describe("order quotes and photo provenance", () => {
     }
     expect(JSON.stringify(rows)).not.toContain("data:image");
   });
-  it("converts the free-text set_order tool on the server and stops it from guessing USD on FX failure", async () => {
-    const args = { side: "buy", card_id: pika.id, price: 30, currency: "AUD" };
+  it("converts a routed order on the server and stops it from guessing USD on FX failure", async () => {
+    vi.mocked(findCards).mockResolvedValue([pika]);
+    const args = {
+      side: "buy",
+      card: printing,
+      price: { amount: 30, currency: "AUD" },
+      note: "  PSA 9 wanted  ",
+    };
     const { send, rows } = chat();
-    gateway(call("set_order", args));
-    await send("Buy for A$30");
+    gateway(call("place_order", args));
+    await send("Buy for A$30, PSA 9 wanted");
     expect(rows.at(-1)?.payload).toMatchObject({
       price_usd: 20,
       price: { amount: 30, currency: "AUD" },
+      note: "PSA 9 wanted",
     });
-    const tool = requests[0]?.tools?.find((t) => t.name === "set_order");
-    expect(tool?.parameters["required"]).toEqual(["side", "card_id", "price", "currency"]);
+    const tool = requests[0]?.tools?.find((t) => t.name === "place_order");
+    expect(tool?.parameters["required"]).toEqual(["side", "card", "price"]);
     cold();
-    gateway(call("set_order", args), order("buy"));
+    gateway(call("place_order", args), order("buy"));
     await send("Another A$30 order");
     expect(rows.filter((r) => r.kind === "confirm")).toHaveLength(1);
     expect(rows.filter((r) => r.kind === "text").at(-1)?.content).toContain("What US$ price");

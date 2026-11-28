@@ -20,7 +20,9 @@ const images = ["data:image/jpeg;base64,Zg=="];
 
 function chat(rows: Row[] = []) {
   let historyLoads = 0;
+  const storage = vi.fn();
   const db = {
+    storage: { from: storage },
     from: () => ({
       select: () => {
         const q = {
@@ -67,6 +69,7 @@ function chat(rows: Row[] = []) {
     send,
     rows,
     events,
+    storage,
     get historyLoads() {
       return historyLoads;
     },
@@ -444,18 +447,60 @@ describe("structured memory flow", () => {
     );
   });
 
-  it("keeps free-text memories without an intent on the normal model loop", async () => {
+  it.each([undefined, { kind: "memory", date: "2026-11-03" }])(
+    "uses the router's image reading without uploading the attachment (%j)",
+    async (intent) => {
+      const { send, rows, storage } = chat();
+      gateway(
+        call("log_memory", {
+          title: "League night",
+          place: "Paris",
+          with_whom: "@mina",
+          date: "2020-01-01",
+          card_name: "Invented",
+        }),
+      );
+      const story = "I signed up on 2 Nov 2026 and went to league night with @mina on 3 Nov 2026.";
+      await send(story + " Help me save this memory.", { intent, images });
+      expect(requests).toHaveLength(1);
+      expect(JSON.stringify(requests[0]?.input)).toContain(images[0]);
+      const p = rows.find((r) => r.kind === "confirm")?.payload;
+      expect(p).toMatchObject({
+        tool: "save_memory",
+        title: "League night",
+        story,
+        date: intent?.date ?? "2026-11-02",
+        with_whom: "@mina",
+      });
+      expect(p).not.toHaveProperty("photo_path", expect.anything());
+      expect(p).not.toHaveProperty("place", expect.anything());
+      expect(p).not.toHaveProperty("card_name", expect.anything());
+      expect(storage).not.toHaveBeenCalled();
+      expect(JSON.stringify(rows)).not.toContain("data:image");
+      expect(rows.some((r) => r.kind === "text")).toBe(false);
+    },
+  );
+  it("keeps an explicitly supplied, owner-scoped path on a routed memory", async () => {
+    const { send, rows, storage } = chat();
+    gateway(call("log_memory", { title: "My league photo" }));
+    await send("I was at league [photo_path: collector/league.jpg].", { images });
+    expect(rows.find((r) => r.kind === "confirm")?.payload).toMatchObject({
+      photo_path: "collector/league.jpg",
+    });
+    expect(requests).toHaveLength(1);
+    expect(storage).not.toHaveBeenCalled();
+  });
+  it("routes free-text memories in one call and keeps the original words", async () => {
     gateway(
-      call("save_memory", {
+      call("log_memory", {
         title: "First booster pack",
-        story: "My cousin gave me my first booster pack when I was ten.",
       }),
     );
     const c = chat();
     await c.send("My cousin gave me my first booster pack when I was ten.");
     expect(c.historyLoads).toBe(1);
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.tools?.some((t) => t.name === "save_memory")).toBe(true);
+    expect(requests[0]?.tools?.some((t) => t.name === "log_memory")).toBe(true);
     expect(c.rows.find((r) => r.kind === "confirm")?.payload).toMatchObject({
       tool: "save_memory",
       title: "First booster pack",
