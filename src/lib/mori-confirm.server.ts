@@ -3,6 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/integrations/supabase/types";
 import type { MoriRow, ProposalPayload } from "./mori-tools";
 import { cardImage, getCard, getSet } from "./tcgdex";
+import { orderAmount } from "./mori-validation";
+import { orderUsd } from "./mori-order-money.server";
+
+export class OrderEditError extends Error {}
 
 export async function confirmWith(
   db: SupabaseClient<Database>,
@@ -35,7 +39,7 @@ export async function confirmWith(
       year: set?.releaseDate ? Number(set.releaseDate.slice(0, 4)) : null,
     };
   }
-  if (action === "confirm" && p.tool === "set_order") details = orderChanges(changes);
+  if (action === "confirm" && p.tool === "set_order") details = orderChanges(p, changes);
   const result = await db.rpc("confirm_mori_proposal", {
     p_message_id: messageId,
     p_action: action,
@@ -45,17 +49,33 @@ export async function confirmWith(
   return result.data as unknown as { done: "confirmed" | "edited"; reply: MoriRow | null };
 }
 
-/** The collector's edits to an order card: buy or sell, a US$ price, and 7, 30 or 90 days. */
-function orderChanges(c: unknown): Json | undefined {
-  if (!c || typeof c !== "object") return undefined;
-  const o = c as Record<string, unknown>;
-  const side = o["side"] === "buy" || o["side"] === "sell" ? o["side"] : undefined;
-  const price = Number(o["price_usd"]);
-  const days = Number(o["expires_days"]);
+/** Old proposals had only a USD amount. New edits are in the proposal's original currency,
+ *  at its stored rate; neither currency nor rate comes from the browser. */
+export function orderChanges(
+  p: Extract<ProposalPayload, { tool: "set_order" }>,
+  changes: unknown,
+): Json | undefined {
+  const c = changes && typeof changes === "object" ? (changes as Record<string, unknown>) : {};
+  const side = c["side"] === "buy" || c["side"] === "sell" ? c["side"] : p.side;
+  if (side === "sell" && !(p.photos?.front && p.photos.back && p.photos.front !== p.photos.back))
+    throw new OrderEditError(
+      "A sell order needs front and back photos. Keep this as a buy order or start a sell order with photos.",
+    );
   const out: Record<string, Json> = {};
-  if (side) out["side"] = side;
-  if (Number.isFinite(price) && price > 0 && price <= 1_000_000)
-    out["price_usd"] = Math.round(price * 100) / 100;
-  if (days === 7 || days === 30 || days === 90) out["expires_days"] = days;
+  if (side !== p.side) out["side"] = side;
+  if ("price" in c || "price_usd" in c) {
+    const usdEdit = !("price" in c);
+    if (usdEdit && p.price && p.price.currency !== "USD")
+      throw new OrderEditError("Edit the price in " + p.price.currency + ".");
+    const parsed = orderAmount.safeParse(usdEdit ? c["price_usd"] : c["price"]);
+    const rate = p.price && p.price.currency !== "USD" ? p.fx_rate : 1;
+    const usd = parsed.success && rate && rate > 0 ? orderUsd(parsed.data, rate) : null;
+    if (!parsed.success || usd === null)
+      throw new OrderEditError("Enter a valid price within the order limit.");
+    out["price_usd"] = usd;
+    if (p.price) out["price_amount"] = parsed.data;
+  }
+  if (c["expires_days"] === 7 || c["expires_days"] === 30 || c["expires_days"] === 90)
+    out["expires_days"] = c["expires_days"];
   return Object.keys(out).length ? out : undefined;
 }

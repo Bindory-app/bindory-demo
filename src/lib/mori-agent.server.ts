@@ -1,11 +1,12 @@
 import { SYSTEM, tools } from "./mori-prompt.server";
 import { parseMoriIntent } from "./mori-validation";
+import type { IntentTools } from "./mori-intent-card.server";
 import { runPriceCheck } from "./mori-price-check.server";
+import { runOrder, PHOTO_INSTRUCTIONS } from "./mori-order.server";
 import { marketFor } from "./market";
-import { usdTo } from "./fx.server";
 import { toCondition, type Condition } from "./ebay-sold.server";
 import { priceCardRow } from "./mori-prices.server";
-import { chatPhotos, saveOrderPhotos } from "./mori-order-photos.server";
+import { saveOrderPhotos } from "./mori-order-photos.server";
 import {
   COLLECTR_BAD_LINK,
   collectrSyncBinder,
@@ -15,6 +16,7 @@ import {
 } from "./collectr";
 import { TOOL_STATUS, type MoriStreamEvent, type MoriRow } from "./mori-tools";
 import {
+  callToolOnce,
   streamResponse,
   GatewayError,
   type ResponsesInputItem,
@@ -127,29 +129,16 @@ export async function runMori({
   const onlyPrice = () => priced.size === 1 && rows.every((row) => row.kind === "status");
   let cardsOnly = false;
   let finalText = "";
-  // Save an explicitly attached sell pair even when the price will only arrive next turn.
-  // Otherwise leave photos ephemeral until set_order actually needs them.
-  let saved: Awaited<ReturnType<typeof saveOrderPhotos>> | undefined;
-  const orderPhotos = async () => {
-    if (!images.length) return since ? chatPhotos(db, userId, since) : null;
-    if (saved === undefined) {
-      saved = await saveOrderPhotos(db, userId, images);
-      if (saved)
-        rows.push({
-          role: "mori",
-          kind: "status",
-          content: "Saved your photos for the listing",
-          payload: { photos: saved },
-        });
-    }
-    return saved;
-  };
+  // Never reuse a previous card's photos, including on a free-text fallback.
+  let saved: ReturnType<typeof saveOrderPhotos> | undefined;
   const ctx: MoriToolContext = {
     message,
     seenIds: new Set<string>(),
     lastCard: "",
-    orderPhotos,
+    hasOrderPhotos: images.length === 2,
+    orderPhotos: () => (saved ??= saveOrderPhotos(db, userId, images)),
     timing: timer,
+    ...(intent?.kind === "order" ? { orderIntent: intent } : {}),
   };
   const runTool = async (name: string, args: Args) => {
     const content = TOOL_STATUS[name] ?? "Working on it";
@@ -176,22 +165,47 @@ export async function runMori({
     return { ...out, serialized };
   };
 
-  switch (intent?.kind) {
-    case "price_check": {
-      const answer = await runPriceCheck(intent, {
-        images,
-        market,
-        runTool,
-        emit,
+  // Structured flows make at most one forced call each; it is timed like a loop turn (turn 0).
+  const callTool: IntentTools["callTool"] = async (tool, instructions, callInput) => {
+    const started = Date.now();
+    let model = "";
+    const record = (ok: boolean, code?: string) =>
+      timer.recordModel({
+        turn: 0,
+        model,
+        ms: Date.now() - started,
+        ok,
+        ...(code ? { code } : {}),
+      });
+    try {
+      const out = await callToolOnce(tool, instructions, callInput, {
         signal,
         oidcToken,
-      }).catch((error: unknown) => {
+        onModel: (m) => {
+          model = m;
+        },
+      });
+      record(true);
+      return out;
+    } catch (e) {
+      record(false, e instanceof GatewayError ? e.code : undefined);
+      throw e;
+    }
+  };
+
+  switch (intent?.kind) {
+    case "price_check":
+    case "order": {
+      const options: IntentTools = { images, market, runTool, emit, signal, callTool };
+      const answer = await (
+        intent.kind === "order" ? runOrder(intent, options) : runPriceCheck(intent, options)
+      ).catch((error: unknown) => {
         if (signal?.aborted) throw error;
-        console.warn("Structured price check unavailable; continuing in chat");
+        console.warn("Structured Mori request unavailable; continuing in chat");
         return null;
       });
       if (answer) {
-        rows.push(answer.row);
+        if (answer.row) rows.push(answer.row);
         return finishMoriTurn(db, rows, answer.text, askedAt, emit, answer.cardsOnly);
       }
       break;
@@ -208,13 +222,12 @@ export async function runMori({
     ctx.seenIds.add(id);
 
   try {
-    const rate = market.currency === "USD" ? 1 : await usdTo(market.currency);
     const input: ResponsesInputItem[] = [
       ...past,
       {
         role: "developer",
         content:
-          `[App note: the collector is in ${market.name} (country code ${market.country}). Show prices in ${market.currency} (${market.symbol}); their eBay site is ${market.ebay}. Pass country "${market.country}" and currency "${market.currency}" to get_card_prices. ${rate ? `Today 1 US$ = ${rate} ${market.currency}; convert the collector's price to US$ for set_order at that rate.` : "Live FX conversion is unavailable right now; fall back to US$ if needed."}]` +
+          `[App note: the collector is in ${market.name} (country code ${market.country}). Show prices in ${market.currency} (${market.symbol}); their eBay site is ${market.ebay}. Pass country "${market.country}" and currency "${market.currency}" to get_card_prices. If the tool reports fx_fallback, its prices are US$.]` +
           (location
             ? `\n[App note: the collector's location, from their phone: ${location}. Use it for nearby shows, events and stores; never assume another city.]`
             : ""),
@@ -242,8 +255,6 @@ export async function runMori({
             },
           ],
         });
-    if (images.length >= 2 && /\bsell order\b|^(?:please |i want to )?sell\b/i.test(message))
-      await orderPhotos();
     turns: for (let turn = 0; turn < 6; turn++) {
       // Questions about the collector's own cards, prices or plans must look at real data first,
       // so the first step has to use a tool (the model sometimes answers from guesswork otherwise).
@@ -336,9 +347,10 @@ export async function runMori({
         if (out.stop) {
           // A batch can contain several writes. Never execute calls after the card we showed.
           // A pre-tool sentence cannot know the sell proposal was blocked.
-          finalText = out.rows.some((r) => r.kind === "photos")
-            ? "Send clear photos of the front and back on a dark, flat background with all four corners in view."
-            : text;
+          if (typeof asObject(result)["error"] === "string") {
+            priced.clear();
+            finalText = String(asObject(result)["error"]);
+          } else finalText = out.rows.some((r) => r.kind === "photos") ? PHOTO_INSTRUCTIONS : text;
           break turns;
         }
       }

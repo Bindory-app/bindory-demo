@@ -7,6 +7,7 @@ describe("Event tickets", () => {
       seenIds: new Set<string>(),
       message: "",
       lastCard: "",
+      hasOrderPhotos: false,
       orderPhotos: async () => null,
     };
     const ok = await executeMoriTool(

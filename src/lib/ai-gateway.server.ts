@@ -31,7 +31,7 @@ type GatewayOptions = {
   onModel?: (model: string) => void;
 };
 
-type ResponsesFunctionTool = {
+export type ResponsesFunctionTool = {
   type: "function";
   name: string;
   description?: string;

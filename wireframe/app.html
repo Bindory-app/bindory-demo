@@ -4664,10 +4664,21 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 
   // Order cards the collector can still change before confirming: id -> { side, price, days, ... }.
   const orders = new Map();
-  const usdx = (n) => localMoney(n);
+  const currencySymbols = { USD: "US$", AUD: "A$", CAD: "C$", GBP: "£", EUR: "€" };
+  const orderMoney = (amount, currency) => (currencySymbols[currency] || currency + " ") + Number(amount).toLocaleString("en-US", { minimumFractionDigits: Math.round(amount * 100) % 100 ? 2 : 0, maximumFractionDigits: 2 });
+  function orderComparison(o) {
+    const ref = o.reference;
+    if (ref === undefined) return o.market ? row("Market reference", "About " + orderMoney(o.market * o.rate, o.currency)) : ""; // legacy card
+    if (!ref) return row("Market comparison", "No market reference is available.");
+    const target = ref.currency === o.currency ? o.price : ref.currency === "USD" ? o.usd : null;
+    const value = orderMoney(ref.amount, ref.currency);
+    return row("Market comparison", target === null ? "The market reference is " + value + " in a different currency." :
+      "Your target is " + (target === ref.amount ? "at" : target < ref.amount ? "below" : "above") + " the market reference of " + value + ".");
+  }
   const orderRows = (o) =>
-    row(o.side === "buy" ? "Buy for up to" : "Sell for at least", usdx(o.price)) +
-    (o.market ? row("Market price now", "About " + usdx(o.market)) : "") +
+    row(o.side === "buy" ? "Buy for up to" : "Sell for at least", orderMoney(o.price, o.currency)) +
+    (o.currency !== "USD" ? row("US$ equivalent", orderMoney(o.usd, "USD")) : "") +
+    orderComparison(o) +
     row("Watching", "Listings and collectors you follow") + row("Expires", "In " + o.days + " days") + (o.note ? row("Note", o.note) : "");
   const orderHead = (o) => "<small>" + (o.side === "buy" ? "Buy order" : "Sell order") + " · price alert</small><b>" + esc(o.name) + "</b>";
 
@@ -4727,7 +4738,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       art = '<div style="display:flex;gap:6px;overflow-x:auto;margin:8px 0">' + (p.cards || []).map((c) => (cardImg(c) ? '<img src="' + esc(cardImg(c)) + '" alt="' + esc(c.name) + '" style="height:84px;border-radius:6px">' : "")).join("") + "</div>";
       rows = row("Cards", String((p.cards || []).length)) + (p.description ? row("About", p.description) : "");
     } else if (p.tool === "set_order") {
-      const o = { side: p.side === "sell" ? "sell" : "buy", price: p.price_usd, days: p.expires_days || 30, market: p.market_usd, note: p.note, name: p.card.name };
+      const o = { side: p.side === "sell" ? "sell" : "buy", price: p.price?.amount ?? p.price_usd, currency: p.price?.currency || "USD", usd: p.price_usd, rate: p.fx_rate || 1, days: p.expires_days || 30, market: p.market_usd, reference: p.market_reference, note: p.note, name: p.card.name, hasPhotos: !!(p.photos?.front && p.photos?.back), condition: p.condition };
       if (!done) orders.set(id, o);
       head = orderHead(o);
       art = cardImg(p.card) ? '<div class="cp-mori-ident"><img src="' + esc(cardImg(p.card)) + '" alt=""><div><small>' + esc(p.card.set_name || "") + "</small><b>" + esc(p.card.name) + "</b></div></div>" : "";
@@ -4967,7 +4978,9 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
             return '<button type="button" class="bd-choice" data-mori-ask="' + esc(label) + '"' + intent + '>' + esc(label) + "</button>";
           }).join("") + "</div>";
           if (last) last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", html);
-          else ui.say(html);
+          else last = ui.say(html);
+          // Only this live response's printing choices may reuse this order's pair.
+          if (ui.sellShots) last.querySelectorAll(".bd-choices:last-child button[data-bd-intent]").forEach(b => choicePhotos.set(b, ui.sellShots));
           ui.scrollDown();
         }
         continue;
@@ -4993,7 +5006,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       else if (r.kind === "photos") {
         // Take a photo / Upload send the front and back for a sell order or a pre-grade (the wireframe's own photo step).
         const why = r.payload && r.payload.for === "grade" ? "grade" : "sell";
-        const btns = '<div class="cp-mori-chips"><button data-mori-act="card-photo" data-mori-arg="' + why + '">Take a photo</button><button data-mori-act="card-photo" data-mori-arg="' + why + '">Upload from my photos</button></div>';
+        const pending = r.payload?.intent ? ' data-bd-pending-order="' + esc(JSON.stringify(r.payload.intent)) + '"' : "";
+        const btns = '<div class="cp-mori-chips"' + pending + '><button data-mori-act="card-photo" data-mori-arg="' + why + '">Take a photo</button><button data-mori-act="card-photo" data-mori-arg="' + why + '">Upload from my photos</button></div>';
         if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", btns);
         else last = ui.say(stepsHTML + btns);
       }
@@ -5131,16 +5145,16 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   // The base wireframe calls bdLiveRoute synchronously from its submit/click handler.
   // Bind an intent to that DOM event (not to matching text or the next message).
   let intentEvent = null;
-  function tagIntent(event, intent) {
-    const entry = { event, intent }; intentEvent = entry;
+  function tagIntent(event, intent, photos) {
+    const entry = { event, intent, photos }; intentEvent = entry;
     setTimeout(() => { if (intentEvent === entry) intentEvent = null; }, 0);
   }
   const conditions = { "Near mint or better": "near_mint", "Lightly played": "lightly_played", "Moderately played": "moderately_played", "Heavily played": "heavily_played" };
   // Photo selection is async; its intent belongs to this exact attachment array.
   const photoIntents = new WeakMap();
+  const choicePhotos = new WeakMap();
   let pendingPick = null;
-  window.bdPickCardPhotos = async (el, kind) => {
-    const camera = !/upload/i.test(el.textContent || "");
+  window.bdPickCardPhotos = async (el, kind, camera = !/upload/i.test(el.textContent || "")) => {
     const p = pendingPick && pendingPick.el === el ? pendingPick.promise : openPicker(camera, !camera && needsBack(kind));
     pendingPick = null;
     let files = await p;
@@ -5157,10 +5171,33 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       const select = el.closest(".cp-mori-body")?.querySelector('form[data-fill="price"] select[name="condition"]');
       photoIntents.set(shots, { kind: "price_check", condition: conditions[select?.value] });
     }
+    const pending = el.closest("[data-bd-pending-order]");
+    if (kind === "sell" && pending) photoIntents.set(shots, JSON.parse(pending.dataset.bdPendingOrder));
     return shots;
   };
 
   // The photo icon in the chat box: the collector's own photo is attached to the next message.
+  // Delay this specific sell submission for its pair. Cancelling leaves the form editable.
+  const collectingOrder = new WeakSet();
+  async function sendFormOrder(el, order, symbol, done) {
+    if (collectingOrder.has(el) || liveRun) return;
+    collectingOrder.add(el);
+    try {
+      let shots;
+      if (order.side === "sell") {
+        P.toast("Choose the front photo first, then the back.");
+        shots = await window.bdPickCardPhotos(el, "sell", false);
+        if (!shots || !el.isConnected || liveRun || P.current() !== "mori") return;
+      }
+      const input = app.querySelector("[data-mori-input]");
+      const form = input.closest("form"), submit = new Event("submit", {bubbles: true, cancelable: true});
+      input.value = (order.side === "sell" ? "Sell " : "Buy ") + order.card.name + (order.card.number ? " " + order.card.number : "") +
+        (order.side === "sell" ? " for at least " : " for up to ") + symbol + order.price.amount;
+      tagIntent(submit, order, shots);
+      form.dispatchEvent(submit);
+      done();
+    } finally { collectingOrder.delete(el); }
+  }
   let attachedShot = null, shotForAdd = false;
   window.bdHasShot = () => Boolean(attachedShot);
   const attachmentBox = () => app.querySelector("[data-mori-attachment]");
@@ -5241,6 +5278,12 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       if (el.binder && !el.binder.value) return bad("Choose a binder, or make a new one.", el.binder);
       if (isNew && !binder) return bad("Type a name for the new binder.", el.newbinder);
       const number = of ? num + "/" + of : num;
+      const orderTemplate = /^(buy|sell) \[(?:card \+ number|card name\] \[card number)\] for (?:up to|at least) US\$\[price\]$/i.exec(tpl.trim());
+      if (orderTemplate) {
+        if (!(Number(price) > 0)) return bad("Enter a price above zero.", el.price);
+        sendFormOrder(f, {kind:"order",side:orderTemplate[1].toLowerCase(),card:{name,number},price:{amount:Number(price),currency:"USD"}}, "US$", () => box.remove());
+        return;
+      }
       inp.value = tpl
         .replace(/\[card \+ number\]/i, name + " " + number)
         .replace(/\[card name\]/i, name)
@@ -5312,7 +5355,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     if (!c || !app.contains(c) || c.closest(".bd-choices.is-done")) return;
     const group = c.closest(".bd-choices");
     if (c.dataset.bdIntent) {
-      try { tagIntent(e, JSON.parse(c.dataset.bdIntent)); } catch { /* Old choices remain plain text. */ }
+      try { tagIntent(e, JSON.parse(c.dataset.bdIntent), choicePhotos.get(c)); } catch { /* Old choices remain plain text. */ }
     }
     if ("bdChoiceOwn" in c.dataset) {
       e.preventDefault(); e.stopImmediatePropagation();
@@ -5360,6 +5403,23 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   // While Mori answers, Enter does not send; a photo sent with no words goes to Mori as a price check.
   document.addEventListener("submit", (e) => {
     // Observe the named fields before the base form validates, disables them and calls send().
+    if (e.target.matches?.('form[data-fill="order"]')) {
+      const form = e.target, f = form.elements;
+      const name = f.name.value.trim().replace(/\s+/g, " "), num = f.num.value.trim().toUpperCase(), of = f.of.value.trim().toUpperCase();
+      const price = f.price.value.trim().replace(/[\s,$£€]|US|A|C/gi, "");
+      const part = /^[A-Z]{0,4}\d{1,4}[A-Z]?$/;
+      if (!name || !part.test(num) || (of && !part.test(of)) || !/^\d{1,7}(\.\d{1,2})?$/.test(price)) return; // native form shows its field error
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (!Number(price)) { P.toast("Enter a price above zero."); return; }
+      const symbol = f.price.previousElementSibling.textContent.trim();
+      const currency = Object.keys(currencySymbols).find(c => currencySymbols[c] === symbol);
+      if (!currency) { P.toast("Reopen the order form to choose a currency."); return; }
+      const pasted = f.price.value.trim().match(/^(US\$|A\$|C\$|£|€)/i);
+      if (pasted && pasted[0].toUpperCase() !== symbol.toUpperCase()) { P.toast("Enter the amount in " + currency + ", as shown on the form."); return; }
+      sendFormOrder(form, {kind:"order",side:form.dataset.side === "sell" ? "sell" : "buy",card:{name,number: of ? num + "/" + of : num},price:{amount:Number(price),currency}}, symbol,
+        () => { form.classList.add("is-done"); form.querySelectorAll("input, select, button").forEach(x => { x.disabled = true; }); });
+      return;
+    }
     if (e.target.matches?.('form[data-fill="price"]')) {
       const f = e.target.elements;
       const name = f.name.value.trim().replace(/\s+/g, " "), num = f.num.value.trim().toUpperCase(), of = f.of.value.trim().toUpperCase();
@@ -6083,11 +6143,18 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 
   // Called from the wireframe's own route() (patched at build time) for typed and tapped messages.
   window.bdLiveRoute = async (text, ui) => {
-    const intent = photoIntents.get(ui.photos) || (intentEvent && intentEvent.event.eventPhase !== Event.NONE ? intentEvent.intent : undefined);
+    const submission = intentEvent && intentEvent.event.eventPhase !== Event.NONE ? intentEvent : undefined;
+    const intent = photoIntents.get(ui.photos) || submission?.intent;
     intentEvent = null;
+    if (submission?.photos) {
+      ui.photos = submission.photos;
+      const mine = [...app.querySelectorAll("[data-mori-thread] .cp-mori-body")].pop();
+      mine?.insertAdjacentHTML("beforeend", window.bdPhotosHTML(ui.photos));
+    }
+    if (intent?.kind === "order" && intent.side === "sell" && ui.photos?.length === 2) ui.sellShots = ui.photos;
     // A photo attached from the chat box goes with this message and shows in its bubble.
     const shot = attachedShot; attachedShot = null;
-    if (shot && !ui.photos) {
+    if (shot && !ui.photos && intent?.kind !== "order") {
       const mine = [...app.querySelectorAll("[data-mori-thread] .cp-mori-body")].pop();
       if (mine) { mine.insertAdjacentHTML("beforeend", '<div class="cp-mori-photos"><span><img src="' + shot + '" alt="Your card"></span></div>'); ui.scrollDown(); }
       ui = Object.assign({}, ui, { photos: [shot] });
@@ -6442,13 +6509,14 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     const id = card.querySelector("[data-bd-confirm]").dataset.bdConfirm, o = orders.get(id);
     if ("orderSave" in save.dataset && o) {
       const price = Number(ed.querySelector("[data-order-price]").value);
-      if (!(price > 0 && price <= 1000000)) { P.toast("Enter a price in US$"); return; }
+      if (!(price > 0 && Number(price.toFixed(2)) === price && Math.round(price / o.rate * 100) >= 1 && Math.round(price / o.rate * 100) <= 100000000)) { P.toast("Enter a valid price in " + o.currency); return; }
       o.side = ed.querySelector("[data-order-side].is-selected")?.dataset.orderSide === "sell" ? "sell" : "buy";
       o.days = Number(ed.querySelector("[data-order-days].is-selected")?.dataset.orderDays) || 30;
       o.price = Math.round(price * 100) / 100;
+      o.usd = Math.round(Math.round(price * 100) / o.rate) / 100;
       o.changed = true;
       card.querySelector(".cp-mori-confirm-head").innerHTML = orderHead(o);
-      card.querySelector("ul").innerHTML = orderRows(o);
+      card.querySelector("ul").innerHTML = orderRows(o) + conditionRows(o.condition) + (o.hasPhotos ? row("Photos", "Front and back, saved for your listing") : "");
       P.toast("Order updated. Tap Confirm to set it.");
     }
     ed.remove();
@@ -6470,7 +6538,11 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       card.querySelector("ul").hidden = true;
       box.hidden = true;
       box.insertAdjacentHTML("afterend", P.orderEditorHTML(order));
-      card.querySelector("[data-order-price]").focus();
+      const field = card.querySelector("[data-order-price]");
+      field.parentNode.firstChild.textContent = currencySymbols[order.currency] || order.currency;
+      field.min = "0.01"; field.max = "9999999.99"; field.step = "0.01";
+      if (!order.hasPhotos) card.querySelector('[data-order-side="sell"]').disabled = true;
+      field.focus();
       return;
     }
     box.querySelectorAll("button").forEach((x) => (x.disabled = true));
@@ -6479,8 +6551,9 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       const res = await fetch("/api/mori-confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
-        body: JSON.stringify({ messageId: id, action, ...(order && order.changed ? { changes: { side: order.side, price_usd: order.price, expires_days: order.days } } : {}) }),
+        body: JSON.stringify({ messageId: id, action, ...(order && order.changed ? { changes: { side: order.side, price: order.price, expires_days: order.days } } : {}) }),
       });
+      if (res.status === 409) { box.querySelectorAll("button").forEach(x => { x.disabled = false; }); P.toast(await res.text()); return; }
       if (!res.ok) throw new Error("failed");
       const out = await res.json();
       const plan = action === "confirm" ? binderPlans.get(id) : null;

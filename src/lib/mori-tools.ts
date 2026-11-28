@@ -72,7 +72,12 @@ export type Proposal =
       side: "buy" | "sell";
       card: ProposalCard;
       price_usd: number;
+      /** Absent on legacy USD proposals. Keep this quote fixed through confirmation. */
+      price?: { amount: number; currency: string } | undefined;
+      fx_rate?: number | undefined;
       market_usd?: number | undefined;
+      /** The market point this turn's get_card_prices actually returned (null if unavailable). */
+      market_reference?: { amount: number; currency: string } | null;
       note?: string | undefined;
       /** Sell orders: condition read from the collector's photos. */
       condition?: OrderCondition | undefined;
@@ -95,7 +100,7 @@ export function proposalTitle(p: Proposal): string {
     case "save_memory":
       return `Save the memory “${p.title}”`;
     case "set_order":
-      return `${p.side === "buy" ? "Buy" : "Sell"} ${p.card.name} at US$${p.price_usd}`;
+      return `${p.side === "buy" ? "Buy" : "Sell"} ${p.card.name} at ${p.price && p.price.currency !== "USD" ? `${p.price.amount} ${p.price.currency} (US$${p.price_usd})` : `US$${p.price_usd}`}`;
   }
 }
 

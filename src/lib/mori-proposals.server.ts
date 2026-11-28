@@ -1,7 +1,8 @@
 import { stringArg, type Args, type DB } from "./mori-context.server";
 import { isWriteTool, type Proposal, type ProposalCard } from "./mori-tools";
 import { cardImage, getCard, getCardPricing, findCards, usdRange } from "./tcgdex";
-import { validateWriteArgs, ownPhotoPath, orderCondition } from "./mori-validation";
+import { validateWriteArgs, ownPhotoPath, writeSchemas } from "./mori-validation";
+import { quoteOrder } from "./mori-order-money.server";
 
 async function briefCard(id: string, reason?: string): Promise<ProposalCard | null> {
   const c = await getCard(id);
@@ -103,26 +104,25 @@ export async function buildProposal(
     };
   }
   if (name === "set_order") {
-    const r = await getCardPricing(stringArg(a["card_id"]) ?? "");
+    const order = writeSchemas.set_order.parse(a);
+    const money = await quoteOrder({ amount: order.price, currency: order.currency });
+    if ("error" in money) return money;
+    const r = await getCardPricing(order.card_id);
     if (!r) return { error: "Card not found in the catalogue" };
     const range = usdRange(r.pricing);
     return {
       tool: "set_order",
-      side: a["side"] === "sell" ? "sell" : "buy",
+      side: order.side,
       card: {
         tcgdex_id: r.card.id,
         name: `${r.card.name} ${r.card.localId}`,
         image: cardImage(r.card.image, "low"),
         set_name: r.card.set.name,
       },
-      price_usd: Math.round(Number(a["price_usd"]) * 100) / 100,
+      ...money,
       market_usd: range?.typical,
-      note: stringArg(a["note"]),
-      ...(() => {
-        // Sell orders carry the condition read from the collector's photos.
-        const condition = a["side"] === "sell" ? orderCondition.safeParse(a["condition"]) : null;
-        return condition?.success ? { condition: condition.data } : {};
-      })(),
+      note: order.note,
+      condition: order.side === "sell" ? order.condition : undefined,
     };
   }
   if (!ownPhotoPath(stringArg(a["photo_path"]), userId))
