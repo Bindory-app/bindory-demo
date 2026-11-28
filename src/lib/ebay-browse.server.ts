@@ -1,8 +1,8 @@
 /**
  * Today's lowest listings for a card from eBay's own Browse API (official, free: 5,000 calls a day),
- * called by this server with the founder's eBay developer keys (EBAY_CLIENT_ID = App ID,
- * EBAY_CLIENT_SECRET = Cert ID; never sent to the browser or the agents). No scraping: eBay blocks
- * HarnessRouter's web_fetch and serves Firecrawl a sponsored-only page, so those are not used.
+ * called server-only with the founder's eBay developer keys (EBAY_CLIENT_ID = App ID,
+ * EBAY_CLIENT_SECRET = Cert ID; never sent to the browser or the agents). Uses the official API
+ * directly rather than page fetching, which eBay blocks or replaces with sponsored-only pages.
  *
  * Two searches on the collector's own eBay marketplace (EBAY_AU for Australia, ...), both raw
  * singles (category 183454, condition Ungraded 4000) in the collector's condition (the "Card
@@ -10,19 +10,31 @@
  * fan art, with postage quoted for delivery to the collector's country:
  * - worldwide: sellers anywhere;
  * - local: itemLocationCountry = the collector's country.
- * Rows then go through the same checks as before (title is the card, the condition, no junk) and
- * are compared by delivered cost: item + postage + estimated import tax and fees from abroad.
- * Cached for an hour per card, marketplace and condition.
+ * Fetched candidate rows are cached for an hour (shared across instances) so different post-applied
+ * price floors reuse the same upstream results without extra eBay API calls.
  */
+import { createCache, type SharedStore } from "./cache.server";
 import { CONDITIONS, type Condition } from "./ebay-sold.server";
 import { pickLowest, type Listing, type ScrapedItem } from "./ebay-listings.server";
 import { usdRates } from "./fx.server";
 import type { Market } from "./market";
+import { upstreamFetch } from "./upstream-fetch";
 
 const API = "https://api.ebay.com";
-const TTL = 60 * 60 * 1000;
-const cache = new Map<string, { at: number; value: BrowseListings | null }>();
-let token: { value: string; until: number } | null = null;
+const BROWSE_TTL_MS = 60 * 60 * 1000;
+const BROWSE_EMPTY_TTL_MS = 10 * 60 * 1000;
+const TOKEN_TIMEOUT_MS = 10_000;
+const SEARCH_TIMEOUT_MS = 12_000;
+
+const regionNames = new Intl.DisplayNames(["en"], { type: "region" });
+
+function regionLabel(code: string): string {
+  try {
+    return regionNames.of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
 
 /** eBay marketplace for each market, and a postcode in its biggest city so postage is quoted. */
 const MARKETPLACE: Record<string, { id: string; zip: string }> = {
@@ -36,7 +48,20 @@ const MARKETPLACE: Record<string, { id: string; zip: string }> = {
   AU: { id: "EBAY_AU", zip: "2000" },
 };
 
-type BrowseListings = { lowest_worldwide: Listing | null; lowest_local: Listing | null };
+export type BrowseListings = { lowest_worldwide: Listing | null; lowest_local: Listing | null };
+
+export type BrowseCandidates = {
+  world: ScrapedItem[];
+  local: ScrapedItem[];
+  /** Whole-unit floor used in the upstream eBay price filter (0 means no floor was applied). */
+  queryFloor: number;
+};
+
+export type BrowseCandidatesLookup =
+  | { status: "ok"; data: BrowseCandidates }
+  | { status: "empty"; data: BrowseCandidates }
+  | { status: "error"; data: null }
+  | { status: "unconfigured"; data: null };
 
 type Money = { value?: string; currency?: string };
 type BrowseItem = {
@@ -47,32 +72,64 @@ type BrowseItem = {
   buyingOptions?: string[];
 };
 
+function makeBrowseCache(store?: SharedStore | null) {
+  return createCache<BrowseCandidates>({
+    namespace: "ebay-browse",
+    ttlMs: BROWSE_TTL_MS,
+    emptyTtlMs: BROWSE_EMPTY_TTL_MS,
+    ...(store !== undefined ? { store } : {}),
+  });
+}
+
+// OAuth bearer tokens stay memory-only (`shared: false`) so credentials are never persisted in DB,
+// while still benefiting from singleflight dedupe and TTL expiry.
+const tokenCache = createCache<string>({
+  namespace: "ebay-token",
+  ttlMs: 6_900 * 1000,
+  shared: false,
+  maxEntries: 4,
+});
+let browseCache = makeBrowseCache();
+
+/** Resets Browse and OAuth token caches (and optionally installs a custom shared store for tests). */
+export function resetBrowseCacheForTest(store?: SharedStore | null): void {
+  tokenCache.clear();
+  browseCache = makeBrowseCache(store);
+}
+
 const hasBrowseKeys = () =>
   Boolean(process.env["EBAY_CLIENT_ID"]?.trim() && process.env["EBAY_CLIENT_SECRET"]?.trim());
 
-/** An application token (client credentials), reused until shortly before it expires. */
+/** An application token (client credentials), deduplicated and reused until shortly before expiry. */
 async function appToken(): Promise<string> {
-  if (token && Date.now() < token.until) return token.value;
-  const id = process.env["EBAY_CLIENT_ID"]!.trim();
-  const secret = process.env["EBAY_CLIENT_SECRET"]!.trim();
-  const res = await fetch(`${API}/identity/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope",
-    signal: AbortSignal.timeout(15_000),
+  const res = await tokenCache.getOrLoad("oauth", async () => {
+    const id = process.env["EBAY_CLIENT_ID"]!.trim();
+    const secret = process.env["EBAY_CLIENT_SECRET"]!.trim();
+    const r = await upstreamFetch(`${API}/identity/v1/oauth2/token`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: "grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope",
+      timeoutMs: TOKEN_TIMEOUT_MS,
+      maxAttempts: 3,
+      baseDelayMs: 250,
+      maxDelayMs: 2_000,
+    });
+    const j = (await r.json().catch(() => ({}))) as {
+      access_token?: string;
+      expires_in?: number;
+      error_description?: string;
+    };
+    if (!r.ok || !j.access_token) {
+      throw new Error(`eBay token ${r.status} ${j.error_description ?? ""}`);
+    }
+    const ttlMs = Math.max(60, (j.expires_in ?? 7200) - 300) * 1000;
+    return { kind: "hit", value: j.access_token, ttlMs };
   });
-  const j = (await res.json().catch(() => ({}))) as {
-    access_token?: string;
-    expires_in?: number;
-    error_description?: string;
-  };
-  if (!res.ok || !j.access_token)
-    throw new Error(`eBay token ${res.status} ${j.error_description ?? ""}`);
-  token = { value: j.access_token, until: Date.now() + ((j.expires_in ?? 7200) - 300) * 1000 };
-  return token.value;
+  if (!res.ok) throw new Error("eBay token unavailable");
+  return res.value;
 }
 
 /** The Browse API search for one card: raw, one condition, Buy It Now, cheapest first. */
@@ -122,10 +179,7 @@ export function toRow(
   const ship = it.shippingOptions?.[0]?.shippingCost;
   const shipping = ship ? conv(ship) : NaN;
   const cc = it.itemLocation?.country ?? "";
-  const name =
-    !cc || cc === market.country
-      ? null
-      : (new Intl.DisplayNames(["en"], { type: "region" }).of(cc) ?? cc);
+  const name = !cc || cc === market.country ? null : regionLabel(cc);
   return {
     title: it.title ?? "",
     price: String(it.price?.value ?? ""),
@@ -136,19 +190,112 @@ export function toRow(
   };
 }
 
-async function search(url: string, market: Market): Promise<BrowseItem[]> {
+async function search(
+  url: string,
+  market: Market,
+  allowTokenRefresh = true,
+): Promise<BrowseItem[]> {
   const mp = MARKETPLACE[market.country] ?? MARKETPLACE["US"]!;
-  const res = await fetch(url, {
+  const res = await upstreamFetch(url, {
     headers: {
       Authorization: `Bearer ${await appToken()}`,
       "X-EBAY-C-MARKETPLACE-ID": mp.id,
       "X-EBAY-C-ENDUSERCTX": `contextualLocation=country=${market.country},zip=${mp.zip}`,
     },
-    signal: AbortSignal.timeout(20_000),
+    timeoutMs: SEARCH_TIMEOUT_MS,
+    maxAttempts: 3,
+    baseDelayMs: 250,
+    maxDelayMs: 2_000,
   });
+  if (res.status === 401 && allowTokenRefresh) {
+    void res.body?.cancel().catch(() => {});
+    await tokenCache.delete("oauth");
+    return search(url, market, false);
+  }
   if (!res.ok) throw new Error(`eBay search ${res.status} ${(await res.text()).slice(0, 200)}`);
   const j = (await res.json()) as { itemSummaries?: BrowseItem[] };
   return j.itemSummaries ?? [];
+}
+
+/** Picks the lowest worldwide and local listings from cached Browse candidates using `floor`. */
+export function pickBrowseLowest(
+  candidates: BrowseCandidates,
+  card: { number: string },
+  market: Market,
+  condition: Condition,
+  floor?: number,
+): BrowseListings {
+  const opts = floor && floor > 0 ? { floor } : {};
+  return {
+    lowest_worldwide: pickLowest(
+      [...candidates.world, ...candidates.local],
+      card.number,
+      condition,
+      market,
+      { local: false, ...opts },
+    ),
+    lowest_local: pickLowest(candidates.local, card.number, condition, market, {
+      local: true,
+      ...opts,
+    }),
+  };
+}
+
+/**
+ * Fetches and caches normalized Browse candidate rows for one card/market/condition.
+ * Cached rows are reused for any floor >= the queried floor so post-applied floors avoid extra
+ * upstream calls; only a strictly lower floor invalidates and refetches.
+ */
+export async function browseCandidates(
+  card: { id: string; name: string; number: string },
+  market: Market,
+  condition: Condition = "nm",
+  queryFloor?: number,
+  now = Date.now(),
+): Promise<BrowseCandidatesLookup> {
+  if (!hasBrowseKeys()) return { status: "unconfigured", data: null };
+  const reqFloor = queryFloor && queryFloor > 0 ? Math.floor(queryFloor) : 0;
+  const key = `${card.id}@${market.country}:${market.currency}#${condition}`;
+
+  const load = () =>
+    browseCache.getOrLoad(
+      key,
+      async () => {
+        try {
+          const apiFloor = reqFloor > 0 ? reqFloor : undefined;
+          const [worldRaw, localRaw, rates] = await Promise.all([
+            search(browseQuery(card, market, condition, false, apiFloor), market),
+            search(browseQuery(card, market, condition, true, apiFloor), market),
+            usdRates(now),
+          ]);
+          const rows = (v: BrowseItem[]) =>
+            v.map((x) => toRow(x, market, rates)).filter((x): x is ScrapedItem => x !== null);
+          const value: BrowseCandidates = {
+            world: rows(worldRaw),
+            local: rows(localRaw),
+            queryFloor: reqFloor,
+          };
+          return value.world.length > 0 || value.local.length > 0
+            ? { kind: "hit", value }
+            : { kind: "empty", value };
+        } catch (e) {
+          console.error("eBay Browse failed", e instanceof Error ? e.message : e);
+          return { kind: "error" };
+        }
+      },
+      { now },
+    );
+
+  let res = await load();
+  // If cached candidates were fetched with a higher upstream floor than requested now, refetch at
+  // the lower floor so valid cheaper listings aren't missed.
+  if (res.ok && res.fromCache && res.value.queryFloor > reqFloor) {
+    await browseCache.delete(key);
+    res = await load();
+  }
+
+  if (!res.ok) return { status: "error", data: null };
+  return { status: res.empty ? "empty" : "ok", data: res.value };
 }
 
 /** Lowest listings worldwide and in the collector's country; null without keys or on error. */
@@ -157,40 +304,9 @@ export async function browseLowest(
   market: Market,
   condition: Condition = "nm",
   floor?: number,
+  now = Date.now(),
 ): Promise<BrowseListings | null> {
-  if (!hasBrowseKeys()) return null;
-  const key = `${card.id}@${market.country}#${condition}`;
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL) return hit.value;
-  let value: BrowseListings | null = null;
-  try {
-    const [world, local, rates] = await Promise.all([
-      search(browseQuery(card, market, condition, false, floor), market),
-      search(browseQuery(card, market, condition, true, floor), market),
-      usdRates(),
-    ]);
-    const rows = (v: BrowseItem[]) =>
-      v.map((x) => toRow(x, market, rates)).filter((x): x is ScrapedItem => x !== null);
-    const opts = floor ? { floor } : {};
-    value = {
-      lowest_worldwide: pickLowest(
-        [...rows(world), ...rows(local)],
-        card.number,
-        condition,
-        market,
-        {
-          local: false,
-          ...opts,
-        },
-      ),
-      lowest_local: pickLowest(rows(local), card.number, condition, market, {
-        local: true,
-        ...opts,
-      }),
-    };
-  } catch (e) {
-    console.error("eBay Browse failed", e instanceof Error ? e.message : e);
-  }
-  cache.set(key, { at: Date.now(), value });
-  return value;
+  const res = await browseCandidates(card, market, condition, floor, now);
+  if (!res.data) return null;
+  return pickBrowseLowest(res.data, card, market, condition, floor);
 }
