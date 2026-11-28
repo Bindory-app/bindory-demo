@@ -21,14 +21,16 @@ type GatewayModel = { model: string; effort?: ReasoningEffort };
 
 /** How hard the chat model thinks before answering: higher is smarter but slower to start. */
 const REASONING_EFFORT: ReasoningEffort = "medium";
-/** Tried in order: the default, then one model per other supplier when a model is rate limited or
- *  this key is not allowed to use it. */
+/** Tried in order: the default, then the next when a model is rate limited or this key is not
+ *  allowed to use it. Only Gemini 2.5 Flash is on for now: GPT-6.2 Sol needs purchased AI Gateway
+ *  credits (the free tier answers 403) and the other two are untried with this key. Uncomment
+ *  them, in this order, once the team has credits. */
 const DEFAULT_MODELS: GatewayModel[] = [
-  { model: "openai/gpt-6.2-sol", effort: REASONING_EFFORT },
-  { model: "anthropic/claude-sonnet-5.5", effort: REASONING_EFFORT },
+  // { model: "openai/gpt-6.2-sol", effort: REASONING_EFFORT },
+  // { model: "anthropic/claude-sonnet-5.5", effort: REASONING_EFFORT },
   // Kept at low: at medium this model is too slow to start answering for a chat turn.
-  { model: "google/gemini-4-carbon", effort: "low" },
-  // Last resort, sent without an effort like the request this app first ran on.
+  // { model: "google/gemini-4-carbon", effort: "low" },
+  // Sent without an effort, like the request this app first ran on.
   { model: "google/gemini-2.5-flash" },
 ];
 /** Optional override: AI_GATEWAY_MODEL goes first, at REASONING_EFFORT unless listed above. */
