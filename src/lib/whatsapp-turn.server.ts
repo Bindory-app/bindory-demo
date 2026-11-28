@@ -13,6 +13,7 @@ import {
 import { whatsappNonce, whatsappToken } from "./mori-signing.server";
 import { toCollectorError, TURN_DEADLINE_MS } from "./mori-chat-stream.server";
 import { BodyTooLarge, downloadPhoto, sendWhatsApp, type Inbound } from "./whatsapp-cloud.server";
+import { paymentOrigin } from "./whatsapp-payment.server";
 import {
   bindLink,
   claimReminder,
@@ -54,17 +55,6 @@ async function row(db: DB, l: Linked, id: string): Promise<MoriRow | null> {
   if (error) throw error;
   return data as MoriRow | null;
 }
-function origin() {
-  const url = new URL(process.env["WHATSAPP_APP_ORIGIN"] ?? "");
-  if (
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    url.origin !== url.href.replace(/\/$/, "")
-  )
-    throw new Error("Invalid payment origin");
-  return url.origin;
-}
 async function wallet(
   l: Linked,
   savePreferences?: () => Promise<void>,
@@ -72,7 +62,7 @@ async function wallet(
   const previous = l.step;
   const key = randomUUID(),
     token = whatsappToken("payment", key, Date.now() + 15 * 60_000),
-    url = origin() + "/api/whatsapp-payment#" + token;
+    url = paymentOrigin() + "/api/whatsapp-payment#" + token;
   if (!(await setStep(l, { kind: "wallet", key }))) return [textMessage(stale)];
   try {
     await savePreferences?.();

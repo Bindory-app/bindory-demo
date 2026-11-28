@@ -37,10 +37,23 @@ export function paymentLanding() {
       "</script>",
   );
 }
+// The one HTTPS origin payment links point at. Checked against the browser's Origin rather than
+// the request URL, which reports http behind a TLS-terminating proxy or tunnel.
+export function paymentOrigin() {
+  const url = new URL(process.env["WHATSAPP_APP_ORIGIN"] ?? "");
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.origin !== url.href.replace(/\/$/, "")
+  )
+    throw new Error("Invalid payment origin");
+  return url.origin;
+}
 const invalid = () =>
   page("This payment link is no longer active. Send PAYMENT to Mori for a new link.", 410);
 export async function submitPayment(request: Request) {
-  if (request.headers.get("origin") !== new URL(request.url).origin) return page("Forbidden", 403);
+  if (request.headers.get("origin") !== paymentOrigin()) return page("Forbidden", 403);
   if (
     !request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded") ||
     Number(request.headers.get("content-length")) > 2048

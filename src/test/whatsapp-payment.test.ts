@@ -33,6 +33,7 @@ const post = (action: string, wallet = "paypal", cap = token, origin = "https://
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv("MORI_MCP_SECRET", "mock-channel-signing-secret-over-32-characters");
+  vi.stubEnv("WHATSAPP_APP_ORIGIN", "https://example.invalid");
   token = whatsappToken("payment", nonce, Date.now() + 60000);
   l = { user_id: "mine", step: { kind: "wallet", key: nonce } } as Linked;
   f.find.mockImplementation(async () => (l.step.kind === "wallet" ? { ...l } : null));
@@ -70,6 +71,23 @@ it("rejects cross-origin posts, expired/other-purpose tokens and invalid wallets
   ])
     expect((await post("connect", "card", cap)).status).toBe(410);
   expect((await post("connect", "constructor")).status).toBe(410);
+  expect(f.connect).not.toHaveBeenCalled();
+});
+it("accepts the configured origin behind a proxy that reports http, and fails closed when unset", async () => {
+  const proxied = (origin: string) =>
+    submitPayment(
+      new Request("http://example.invalid/api/whatsapp-payment", {
+        method: "POST",
+        headers: { origin },
+        body: new URLSearchParams({ action: "view", token }),
+      }),
+    );
+  expect((await proxied("https://example.invalid")).status).toBe(200);
+  expect((await proxied("http://example.invalid")).status).toBe(403);
+  vi.stubEnv("WHATSAPP_APP_ORIGIN", "");
+  await expect(post("connect")).rejects.toThrow();
+  vi.stubEnv("WHATSAPP_APP_ORIGIN", "http://example.invalid");
+  await expect(post("connect")).rejects.toThrow();
   expect(f.connect).not.toHaveBeenCalled();
 });
 it("only one explicit connection wins; WhatsApp gets exactly the database-confirmed count", async () => {
