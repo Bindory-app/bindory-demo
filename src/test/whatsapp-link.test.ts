@@ -39,3 +39,13 @@ it("takes the collector id only from the verified bearer, never the body, and pr
   expect(f.start).toHaveBeenCalledWith("verified", "GB");
   expect(await r.json()).toEqual({ url: "https://wa.me/15555550101?text=mock" });
 });
+it("reports malformed JSON as a client error without issuing a link", async () => {
+  f.user.mockResolvedValue({ data: { user: { id: "verified" } } });
+  const request = new Request("https://example.invalid/api/whatsapp-link", {
+    method: "POST",
+    headers: { origin: "https://example.invalid", authorization: "Bearer mock" },
+    body: "{",
+  });
+  expect((await post({ request })).status).toBe(400);
+  expect(f.start).not.toHaveBeenCalled();
+});

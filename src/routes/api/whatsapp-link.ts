@@ -18,7 +18,9 @@ export const Route = createFileRoute("/api/whatsapp-link")({
           });
           const { data, error } = await db.auth.getUser(token.slice(7));
           if (error || !data.user) return new Response(null, { status: 401 });
-          const body = await request.json();
+          const body = await request.json().catch(() => null);
+          if (!body || typeof body !== "object" || Array.isArray(body))
+            return new Response(null, { status: 400 });
           const { startLink } = await import("@/lib/whatsapp-state.server");
           return Response.json(
             { url: await startLink(data.user.id, body?.country) },
