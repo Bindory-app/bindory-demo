@@ -12,6 +12,9 @@ import type { MoriErrorCode, MoriStreamEvent } from "./mori-tools";
 
 /** Heartbeat interval (ms) — 3x shorter than the client's 30 s idle timeout. */
 export const HEARTBEAT_INTERVAL_MS = 10_000;
+/** Whole-turn budget (ms): below the 60 s function limit set for /api/mori-chat in vite.config.ts,
+ *  so a slow turn ends with a clear error instead of being cut off by the platform. */
+export const TURN_DEADLINE_MS = 55_000;
 
 export function toCollectorError(
   error: unknown,
@@ -45,12 +48,14 @@ export function toCollectorError(
 export function createMoriChatStream(options: {
   requestSignal?: AbortSignal;
   heartbeatMs?: number;
+  deadlineMs?: number;
   timing?: TurnTimer;
   run: (ctx: { emit: (event: MoriStreamEvent) => void; signal: AbortSignal }) => Promise<unknown>;
 }): { stream: ReadableStream<Uint8Array>; task: Promise<void> } {
   const encoder = new TextEncoder();
   const abort = new AbortController();
   const heartbeatMs = options.heartbeatMs ?? HEARTBEAT_INTERVAL_MS;
+  const deadlineMs = options.deadlineMs ?? TURN_DEADLINE_MS;
 
   let resolveTask!: () => void;
   const task = new Promise<void>((resolve) => {
@@ -60,12 +65,18 @@ export function createMoriChatStream(options: {
   let closed = false;
   let terminated = false;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
+  let deadline: ReturnType<typeof setTimeout> | null = null;
   let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
 
+  // Stops both timers: the heartbeat and the whole-turn deadline end with the turn.
   const stopHeartbeat = () => {
     if (heartbeat !== null) {
       clearInterval(heartbeat);
       heartbeat = null;
+    }
+    if (deadline !== null) {
+      clearTimeout(deadline);
+      deadline = null;
     }
   };
 
@@ -117,6 +128,16 @@ export function createMoriChatStream(options: {
         heartbeat = setInterval(() => {
           emit({ type: "ping" });
         }, heartbeatMs);
+      }
+
+      if (deadlineMs > 0) {
+        deadline = setTimeout(() => {
+          if (terminated) return;
+          const safe = toCollectorError(Object.assign(new Error("turn"), { name: "TimeoutError" }));
+          emit({ type: "error", code: safe.code, text: safe.text });
+          options.timing?.flush("error", safe.code);
+          abort.abort();
+        }, deadlineMs);
       }
 
       Promise.resolve()

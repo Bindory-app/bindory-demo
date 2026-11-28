@@ -145,6 +145,32 @@ describe("mori-chat NDJSON stream contract", () => {
     }
   });
 
+  it("ends a turn that outlives its budget with one timeout error and aborts its work", async () => {
+    const lines: string[] = [];
+    const timing = createTurnTimer(undefined, (line) => lines.push(line));
+    let turnSignal: AbortSignal | undefined;
+    const { stream, task } = createMoriChatStream({
+      heartbeatMs: 0,
+      deadlineMs: 55_000,
+      timing,
+      run: ({ signal }) => {
+        turnSignal = signal;
+        return new Promise((_, reject) =>
+          signal.addEventListener("abort", () => reject(new Error("stopped"))),
+        );
+      },
+    });
+    const read = readNdjson(stream);
+    await vi.advanceTimersByTimeAsync(55_000);
+    await task;
+    expect(await read).toEqual([
+      { type: "error", code: "timeout", text: "That took too long to finish. Please try again." },
+    ]);
+    expect(turnSignal?.aborted).toBe(true);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]!)).toMatchObject({ outcome: "error", error_code: "timeout" });
+  });
+
   it("emits exactly one error event if run completes without emitting done", async () => {
     const { stream, task } = createMoriChatStream({
       heartbeatMs: 10_000,
