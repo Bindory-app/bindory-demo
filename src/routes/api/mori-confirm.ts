@@ -28,12 +28,13 @@ export const Route = createFileRoute("/api/mori-confirm")({
           body && typeof body === "object" && "action" in body ? String(body.action) : "";
         if (!/^[0-9a-f-]{36}$/i.test(messageId) || (action !== "confirm" && action !== "edit"))
           return new Response("Invalid confirmation", { status: 400 });
+        const { confirmWith, OrderEditError } = await import("@/lib/mori-confirm.server");
         try {
-          const { confirmWith } = await import("@/lib/mori-confirm.server");
           const changes =
             body && typeof body === "object" && "changes" in body ? body.changes : undefined;
           return Response.json(await confirmWith(db, messageId, action, changes));
         } catch (e) {
+          if (e instanceof OrderEditError) return new Response(e.message, { status: 409 });
           console.error("Mori confirm failed", e instanceof Error ? e.message : JSON.stringify(e));
           return new Response("Could not confirm", { status: 500 });
         }
