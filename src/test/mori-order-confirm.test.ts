@@ -92,14 +92,21 @@ describe("pending order contracts", () => {
     const base = readFileSync("setup/015_order_confirmation.sql", "utf8");
     const sql = readFileSync("setup/016_pending_orders.sql", "utf8");
     expect(Buffer.byteLength(sql, "utf8")).toBe(sql.length);
-    expect(sql).toContain(
-      base.slice(
-        base.indexOf("CREATE OR REPLACE FUNCTION"),
-        base.indexOf("  INSERT INTO public.market_orders"),
-      ),
-    );
-    expect(sql).toContain("o_price,p->>'note','pending'");
-    expect(sql).toContain("jsonb_build_object('order_status','pending')");
+    // The entire 015 confirmation and grants carry forward except these checkout changes.
+    const expectedConfirm = base
+      .slice(base.indexOf("CREATE OR REPLACE FUNCTION"))
+      .trimEnd()
+      .replace("price_usd,note,expires_at", "price_usd,note,status,expires_at")
+      .replace("o_price,p->>'note',now()", "o_price,p->>'note','pending',now()")
+      .replace(
+        "' is live for ' || o_days || ' days. I will tell you as soon as a matching listing appears.'",
+        "' is saved. Add a payment method to make it live for ' || o_days || ' days.'",
+      )
+      .replace(
+        "'reply',to_jsonb(reply_row));",
+        "'reply',to_jsonb(reply_row)) ||\n  CASE WHEN p->>'tool'='set_order' THEN jsonb_build_object('order_status','pending') ELSE '{}'::jsonb END;",
+      );
+    expect(sql).toContain(expectedConfirm);
     expect(sql).toContain("BEGIN;");
     expect(sql.trimEnd()).toMatch(/COMMIT;$/);
     const connect = sql.slice(
