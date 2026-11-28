@@ -99,6 +99,11 @@ describe("WhatsApp transport", () => {
         type: "interactive",
         interactive: { type: t, [t]: { id: "choice" } },
       })),
+      {
+        ...base,
+        type: "interactive",
+        interactive: { type: "button_reply", button_reply: { id: "" } },
+      },
       { ...base, type: "audio" },
       null,
     ];
@@ -107,6 +112,19 @@ describe("WhatsApp transport", () => {
     expect(m[0]).toMatchObject({ phone: null, bsuid: "US.123", text: "Hello" });
     expect(m[1]).toMatchObject({ phone: "15555550101", bsuid: "US.123", media: "123" });
     expect(inboundMessages(envelope(messages, "messages", "999"), "123")).toEqual([]);
+  });
+  it("enforces the web data URL limit even when a CDN omits the content length", async () => {
+    const url = "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=mock";
+    const max = 3 * Math.floor((2_000_000 - "data:image/jpeg;base64,".length) / 4);
+    const f = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", f);
+    for (const size of [max, max + 1]) {
+      f.mockResolvedValueOnce(
+        Response.json({ id: "99", url, mime_type: "image/jpeg" }),
+      ).mockResolvedValueOnce(new Response(new Uint8Array(size)));
+      if (size === max) expect((await downloadPhoto("99")).length).toBeLessThanOrEqual(2_000_000);
+      else await expect(downloadPhoto("99")).rejects.toThrow("Body too large");
+    }
   });
   it("posts to the versioned messages endpoint with +phone or recipient-only BSUID", async () => {
     const f = vi
@@ -156,8 +174,37 @@ describe("WhatsApp transport", () => {
     f.mockResolvedValueOnce(
       Response.json({ id: "99", url: u, mime_type: "image/jpeg", file_size: 5_000_001 }),
     );
-    await expect(downloadPhoto("99")).rejects.toThrow("Unsupported");
+    await expect(downloadPhoto("99")).rejects.toThrow("too large");
     expect(f).toHaveBeenCalledTimes(6);
+  });
+  it("logs only the HTTP status and numeric Graph failure code", async () => {
+    const log = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            Response.json(
+              { error: { code: 131056, message: "private upstream text" } },
+              { status: 429 },
+            ),
+          ),
+      );
+      await expect(
+        sendWhatsApp(
+          { phone: null, bsuid: "US.private" },
+          { type: "text", text: { body: "private collector text" } },
+        ),
+      ).rejects.toThrow("not confirmed");
+      expect(log).toHaveBeenCalledWith("WhatsApp send not confirmed", {
+        status: 429,
+        code: 131056,
+      });
+      expect(JSON.stringify(log.mock.calls)).not.toContain("private");
+    } finally {
+      log.mockRestore();
+    }
   });
   it("purpose-separates token signatures and refuses expired, malformed or altered values", () => {
     vi.setSystemTime(now);

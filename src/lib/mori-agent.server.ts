@@ -172,7 +172,11 @@ export async function runMori({
 
   // Structured flows make at most one forced call each; it is timed like a loop turn (turn 0).
   const callTool: IntentTools["callTool"] = async (tool, instructions, callInput, options) => {
-    if (selectionOnly) throw new Error("No model for a stored selection");
+    if (
+      selectionOnly &&
+      !(intent?.kind === "order" && intent.side === "sell" && tool.name === "read_order_condition")
+    )
+      throw new Error("No model for a stored selection");
     const started = Date.now();
     let model = "";
     const record = (ok: boolean, code?: string) =>

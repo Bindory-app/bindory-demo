@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { asObject } from "./mori-context.server";
 import { upstreamFetchJson as upstreamJson } from "./upstream-fetch";
 import type { WhatsAppMessage } from "./whatsapp-render";
+import { CARD_PHOTO_DATA_URL_LIMIT } from "./mori-validation";
 
 export type Address = { phone: string | null; bsuid: string | null };
 export type Inbound = Address & { id: string; at: string } & (
@@ -18,6 +19,7 @@ export function signedWebhook(bytes: Uint8Array, signature: string | null) {
     Buffer.from(signature!.slice(7), "hex"),
   );
 }
+export class BodyTooLarge extends Error {}
 export async function boundedBytes(body: ReadableStream<Uint8Array> | null, max: number) {
   if (!body) throw new Error("Missing body");
   const reader = body.getReader(),
@@ -30,7 +32,7 @@ export async function boundedBytes(body: ReadableStream<Uint8Array> | null, max:
       size += value.length;
       if (size > max) {
         await reader.cancel();
-        throw new Error("Body too large");
+        throw new BodyTooLarge("Body too large");
       }
       chunks.push(value);
     }
@@ -91,7 +93,7 @@ export function inboundMessages(body: unknown, numberId: string): Inbound[] {
           ["button_reply", "list_reply"].includes(m.interactive?.type)
         ) {
           const a = m.interactive[m.interactive.type]?.id;
-          if (typeof a === "string" && a.length <= 256)
+          if (typeof a === "string" && a.length > 0 && a.length <= 256)
             out.push({ ...meta, kind: "action", action: a });
         }
       }
@@ -107,7 +109,7 @@ function graphAuth() {
 export async function sendWhatsApp(addr: Address, message: WhatsAppMessage) {
   const { number, headers } = graphAuth();
   if (!addr.phone && !addr.bsuid) throw new Error("Missing recipient");
-  const r = await upstreamJson<{ messages?: { id: string }[] }>(graph + number + "/messages", {
+  const r = await fetch(graph + number + "/messages", {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
     redirect: "error",
@@ -117,10 +119,22 @@ export async function sendWhatsApp(addr: Address, message: WhatsAppMessage) {
       ...(addr.phone ? { to: "+" + addr.phone } : { recipient: addr.bsuid }),
       ...message,
     }),
-    maxAttempts: 1,
-    timeoutMs: 8000,
+    signal: AbortSignal.timeout(8000),
   });
-  if (!r.ok || !r.data?.messages?.[0]?.id) throw new Error("WhatsApp send was not confirmed");
+  let data;
+  try {
+    data = JSON.parse((await boundedBytes(r.body, 32768)).toString("utf8"));
+  } catch {
+    /* An unreadable acknowledgement is never a reason to repeat a send. */
+  }
+  if (!r.ok || !data?.messages?.[0]?.id) {
+    const code = data?.error?.code;
+    console.warn("WhatsApp send not confirmed", {
+      status: r.status,
+      ...(Number.isSafeInteger(code) ? { code } : {}),
+    });
+    throw new Error("WhatsApp send was not confirmed");
+  }
 }
 export async function downloadPhoto(id: string) {
   if (!/^\d{1,40}$/.test(id)) throw new Error("Invalid media id");
@@ -131,15 +145,16 @@ export async function downloadPhoto(id: string) {
     mime_type: string;
     file_size?: number | string;
   }>(graph + id + "?phone_number_id=" + number, { headers, redirect: "error", maxAttempts: 2 });
-  const info = meta.data,
-    max = 5_000_000;
+  const info = meta.data;
   if (
     !meta.ok ||
     info?.id !== id ||
-    !["image/jpeg", "image/png", "image/webp"].includes(info.mime_type) ||
-    Number(info.file_size) > max
+    !["image/jpeg", "image/png", "image/webp"].includes(info.mime_type)
   )
     throw new Error("Unsupported photo");
+  const prefix = "data:" + info.mime_type + ";base64,";
+  const max = 3 * Math.floor((CARD_PHOTO_DATA_URL_LIMIT - prefix.length) / 4);
+  if (Number(info.file_size) > max) throw new BodyTooLarge("Photo too large");
   // No documented exhaustive CDN allowlist. Fail closed on unknown hosts or redirects.
   const u = new URL(info.url);
   if (
@@ -151,8 +166,9 @@ export async function downloadPhoto(id: string) {
   )
     throw new Error("Untrusted media URL");
   const r = await fetch(u, { headers, redirect: "error", signal: AbortSignal.timeout(10000) });
-  if (!r.ok || Number(r.headers.get("content-length")) > max) throw new Error("Photo unavailable");
+  if (!r.ok) throw new Error("Photo unavailable");
+  if (Number(r.headers.get("content-length")) > max) throw new BodyTooLarge("Photo too large");
   const bytes = await boundedBytes(r.body, max);
   if (!bytes.length) throw new Error("Empty photo");
-  return "data:" + info.mime_type + ";base64," + bytes.toString("base64");
+  return prefix + bytes.toString("base64");
 }
