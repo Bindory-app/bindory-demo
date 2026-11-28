@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 describe("AI Gateway streaming timeouts and retries", () => {
-  it("retries 429, 5xx, and network errors before first byte without duplicating text or tool calls", async () => {
+  it("recovers from 429 (next model), 5xx and network errors before first byte without duplicating output", async () => {
     const cases: Array<() => Promise<Response>> = [
       async () => new Response("rate limit", { status: 429 }),
       async () => new Response("bad gateway", { status: 502 }),
@@ -58,7 +58,7 @@ describe("AI Gateway streaming timeouts and retries", () => {
       vi.stubGlobal("fetch", fetchMock);
 
       const streamPromise = streamResponse(
-        { model: "google/gemini-2.5-flash", input: [{ role: "user", content: "hi" }] },
+        { input: [{ role: "user", content: "hi" }] },
         { oidcToken: "test-token", headersTimeoutMs: 2_000, idleTimeoutMs: 2_000, maxAttempts: 2 },
       );
       await vi.advanceTimersByTimeAsync(1_000);
@@ -92,7 +92,7 @@ describe("AI Gateway streaming timeouts and retries", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const stream = await streamResponse(
-      { model: "google/gemini-2.5-flash", input: [{ role: "user", content: "hi" }] },
+      { input: [{ role: "user", content: "hi" }] },
       { oidcToken: "test-token", maxAttempts: 2 },
     );
 
@@ -126,7 +126,7 @@ describe("AI Gateway streaming timeouts and retries", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const p = streamResponse(
-      { model: "google/gemini-2.5-flash", input: [{ role: "user", content: "hi" }] },
+      { input: [{ role: "user", content: "hi" }] },
       { oidcToken: "test-token", headersTimeoutMs: 1_500, maxAttempts: 2 },
     );
     const handled = p.catch((e: unknown) => e);
@@ -158,7 +158,7 @@ describe("AI Gateway streaming timeouts and retries", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const stream = await streamResponse(
-      { model: "google/gemini-2.5-flash", input: [{ role: "user", content: "hi" }] },
+      { input: [{ role: "user", content: "hi" }] },
       { oidcToken: "test-token", idleTimeoutMs: 1_000, maxAttempts: 2 },
     );
 
@@ -195,7 +195,7 @@ describe("AI Gateway streaming timeouts and retries", () => {
     vi.stubGlobal("fetch", fetchMock1);
 
     const p1 = streamResponse(
-      { model: "google/gemini-2.5-flash", input: [{ role: "user", content: "hi" }] },
+      { input: [{ role: "user", content: "hi" }] },
       { oidcToken: "test-token", signal: caller1.signal, headersTimeoutMs: 10_000, maxAttempts: 2 },
     );
     const h1 = p1.catch((e: unknown) => e);
@@ -220,7 +220,7 @@ describe("AI Gateway streaming timeouts and retries", () => {
     vi.stubGlobal("fetch", fetchMock2);
 
     const stream = await streamResponse(
-      { model: "google/gemini-2.5-flash", input: [{ role: "user", content: "hi" }] },
+      { input: [{ role: "user", content: "hi" }] },
       { oidcToken: "test-token", signal: caller2.signal, idleTimeoutMs: 10_000 },
     );
 

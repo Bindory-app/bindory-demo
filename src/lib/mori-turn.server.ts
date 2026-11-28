@@ -9,10 +9,16 @@ import type { MoriStreamEvent } from "./mori-tools";
 export const HISTORY_LIMIT = 60;
 
 /** The conversation so far: up to the most recent `HISTORY_LIMIT` rows since `since` (when the
- *  collector opened Ask Mori or tapped New chat), returned in chronological order. */
-export async function history(db: DB, since?: string): Promise<ResponsesInputItem[]> {
+ *  collector opened Ask Mori or tapped New chat) and before `before` (this turn's own question),
+ *  returned in chronological order. */
+export async function history(
+  db: DB,
+  since?: string,
+  before?: string,
+): Promise<ResponsesInputItem[]> {
   let q = db.from("mori_messages").select("role, kind, content, payload");
   if (since) q = q.gt("created_at", since);
+  if (before) q = q.lt("created_at", before);
   const page = await q
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
@@ -28,7 +34,9 @@ export async function history(db: DB, since?: string): Promise<ResponsesInputIte
           ? `[Tool result: ${JSON.stringify(m.payload)}]`
           : m.kind === "confirm"
             ? `[Confirmation: ${JSON.stringify(m.payload)}]`
-            : m.content;
+            : m.kind === "choices"
+              ? `[Choices: ${JSON.stringify(m.payload)}]`
+              : m.content;
       return { role: "assistant", content: [{ type: "output_text", text, annotations: [] }] };
     });
 }
@@ -96,6 +104,7 @@ export async function finishMoriTurn(
   suggestions = [...new Set(suggestions)].slice(0, 3);
   // A confirmation card is the next step itself; follow-ups come after Confirm instead.
   if (rows.some((r) => r.kind === "confirm" || r.kind === "photos")) suggestions = choices = [];
+  if (rows.some((r) => r.kind === "choices")) suggestions = choices = [];
   // A question with answers to tap replaces the general next steps.
   if (choices.length >= 2) suggestions = [];
   else choices = [];
@@ -113,7 +122,8 @@ export async function finishMoriTurn(
         r.kind === "people" ||
         r.kind === "price" ||
         r.kind === "tickets" ||
-        r.kind === "photos",
+        r.kind === "photos" ||
+        r.kind === "choices",
     );
     // One bubble per part: a reply that answers several things separates them with a "---" line.
     const replies = replyParts(finalText).map((content) => ({

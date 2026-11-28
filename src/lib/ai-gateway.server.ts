@@ -11,12 +11,25 @@
 import { upstreamFetch } from "./upstream-fetch";
 
 const GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/responses";
-/** Maximum wait for AI Gateway response headers (ms); retried only on 429/5xx/network before bytes flow. */
+/** Maximum wait for AI Gateway response headers (ms); retried only on 5xx/network before bytes flow. */
 export const GATEWAY_HEADERS_TIMEOUT_MS = 15_000;
 /** Maximum silence between SSE chunks once streaming begins (ms); never retried after output starts. */
 export const GATEWAY_IDLE_TIMEOUT_MS = 20_000;
 const GATEWAY_MAX_ATTEMPTS = 2;
 const GATEWAY_ERROR_BODY_TIMEOUT_MS = 3_000;
+const MODEL = process.env["AI_GATEWAY_MODEL"] || "google/gemini-2.5-flash";
+const MODELS = [
+  ...new Set([MODEL, "openai/gpt-4.1-mini", "google/gemini-2.5-flash-lite", "openai/gpt-5-mini"]),
+];
+type GatewayOptions = {
+  signal?: AbortSignal | undefined;
+  oidcToken?: string | null | undefined;
+  headersTimeoutMs?: number;
+  idleTimeoutMs?: number;
+  maxAttempts?: number;
+  /** Told which model each attempt uses (the next one is tried when a model is rate limited). */
+  onModel?: (model: string) => void;
+};
 
 type ResponsesFunctionTool = {
   type: "function";
@@ -232,15 +245,9 @@ async function* readSse(
 }
 
 /** POST a streaming Responses request to AI Gateway and iterate its SSE events. */
-export async function streamResponse(
+async function streamModelResponse(
   payload: ResponsesRequest,
-  options: {
-    signal?: AbortSignal;
-    oidcToken?: string | null;
-    headersTimeoutMs?: number;
-    idleTimeoutMs?: number;
-    maxAttempts?: number;
-  } = {},
+  options: GatewayOptions,
 ): Promise<AsyncIterable<ResponsesStreamEvent>> {
   const sources: [string, string | null | undefined][] = [
     ["request OIDC token", options.oidcToken],
@@ -255,7 +262,8 @@ export async function streamResponse(
   const maxAttempts = options.maxAttempts ?? GATEWAY_MAX_ATTEMPTS;
   let res: Response;
   try {
-    // Retries happen strictly before any stream byte is consumed (429 / 5xx / network errors).
+    // Retries happen strictly before any stream byte is consumed (5xx / network errors). A rate
+    // limit is not retried here: streamResponse moves on to the next model instead.
     // Header timeouts are not retried so a hung upstream never doubles latency inside the 60 s turn.
     res = await upstreamFetch(GATEWAY_URL, {
       method: "POST",
@@ -265,6 +273,7 @@ export async function streamResponse(
       maxAttempts,
       baseDelayMs: 400,
       maxDelayMs: 2_000,
+      retryStatuses: [500, 502, 503, 504],
       retryOnTimeout: false,
       retryOnNetworkError: true,
       ...(options.signal ? { signal: options.signal } : {}),
@@ -301,4 +310,49 @@ export async function streamResponse(
   return {
     [Symbol.asyncIterator]: () => readSse(body, requestId, idleTimeoutMs, options.signal),
   };
+}
+
+/** Chat and single-purpose calls share the same model selection and rate-limit fallback. */
+export async function streamResponse(
+  payload: Omit<ResponsesRequest, "model">,
+  options: GatewayOptions = {},
+) {
+  for (const model of MODELS) {
+    options.onModel?.(model);
+    try {
+      return await streamModelResponse({ ...payload, model }, options);
+    } catch (error) {
+      if (
+        !(error instanceof GatewayError && error.code === "rate_limited") ||
+        model === MODELS.at(-1)
+      )
+        throw error;
+    }
+  }
+  throw new Error("No gateway model configured");
+}
+
+/** One inference turn with one allowed function and no tool execution. Callers validate the
+ *  returned arguments for their job; missing, ambiguous or malformed calls yield null. */
+export async function callToolOnce(
+  tool: ResponsesFunctionTool,
+  instructions: string,
+  input: ResponsesInputItem[],
+  options: GatewayOptions = {},
+): Promise<unknown> {
+  const stream = await streamResponse(
+    { instructions, input, tools: [tool], tool_choice: "required", max_output_tokens: 500 },
+    options,
+  );
+  for await (const event of stream) {
+    if (event.type !== "response.completed") continue;
+    const calls = event.response?.output?.filter((item) => item.type === "function_call");
+    if (calls?.length !== 1 || calls[0]?.name !== tool.name) return null;
+    try {
+      return JSON.parse(calls[0].arguments ?? "");
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }

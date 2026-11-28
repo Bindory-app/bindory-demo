@@ -8,7 +8,7 @@
 <!-- harnessrouter:start -->
 ## Mori chat and Collectr sync
 
-- `/api/mori-chat` runs one in-process Responses tool loop (`runMori`, `ai-gateway.server.ts`). The app sends country and optional phone location; prior messages, tool results and confirmation statuses provide the chat history. `AI_GATEWAY_MODEL` selects the model.
+- `/api/mori-chat` accepts readable `message` text plus an optional validated `intent`. Named `price_check` forms use the catalogue and price tools without a model; ambiguous printings are choices carrying catalogue IDs. A price photo without a named card uses one forced identification call first. Free text and unsuccessful lookups use the Responses tool loop (`runMori`, `ai-gateway.server.ts`). Both paths save tool results to the same chat history. `AI_GATEWAY_MODEL` selects the model.
 - A single-card price check displays the server's market card. Sell proposals require the collector's private front and back photos; until a pair is available, the tool shows a photo request, not a confirmation.
 - Only **Sync from Collectr** uses HarnessRouter. The `collectr` setup in `harnessrouter.json` reads the public collection; `collectr-sync.server.ts` stores a signed task and `/api/mori-sync` polls it. Bindory, not the harness, applies the collector's approved import. Use `Collectr sync: <instruction>` to continue the latest finished sync in this chat.
 - `HR_API_KEY` and `MORI_MCP_SECRET` (the task signing secret) are server-only and needed only for sync. See `.env.example` for placeholder configuration.
@@ -16,3 +16,4 @@
 
 - Price card: "Listing and Sold · <condition>" shows the lowest worldwide listing, the lowest listing in the collector's country, and the last three sales. Sold prices come from the server, never from the model. The headline prefers recent raw sales and falls back to listings or the market reference when sales are missing.
 - Listings: the server uses eBay Browse for fixed-price raw singles in the requested condition. Local results restrict the seller country; worldwide results may include local sellers. Compare by delivered cost: price + postage + estimated import fees (`importFeeRate` in `src/lib/market.ts`). Missing listing data is shown as a dash, not a zero.
+- Wireframe integration: edit `wireframe/live.html`, then run `python3 scripts/sync-live-layer.py` to update its embedded copy in `wireframe/app.html`. Use `--check` to verify parity without writing either file.

@@ -88,6 +88,7 @@ export const Route = createFileRoute("/api/mori-chat")({
               db,
               userId,
               message,
+              intent: "intent" in body ? body.intent : undefined,
               emit,
               signal,
               oidcToken,
