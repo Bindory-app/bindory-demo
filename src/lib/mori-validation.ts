@@ -50,6 +50,7 @@ const orderIntent = z
     kind: z.literal("order"),
     side,
     card: intentCard,
+    note: text.optional(),
     price: z.object({ amount: orderAmount, currency: orderCurrency }).strict(),
   })
   .strict();

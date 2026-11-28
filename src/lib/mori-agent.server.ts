@@ -142,6 +142,7 @@ export async function runMori({
     timing: timer,
   };
   const runTool = async (name: string, args: Args) => {
+    signal?.throwIfAborted();
     const content = TOOL_STATUS[name] ?? "Working on it";
     emit({ type: "status", name, text: content });
     const status: MoriRowDraft = {
@@ -196,11 +197,13 @@ export async function runMori({
   };
 
   const options: IntentTools = { message, images, market, runTool, emit, signal, callTool };
+  // A grade or memory claims its photos even if its arguments or reading turn out to be invalid.
+  const claimPhotos = (kind: MoriIntent["kind"]) => {
+    if (kind === "pre_grade" || kind === "memory") ctx.hasOrderPhotos = false;
+  };
   const runIntent = async (action: MoriIntent, reading?: Args) => {
     try {
       signal?.throwIfAborted();
-      // Sell storage is never entitled to photos already submitted for a grade or memory.
-      if (action.kind === "pre_grade" || action.kind === "memory") ctx.hasOrderPhotos = false;
       if (action.kind === "order" || action.kind === "pre_grade") ctx.photoIntent = action;
       else delete ctx.photoIntent;
       switch (action.kind) {
@@ -212,7 +215,11 @@ export async function runMori({
           return await runPreGrade(action, options);
         case "memory":
           // Router metadata is a model reading, never a trusted date-picker/form slot.
-          return await runMemory(reading ? { kind: "memory" } : action, options, reading);
+          return await runMemory(
+            intent?.kind === "memory" ? intent : { kind: "memory" },
+            options,
+            reading,
+          );
       }
     } catch (error) {
       // A gateway failure would fail the chat loop too, only later; report it now.
@@ -229,6 +236,7 @@ export async function runMori({
     return done;
   };
   if (intent) {
+    claimPhotos(intent.kind);
     const answer = await runIntent(intent);
     if (answer) return finishAnswer(answer);
   }
@@ -356,6 +364,7 @@ export async function runMori({
         });
         const kind = flowKinds.get(name);
         if (kind) {
+          claimPhotos(kind);
           const previous = failedFlows.get(name);
           if (previous) return await finishAnswer({ text: previous });
           const { title, ...slots } = args;

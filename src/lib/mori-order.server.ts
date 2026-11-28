@@ -1,4 +1,3 @@
-import { GatewayError } from "./ai-gateway.server";
 import { asObject } from "./mori-context.server";
 import { resolveIntentCard, type IntentAnswer, type IntentTools } from "./mori-intent-card.server";
 import { conditionParameters } from "./mori-prompt.server";
@@ -27,7 +26,7 @@ async function readCondition({ images, emit, signal, callTool }: IntentTools) {
     const result = orderCondition.safeParse(raw);
     return result.success ? result.data : undefined;
   } catch (error) {
-    if (signal?.aborted || error instanceof GatewayError) throw error;
+    if (signal?.aborted) throw error;
     return undefined;
   }
 }
@@ -61,6 +60,7 @@ export async function runOrder(
     card_id: id,
     price: intent.price.amount,
     currency: intent.price.currency,
+    ...(intent.note ? { note: intent.note } : {}),
     ...(condition ? { condition } : {}),
   });
   if (proposal.rows.some((r) => r.kind === "photos"))
