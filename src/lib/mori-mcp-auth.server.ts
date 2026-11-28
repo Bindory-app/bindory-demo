@@ -12,35 +12,19 @@
  *   through the agent's tool output; the signature proves they came from this endpoint and for
  *   this collector before Mori's server saves them.
  */
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHmac,
-  hkdfSync,
-  randomBytes,
-  timingSafeEqual,
-} from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
+import { deriveMoriKey, moriSecret, sameText } from "./mori-signing.server";
 
 const SEAL_TTL_SECONDS = 600;
 const ROWS_MARKER = "MORI_ROWS ";
 
-function secret(): string {
-  const s = process.env["MORI_MCP_SECRET"]?.trim();
-  if (!s || s.length < 32) throw new Error("MORI_MCP_SECRET is not configured");
-  return s;
-}
-const derive = (info: string) => Buffer.from(hkdfSync("sha256", secret(), "", info, 32));
 const b64 = (b: Buffer) => b.toString("base64url");
-
-function sameText(a: string, b: string): boolean {
-  const x = Buffer.from(a);
-  const y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
-}
 
 /** The bearer HarnessRouter sends; computed the same way it was stored (HMAC of a fixed label). */
 export function mcpBearer(): string {
-  return createHmac("sha256", secret()).update("mori-mcp:harnessrouter-bearer").digest("base64url");
+  return createHmac("sha256", moriSecret())
+    .update("mori-mcp:harnessrouter-bearer")
+    .digest("base64url");
 }
 export function isHarnessBearer(authorization: string | null): boolean {
   const m = /^Bearer\s+(\S+)$/i.exec(authorization ?? "");
@@ -60,7 +44,7 @@ function jwtExpiry(jwt: string): number | undefined {
   }
 }
 
-export type CollectorSession = { userId: string; accessToken: string };
+type CollectorSession = { userId: string; accessToken: string };
 
 /** Seals the collector's session for one task; expires with the session or after 10 minutes. */
 export function sealCollector(s: CollectorSession, now = Date.now()): string {
@@ -69,7 +53,7 @@ export function sealCollector(s: CollectorSession, now = Date.now()): string {
     jwtExpiry(s.accessToken) ?? Infinity,
   );
   const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", derive("mori-mcp:seal"), iv);
+  const cipher = createCipheriv("aes-256-gcm", deriveMoriKey("mori-mcp:seal"), iv);
   const body = Buffer.concat([
     cipher.update(JSON.stringify({ u: s.userId, t: s.accessToken, e: exp }), "utf8"),
     cipher.final(),
@@ -83,7 +67,11 @@ export function openCollector(token: string | null, now = Date.now()): Collector
   try {
     const raw = Buffer.from(token, "base64url");
     if (raw.length < 12 + 16 + 1) return null;
-    const decipher = createDecipheriv("aes-256-gcm", derive("mori-mcp:seal"), raw.subarray(0, 12));
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      deriveMoriKey("mori-mcp:seal"),
+      raw.subarray(0, 12),
+    );
     decipher.setAuthTag(raw.subarray(raw.length - 16));
     const text = Buffer.concat([
       decipher.update(raw.subarray(12, raw.length - 16)),
@@ -101,14 +89,14 @@ export function openCollector(token: string | null, now = Date.now()): Collector
 /** One line a tool result ends with, carrying the chat cards it produced, signed for this collector. */
 export function signRows(userId: string, rows: unknown[]): string {
   const body = b64(Buffer.from(JSON.stringify({ u: userId, r: rows }), "utf8"));
-  const sig = createHmac("sha256", derive("mori-mcp:rows")).update(body).digest("base64url");
+  const sig = createHmac("sha256", deriveMoriKey("mori-mcp:rows")).update(body).digest("base64url");
   return `${ROWS_MARKER}${body}.${sig}`;
 }
 
 /** Every genuine row block for this collector found in a tool output; anything else is ignored. */
 export function readSignedRows(output: string, userId: string): unknown[] {
   const rows: unknown[] = [];
-  const key = derive("mori-mcp:rows");
+  const key = deriveMoriKey("mori-mcp:rows");
   for (const m of output.matchAll(/MORI_ROWS ([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})/g)) {
     const [, body, sig] = m;
     if (!body || !sig) continue;
@@ -129,14 +117,3 @@ export function readSignedRows(output: string, userId: string): unknown[] {
 /** Removes row blocks from text, in case the agent repeats one. */
 export const stripRowBlocks = (text: string) =>
   text.replace(/MORI_ROWS [A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}/g, "").trim();
-
-/** Ties a background task (response and session) to one collector, so a stored task can only be
- *  read by the collector who started it, even if the stored row were edited. */
-export function signTask(userId: string, responseId: string, sessionId: string): string {
-  return createHmac("sha256", derive("mori:task"))
-    .update(`${userId}\n${responseId}\n${sessionId}`)
-    .digest("base64url");
-}
-export function isOwnTask(userId: string, responseId: string, sessionId: string, sig: unknown) {
-  return typeof sig === "string" && sameText(sig, signTask(userId, responseId, sessionId));
-}

@@ -94,16 +94,3 @@ export function importFeeRate(m: Market, origin: unknown): number {
   if (EU_MARKETS.has(m.country) && EU.has(o.split(",").pop()!.trim())) return 0;
   return IMPORT_RATE[m.country] ?? 0.1;
 }
-
-/** Money in the collector's currency, e.g. A$1,234 or A$12.50. */
-export function money(amount: number, m: Market): string {
-  const v = Math.round(amount * 100) / 100;
-  const cents = v < 100 && v % 1 !== 0;
-  return (
-    m.symbol +
-    v.toLocaleString("en-US", {
-      minimumFractionDigits: cents ? 2 : 0,
-      maximumFractionDigits: cents ? 2 : 0,
-    })
-  );
-}

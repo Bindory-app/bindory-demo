@@ -8,7 +8,7 @@
 const API = "https://silphcoanalytics.xyz/api/v3";
 const TTL_MS = 6 * 60 * 60 * 1000;
 
-export type SoldPoint = {
+type SoldPoint = {
   value_usd: number | null;
   /** SilphCo status: ok, thin (few sales), stale, suspect or none. */
   status: string;
@@ -17,7 +17,7 @@ export type SoldPoint = {
   /** Only when a single sale exists: that sale's price, never a market price. */
   last_sale_usd?: number | undefined;
 };
-export type EbaySold = {
+type EbaySold = {
   raw: SoldPoint;
   psa9: SoldPoint;
   psa10: SoldPoint;

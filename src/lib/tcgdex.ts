@@ -15,8 +15,8 @@ async function tcgFetch(url: string, init?: RequestInit): Promise<Response> {
   }
 }
 
-export type CardBrief = { id: string; localId: string; name: string; image?: string | undefined };
-export type CardDetail = CardBrief & {
+type CardBrief = { id: string; localId: string; name: string; image?: string | undefined };
+type CardDetail = CardBrief & {
   rarity?: string | undefined;
   hp?: number | undefined;
   types?: string[] | undefined;
@@ -93,7 +93,7 @@ export async function getCard(id: string): Promise<CardDetail | null> {
   return (await res.json()) as CardDetail;
 }
 
-export type CardPricing = {
+type CardPricing = {
   tcgplayer?: ({ unit?: string; updated?: string } & Record<string, unknown>) | undefined;
   cardmarket?: ({ unit?: string; updated?: string } & Record<string, unknown>) | undefined;
 };
@@ -172,7 +172,7 @@ export async function getSetCards(
   return { id: d.id, name: d.name, cards: d.cards ?? [] };
 }
 
-export type SetDetail = { id: string; name: string; releaseDate?: string | undefined };
+type SetDetail = { id: string; name: string; releaseDate?: string | undefined };
 
 export async function getSet(id: string): Promise<SetDetail | null> {
   const res = await tcgFetch(`${BASE}/sets/${encodeURIComponent(id)}`);

@@ -1,33 +1,14 @@
 import { defineConfig, loadEnv, type PluginOption } from "vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
-import tsConfigPaths from "vite-tsconfig-paths";
 import { nitro } from "nitro/vite";
 
 // Notes:
 // - Never set ssr.external or resolve.external: the server bundle has no runtime module
 //   resolution, so the build fails.
 // - Don't add compression plugins: Vercel already compresses at the edge.
-export default defineConfig(async ({ command, mode }) => {
-  const plugins: PluginOption[] = [];
-
-  if (mode === "development") {
-    const { devtools } = await import("@tanstack/devtools-vite");
-    plugins.push(
-      devtools({
-        logging: false,
-        eventBusConfig: { enabled: false },
-        enhancedLogs: { enabled: false },
-        consolePiping: { enabled: false },
-        removeDevtoolsOnBuild: false,
-      }),
-    );
-  }
-
-  plugins.push(
-    tailwindcss(),
-    tsConfigPaths({ projects: ["./tsconfig.json"] }),
+export default defineConfig(({ command, mode }) => {
+  const plugins: PluginOption[] = [
     tanstackStart({
       // Server-only code must never be bundled into the browser.
       importProtection: {
@@ -37,7 +18,7 @@ export default defineConfig(async ({ command, mode }) => {
       // Use src/server.ts (our SSR error wrapper) as the server entry.
       server: { entry: "server" },
     }),
-  );
+  ];
 
   // Build for Vercel.
   if (command === "build") plugins.push(nitro({ preset: "vercel" }));
@@ -52,20 +33,19 @@ export default defineConfig(async ({ command, mode }) => {
 
   return {
     define,
-    css: { transformer: "lightningcss" as const },
     resolve: {
+      tsconfigPaths: true,
       alias: { "@": `${process.cwd()}/src` },
-      dedupe: [
-        "react",
-        "react-dom",
-        "react/jsx-runtime",
-        "react/jsx-dev-runtime",
-        "@tanstack/react-query",
-        "@tanstack/query-core",
-      ],
+      dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
     },
     optimizeDeps: {
-      include: ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime"],
+      include: [
+        "react",
+        "react-dom",
+        "react-dom/client",
+        "react/jsx-runtime",
+        "react/jsx-dev-runtime",
+      ],
     },
     server: { host: "::", port: 8080 },
     plugins,

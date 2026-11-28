@@ -65,6 +65,7 @@ export function ownPhotoPath(path: string | undefined, userId: string) {
     (path.startsWith(`${userId}/`) &&
       path.length > userId.length + 1 &&
       !path.includes("..") &&
+      // eslint-disable-next-line no-control-regex -- rejecting control characters is the point
       !/[\\\u0000-\u001f]/.test(path))
   );
 }

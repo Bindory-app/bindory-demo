@@ -10,8 +10,8 @@ const MAX_RESULTS = 5;
 const MAX_URLS = 3;
 const MAX_CHARS = 6000;
 
-export type WebResult = { title: string; url: string; summary?: string | undefined };
-export type WebPage = {
+type WebResult = { title: string; url: string; summary?: string | undefined };
+type WebPage = {
   url: string;
   ok: boolean;
   title?: string | undefined;

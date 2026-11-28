@@ -5,7 +5,7 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-export const GATE_COOKIE = "bd_gate";
+const GATE_COOKIE = "bd_gate";
 const MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 const secret = () => process.env["GATE_SECRET"] || "";

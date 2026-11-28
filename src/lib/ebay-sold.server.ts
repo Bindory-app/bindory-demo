@@ -3,14 +3,15 @@
  * in that site's currency, from the Apify actor "eBay Sold Listings Search" (caffein.dev,
  * oTtB3VgfuE9GtxQt2). The Price Check agent runs the actor itself on HarnessRouter and passes the
  * sales to get_card_prices; when no sales are passed, the server runs it (APIFY_TOKEN, never in the
- * browser). Either way it is one search for the 5 newest RAW sales from the last 90 days, from sellers in the collector's own country: eBay's
- * trading-card singles category (183454), condition "Ungraded" (4000), and words like custom,
- * proxy and PSA excluded. The server's lookup is cached for 6 hours per card and site.
+ * browser). The server asks for the 3 newest raw sales from sellers in the collector's own country
+ * in the last 90 days: eBay's trading-card singles category (183454), condition "Ungraded" (4000),
+ * and words like custom, proxy and PSA excluded. The cache key includes card, site and condition.
  *
  * Sales are sorted by their titles: PSA 10, PSA 9, other graders (ignored) and raw. Lots, proxies,
  * non-English printings and titles without the card number are left out, and so are sales far
  * below the rest (under 35% of the median, e.g. a custom or metal card that slipped through).
- * Result: the average of the newest 3 raw sales and of the newest 5.
+ * The card uses the average of up to 3 recent raw sales. The tool also returns a last-5 average
+ * for compatibility when more sales were supplied.
  *
  * Condition: the collector picks near mint or better, lightly, moderately or heavily played. The
  * search uses eBay's own "Card Condition" filter for ungraded cards, and titles that name a
@@ -22,8 +23,8 @@ const ACTOR = "oTtB3VgfuE9GtxQt2";
 const TTL = 6 * 60 * 60 * 1000;
 const cache = new Map<string, { at: number; value: LocalSold | null }>();
 
-export type SoldStat = {
-  /** Average of the newest 5 sales (fewer when fewer exist); the headline value. */
+type SoldStat = {
+  /** Average of up to 5 supplied sales; the price card uses avg_last_3. */
   value: number | null;
   avg_last_3: number | null;
   avg_last_5: number | null;
@@ -64,7 +65,7 @@ export function titleCondition(title: string): Condition | null {
   return null;
 }
 
-export type LocalSold = {
+type LocalSold = {
   currency: string;
   condition: Condition;
   site: string;
@@ -72,7 +73,7 @@ export type LocalSold = {
   psa9: SoldStat;
   psa10: SoldStat;
 };
-export type Sale = {
+type Sale = {
   title?: string;
   soldPrice?: string | number;
   soldCurrency?: string;
@@ -173,7 +174,7 @@ export function summarise(
 }
 
 /** Words eBay leaves out of the search: graded slabs, customs, proxies and look-alikes. */
-export const EXCLUDE = [
+const EXCLUDE = [
   "custom",
   "proxy",
   "orica",
@@ -188,7 +189,7 @@ export const EXCLUDE = [
   "mystery",
 ];
 
-/** The actor's input for one card: one search for the 5 newest raw (ungraded) sales in one
+/** The actor's input for one card: one search for the 3 newest raw (ungraded) sales in one
  *  condition on the collector's eBay site, in eBay's trading-card singles category. */
 export function actorInput(
   card: { name: string; number: string },
@@ -202,8 +203,7 @@ export function actorInput(
     categoryId: "183454",
     conditionId: 4000,
     count: 3,
-    // Sellers in the collector's own country only (eBay puts them first; any from elsewhere that
-    // fill up the 10 are dropped by summarise). 90 days, since local sales are fewer.
+    // eBay may fill the results with overseas sales; summarise drops those.
     sellerCountry: market.country,
     daysToScrape: 90,
     sortOrder: "endedRecently",

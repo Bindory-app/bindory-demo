@@ -36,10 +36,10 @@ const MARKETPLACE: Record<string, { id: string; zip: string }> = {
   AU: { id: "EBAY_AU", zip: "2000" },
 };
 
-export type BrowseListings = { lowest_worldwide: Listing | null; lowest_local: Listing | null };
+type BrowseListings = { lowest_worldwide: Listing | null; lowest_local: Listing | null };
 
 type Money = { value?: string; currency?: string };
-export type BrowseItem = {
+type BrowseItem = {
   title?: string;
   price?: Money;
   shippingOptions?: { shippingCost?: Money; shippingCostType?: string }[];
@@ -47,7 +47,7 @@ export type BrowseItem = {
   buyingOptions?: string[];
 };
 
-export const hasBrowseKeys = () =>
+const hasBrowseKeys = () =>
   Boolean(process.env["EBAY_CLIENT_ID"]?.trim() && process.env["EBAY_CLIENT_SECRET"]?.trim());
 
 /** An application token (client credentials), reused until shortly before it expires. */

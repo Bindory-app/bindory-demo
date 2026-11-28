@@ -46,7 +46,7 @@ export async function confirmWith(
 }
 
 /** The collector's edits to an order card: buy or sell, a US$ price, and 7, 30 or 90 days. */
-export function orderChanges(c: unknown): Json | undefined {
+function orderChanges(c: unknown): Json | undefined {
   if (!c || typeof c !== "object") return undefined;
   const o = c as Record<string, unknown>;
   const side = o["side"] === "buy" || o["side"] === "sell" ? o["side"] : undefined;

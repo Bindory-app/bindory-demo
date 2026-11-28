@@ -10,7 +10,7 @@
 
 const GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/responses";
 
-export type ResponsesFunctionTool = {
+type ResponsesFunctionTool = {
   type: "function";
   name: string;
   description?: string;
@@ -54,13 +54,13 @@ type OutputItem = {
 export type ResponsesResponse = { id?: string; output?: OutputItem[] };
 
 /** One SSE event. `delta` is set on response.output_text.delta, `response` on response.completed. */
-export type ResponsesStreamEvent = {
+type ResponsesStreamEvent = {
   type: string;
   delta?: string;
   response?: ResponsesResponse;
 };
 
-export type GatewayErrorCode =
+type GatewayErrorCode =
   | "not_configured"
   | "unauthorized"
   | "payment_required"

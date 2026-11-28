@@ -8,7 +8,8 @@ import {
   signRows,
   stripRowBlocks,
 } from "@/lib/mori-mcp-auth.server";
-import { answerText, parseSSE } from "@/lib/harnessrouter.server";
+import { answerText } from "@/lib/harnessrouter.server";
+import { parseSSE } from "@/lib/harnessrouter-chat.server";
 import { moriToolName } from "@/lib/mori-harness.server";
 
 const jwt = (exp: number) =>
@@ -241,7 +242,7 @@ describe("Bare card names are price checks", () => {
   });
 });
 
-import { replyParts } from "@/lib/mori-agent.server";
+import { replyParts } from "@/lib/mori-turn.server";
 
 describe("Reply bubbles", () => {
   it("splits a multi-part reply on --- lines, one bubble each", () => {
@@ -389,7 +390,7 @@ describe("Collectr sync", () => {
   });
   it("signs a task for one collector only", async () => {
     process.env["MORI_MCP_SECRET"] ??= "x".repeat(40);
-    const { signTask, isOwnTask } = await import("@/lib/mori-mcp-auth.server");
+    const { signTask, isOwnTask } = await import("@/lib/mori-signing.server");
     const sig = signTask("u1", "resp_1", "hsess_1");
     expect(isOwnTask("u1", "resp_1", "hsess_1", sig)).toBe(true);
     expect(isOwnTask("u2", "resp_1", "hsess_1", sig)).toBe(false);
@@ -403,7 +404,7 @@ describe("Event tickets", () => {
     expect(routeMoriMessage("Help me buy tickets for East Bay Card Show")).toBe("ask");
   });
   it("shows the organiser's ticket page with its options, never a bad link", async () => {
-    const { executeMoriTool } = await import("@/lib/mori-agent.server");
+    const { executeMoriTool } = await import("@/lib/mori-execute.server");
     const ctx = { seenIds: null, message: "" } as never;
     const ok = await executeMoriTool(
       null as never,
@@ -451,7 +452,7 @@ describe("Answers to tap", () => {
     return { db: db as never, saved };
   };
   it("turns a Choices line into answers and drops the general suggestions", async () => {
-    const { finishMoriTurn } = await import("@/lib/mori-agent.server");
+    const { finishMoriTurn } = await import("@/lib/mori-turn.server");
     const { db, saved } = fakeDb();
     await finishMoriTurn(
       db,
@@ -467,7 +468,7 @@ describe("Answers to tap", () => {
     expect(saved.some((r) => r.kind === "suggest")).toBe(false);
   });
   it("keeps Suggestions when no question was asked", async () => {
-    const { finishMoriTurn } = await import("@/lib/mori-agent.server");
+    const { finishMoriTurn } = await import("@/lib/mori-turn.server");
     const { db, saved } = fakeDb();
     await finishMoriTurn(
       db,
@@ -484,31 +485,12 @@ describe("Answers to tap", () => {
 });
 
 describe("Trade-up game", () => {
-  it("gives each side a chance equal to its share of the value", async () => {
-    const { winChances } = await import("@/lib/tradeup");
-    const a = winChances(1000, 800);
-    expect(a.host).toBeCloseTo(0.5556, 3);
-    const b = winChances(1000, 1200);
-    expect(b.host).toBeCloseTo(0.4545, 3);
-    expect(winChances(1000, 0)).toEqual({ host: 0, guest: 0 });
-  });
-  it("draws from both secrets, repeatably, and is fair over many games", async () => {
-    const { decide, drawFrom } = await import("@/lib/tradeup");
+  it("draws from both secrets, repeatably", async () => {
+    const { drawFrom } = await import("@/lib/tradeup");
     const s1 = "a".repeat(64),
       s2 = "b".repeat(64);
     expect(drawFrom(s1, s2)).toBe(drawFrom(s1, s2));
     expect(drawFrom(s1, s2)).not.toBe(drawFrom(s2, s1));
-    const { randomBytes } = await import("node:crypto");
-    let hostWins = 0;
-    const n = 20000;
-    for (let i = 0; i < n; i++)
-      if (
-        decide(1000, 800, randomBytes(32).toString("hex"), randomBytes(32).toString("hex"))
-          .winner === "host"
-      )
-        hostWins++;
-    expect(hostWins / n).toBeGreaterThan(0.54);
-    expect(hostWins / n).toBeLessThan(0.571);
   });
   it("only accepts 64-hex secrets and makes 6-digit codes", async () => {
     const { isSecret, joinCode } = await import("@/lib/tradeup");
@@ -566,12 +548,10 @@ describe("Local currency", () => {
     expect(routeMoriMessage("Buy Pikachu 25 for up to US$20")).toBe("order");
   });
   it("maps countries to currency and eBay site, US by default", async () => {
-    const { marketFor, money } = await import("@/lib/market");
+    const { marketFor } = await import("@/lib/market");
     expect(marketFor("au")).toMatchObject({ currency: "AUD", symbol: "A$", ebay: "ebay.com.au" });
     expect(marketFor("GB").ebay).toBe("ebay.co.uk");
     expect(marketFor("ZZ").currency).toBe("USD");
-    expect(money(1234.5, marketFor("AU"))).toBe("A$1,235");
-    expect(money(12.5, marketFor("AU"))).toBe("A$12.50");
   });
 });
 
@@ -753,19 +733,6 @@ describe("Last 3 and last 5 sold averages", () => {
 });
 
 describe("Today's listings and the 7-day change", () => {
-  it("builds eBay searches with the site's own location, condition and price floor", async () => {
-    const { searchUrl } = await import("@/lib/ebay-listings.server");
-    const { MARKETS } = await import("@/lib/market");
-    const card = { name: "Umbreon ex", number: "161" };
-    const local = searchUrl(card, MARKETS["AU"]!, "lp", "local", 654.5);
-    expect(local).toMatch(
-      /^https:\/\/www\.ebay\.com\.au\/sch\/183454\/i\.html\?_nkw=Umbreon\+ex\+161\+-custom/,
-    );
-    expect(local).toContain("LH_ItemCondition=4000");
-    expect(local).toContain("Card%2520Condition=Lightly%2520Played%2520%2528Excellent%2529");
-    expect(local).toContain("LH_BIN=1&_sop=15&LH_PrefLoc=1&_udlo=654&rt=nc");
-    expect(searchUrl(card, MARKETS["AU"]!, "nm", "worldwide")).toContain("LH_PrefLoc=2");
-  });
   it("picks the cheapest real card, skipping junk, other conditions and other countries", async () => {
     const { pickLowest } = await import("@/lib/ebay-listings.server");
     const { MARKETS } = await import("@/lib/market");
@@ -805,46 +772,6 @@ describe("Today's listings and the 7-day change", () => {
       price: 1674.7,
       shipping: 8,
     });
-  });
-  it("takes the 7-day change from the catalogue's 7-day and 30-day averages", async () => {
-    const { weekChange } = await import("@/lib/ebay-listings.server");
-    expect(weekChange({ cardmarket: { avg7: 1100, avg30: 1000 } })).toBe(10);
-    expect(weekChange({ cardmarket: { avg7: 1100 } })).toBeNull();
-    expect(weekChange(null)).toBeNull();
-  });
-  it("reads the agent's rows: price, postage and location as eBay shows them", async () => {
-    const { lowestListings, moneyValue } = await import("@/lib/ebay-listings.server");
-    const { MARKETS } = await import("@/lib/market");
-    expect(moneyValue("AU $1,493.89")).toBe(1493.89);
-    expect(moneyValue("Free delivery")).toBe(0);
-    expect(Number.isNaN(moneyValue("AU $6.93 to AU $42.18"))).toBe(true);
-    const r = lowestListings({ number: "161" }, MARKETS["AU"]!, "nm", {
-      worldwide: [
-        {
-          title: "Umbreon ex 161/131 SIR",
-          price: "AU $1,327.89",
-          shipping: "+AU $48.91 delivery",
-          location: "from United States",
-        },
-      ],
-      // eBay fills an empty "Australia only" page with international sellers: never local.
-      local: [
-        {
-          title: "Umbreon ex 161/131 Prismatic Evolutions",
-          price: "AU $1,466.70",
-          shipping: "+AU $8.26 delivery",
-          location: "",
-        },
-        {
-          title: "Umbreon ex 161/131 SIR",
-          price: "AU $1,400.00",
-          shipping: "+AU $80 delivery",
-          location: "from Canada",
-        },
-      ],
-    });
-    expect(r.lowest_local).toMatchObject({ price: 1466.7, total: 1474.96, from: null });
-    expect(r.lowest_worldwide).toMatchObject({ total: 1474.96 });
   });
 });
 

@@ -1,32 +1,29 @@
 /**
- * Ask Mori on HarnessRouter (MORI_RUNTIME=harnessrouter). One collector message is one task on the
- * "Ask Mori" harness; later messages in the same chat continue its session. The harness reaches
+ * Ask Mori on HarnessRouter (MORI_RUNTIME=harnessrouter). Each specialist and the general agent
+ * continues its own session for this chat; a hand-off can start a second task. Each harness reaches
  * Mori's tools through /api/mori-mcp with the collector's sealed session, and the chat cards those
  * tools produce come back signed inside the tool outputs, so this server saves exactly what the
  * tools built. Instructions live on the harness (harnessrouter.json), not in this file.
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Json } from "@/integrations/supabase/types";
+import type { Json } from "@/integrations/supabase/types";
+import { asObject, type DB, type MoriRowDraft } from "./mori-context.server";
+import { chatPhotos, dataUrlBytes, saveOrderPhotos } from "./mori-order-photos.server";
 import { TOOL_STATUS, type MoriStreamEvent } from "./mori-tools";
 import { AGENT_NAMES, isMoriAgent, routeMoriMessage, type MoriAgent } from "./mori-agents";
-import { marketFor, type Market } from "./market";
+import { marketFor } from "./market";
+import { answerText, HRError, type HRResponse, type OutputItem } from "./harnessrouter.server";
 import {
-  answerText,
   harnessIdFor,
   getTurns,
-  HRError,
   runStreamedTask,
   uploadFile,
   MoriStopped,
-  type HRResponse,
-  type OutputItem,
-} from "./harnessrouter.server";
+} from "./harnessrouter-chat.server";
 import { readSignedRows, sealCollector, stripRowBlocks } from "./mori-mcp-auth.server";
-import { cardImage, getCardPricing, priceScale } from "./tcgdex";
-import { ebaySoldPrices } from "./silphco.server";
-import { finishMoriTurn, tools, type MoriRowDraft } from "./mori-agent.server";
+import { priceCardRow } from "./mori-prices.server";
+import { finishMoriTurn } from "./mori-turn.server";
+import { tools } from "./mori-prompt.server";
 
-type DB = SupabaseClient<Database>;
 const TOOL_NAMES = tools.map((t) => t.name);
 const ROW_KINDS = new Set(["confirm", "grade", "people", "video", "binders", "orders", "photos"]);
 
@@ -36,9 +33,6 @@ export function moriToolName(raw: string | undefined): string | null {
   if (TOOL_NAMES.includes(n)) return n;
   return TOOL_NAMES.find((t) => new RegExp(`(^|[._:/-])${t}$`).test(n)) ?? null;
 }
-
-const asObject = (v: unknown): Record<string, unknown> =>
-  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
 function parseJson(text: string | undefined): unknown {
   try {
@@ -213,11 +207,6 @@ async function cardOutcomes(db: DB, since: string) {
     .join("; ")}.]\n`;
 }
 
-function dataUrlBytes(url: string): { bytes: Uint8Array; type: string } | null {
-  const m = /^data:([\w/+.-]+);base64,(.+)$/s.exec(url);
-  return m?.[1] && m[2] ? { bytes: Buffer.from(m[2], "base64"), type: m[1] } : null;
-}
-
 async function buildInput(text: string, images: string[]) {
   if (!images.length) return text;
   const names = ["card-front.jpg", "card-back.jpg"];
@@ -235,47 +224,6 @@ async function buildInput(text: string, images: string[]) {
         ? `\n[Card photo attached as a file in your working directory: ${names[0]} (the front). Open it and look before you answer.]`
         : "";
   return [{ role: "user", content: [{ type: "input_text", text: text + note }, ...files] }];
-}
-
-/** Saves the collector's front and back photos for a sell order in their own private folder
- *  (owner-only storage rules), so the order and its marketplace listing can use them. */
-async function saveOrderPhotos(db: DB, userId: string, images: string[]) {
-  const parts = images.slice(0, 2).map(dataUrlBytes);
-  if (parts.length < 2 || parts.some((x) => !x)) return null;
-  const id = crypto.randomUUID();
-  const paths = {
-    front: `${userId}/orders/${id}-front.jpg`,
-    back: `${userId}/orders/${id}-back.jpg`,
-  };
-  const bucket = db.storage.from("memory-photos");
-  for (const [i, path] of [paths.front, paths.back].entries()) {
-    const img = parts[i]!;
-    const { error } = await bucket.upload(path, img.bytes, {
-      contentType: img.type,
-      upsert: false,
-    });
-    if (error) {
-      console.error("Order photo upload failed", error.message);
-      return null;
-    }
-  }
-  return paths;
-}
-
-/** The latest order photos saved in this chat, if any. */
-async function chatPhotos(db: DB, userId: string, since?: string) {
-  let q = db
-    .from("mori_messages")
-    .select("payload")
-    .eq("role", "mori")
-    .eq("kind", "status")
-    .not("payload->photos", "is", null);
-  if (since) q = q.gt("created_at", since);
-  const { data } = await q.order("created_at", { ascending: false }).limit(1).maybeSingle();
-  const ph = asObject(asObject(data?.payload)["photos"]);
-  const ok = (v: unknown): v is string =>
-    typeof v === "string" && v.startsWith(`${userId}/orders/`) && !v.includes("..");
-  return ok(ph["front"]) && ok(ph["back"]) ? { front: ph["front"], back: ph["back"] } : null;
 }
 
 /** Tool calls of a finished task, paired with their outputs (from the turn if the response lacks them). */
@@ -303,106 +251,6 @@ async function toolCalls(r: HRResponse, sessionId: string) {
     if (fromTurn.length) calls = fromTurn;
   }
   return calls;
-}
-
-/** The price card for one card: TCGplayer's lowest listing, market price and mid price (US$). */
-export async function priceCardRow(
-  cardId: string,
-  market: Market,
-  fromTool?: Record<string, unknown> | null,
-  condition: import("./ebay-sold.server").Condition = "nm",
-): Promise<MoriRowDraft | null> {
-  const r = await getCardPricing(cardId);
-  if (!r) return null;
-  const { marketPrices } = await import("./mori-agent.server");
-  // Reuse the prices the agent just fetched for this market; look them up only if missing.
-  const tool =
-    fromTool && fromTool["currency"] === market.currency
-      ? (fromTool as {
-          price_points?: Record<string, number | null> | null;
-          recent_sold?: Record<string, unknown> | null;
-          listings?: Record<string, unknown> | null;
-        })
-      : (
-          await marketPrices(
-            { id: r.card.id, name: r.card.name, number: r.card.localId },
-            r.pricing,
-            market,
-            undefined,
-            condition,
-          )
-        ).forTool;
-  const pts = tool.price_points ?? null;
-  const soldAll = (tool.recent_sold ?? null) as Record<string, unknown> | null;
-  const sold = soldAll as Record<
-    string,
-    {
-      avg_last_3?: number | null;
-      avg_last_5?: number | null;
-      value?: number | null;
-      sales?: number | null;
-      status: string;
-    }
-  > | null;
-  const lst = (tool.listings ?? null) as {
-    lowest_worldwide?: { price: number; shipping: number | null; total?: number } | null;
-    lowest_in_country?: { price: number; shipping: number | null; total?: number } | null;
-    change_7d_pct?: number | null;
-    listings_read?: boolean;
-  } | null;
-  if (!pts && !sold && !lst) return null;
-  // The headline is what the card is selling for here: the last 5 sales, else today's cheapest
-  // local listing; the converted overseas market price only when there is nothing else.
-  const headline =
-    sold?.["raw"]?.avg_last_3 ??
-    sold?.["raw"]?.value ??
-    lst?.lowest_in_country?.total ??
-    lst?.lowest_worldwide?.total ??
-    pts?.["market"] ??
-    undefined;
-  return {
-    role: "mori",
-    kind: "price",
-    content: `Price check: ${r.card.name} ${r.card.localId}${typeof headline === "number" ? `, ${market.symbol}${Math.round(headline)}` : ""}`,
-    payload: {
-      card: {
-        id: r.card.id,
-        name: r.card.name,
-        number: r.card.localId,
-        set: r.card.set.name,
-        rarity: r.card.rarity,
-        image: cardImage(r.card.image, "low"),
-      },
-      // Everything here is already in the collector's currency.
-      market: {
-        currency: market.currency,
-        symbol: market.symbol,
-        ebay: market.ebay,
-        country: market.name.replace(/^the\s+/i, ""),
-      },
-      ...(typeof headline === "number" ? { headline } : {}),
-      ...(lst
-        ? {
-            listings: {
-              world: lst.lowest_worldwide ?? null,
-              local: lst.lowest_in_country ?? null,
-              change7: lst.change_7d_pct ?? null,
-              read: lst.listings_read ?? false,
-            },
-          }
-        : pts
-          ? { scale: { low: pts["lowest_listing"], market: pts["market"], mid: pts["mid"] } }
-          : {}),
-      ...(sold
-        ? {
-            sold: {
-              raw: sold["raw"],
-              condition: typeof soldAll?.["condition"] === "string" ? soldAll["condition"] : null,
-            },
-          }
-        : {}),
-    } as Json,
-  };
 }
 
 export async function runMoriHarness(
@@ -500,7 +348,6 @@ export async function runMoriHarness(
 
     let agent = first;
     let r = await run(agent, "");
-    // A specialist that gets something outside its job hands the message to Ask Mori.
     // A specialist that gets a teammate's job names that teammate ("role_mismatch grade"); the
     // message goes there with the hand-off, or to Ask Mori when no teammate is named.
     const mismatch = /^\s*role_mismatch\b[ \t]*([a-z]+)?/i.exec(answerText(r));
@@ -559,8 +406,6 @@ export async function runMoriHarness(
       }
     }
 
-    // A price check shows the real market points on a scale, read here from TCGdex (not from the
-    // agent).
     // The same format every time, whichever agent answered: an answer that prices exactly one
     // card and shows no other card (order, wishlist, grade, photos...) is a price check.
     const singlePriceCheck =
