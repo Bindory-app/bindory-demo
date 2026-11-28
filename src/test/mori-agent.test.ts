@@ -84,7 +84,7 @@ function chat(rows: Row[] = []) {
     message: string,
     opts: Pick<
       Parameters<typeof runMori>[0],
-      "images" | "location" | "country" | "intent" | "timing" | "signal"
+      "images" | "location" | "country" | "intent" | "timing" | "signal" | "selectionOnly"
     > = {},
   ) =>
     runMori({
@@ -145,6 +145,17 @@ afterEach(() => {
   expect(replies).toHaveLength(0);
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+});
+
+it("never invokes the gateway for a stored printing pick, even if the printing is unavailable", async () => {
+  vi.mocked(getCardPricing).mockResolvedValueOnce(null);
+  const { send, rows } = chat();
+  await send("Chosen printing", {
+    selectionOnly: true,
+    intent: { kind: "price_check", card: { id: "base1-25" } },
+  });
+  expect(requests).toHaveLength(0);
+  expect(rows.some((r) => r.content.includes("try another printing"))).toBe(true);
 });
 
 describe("structured pre-grading", () => {
