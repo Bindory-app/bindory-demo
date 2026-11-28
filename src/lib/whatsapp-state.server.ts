@@ -32,14 +32,12 @@ export async function startLink(userId: string, country: unknown) {
   const nonce = randomUUID(),
     expires = Date.now() + 10 * 60_000;
   const token = whatsappToken("link", nonce, expires);
-  const { error } = await store
-    .from("whatsapp_links")
-    .upsert({
-      user_id: userId,
-      country: marketFor(country).country,
-      link_nonce: nonce,
-      link_expires: new Date(expires).toISOString(),
-    });
+  const { error } = await store.from("whatsapp_links").upsert({
+    user_id: userId,
+    country: marketFor(country).country,
+    link_nonce: nonce,
+    link_expires: new Date(expires).toISOString(),
+  });
   if (error) throw error;
   return (
     "https://wa.me/" + number.replace(/^\+/, "") + "?text=" + encodeURIComponent("Link " + token)
@@ -118,4 +116,12 @@ export async function claimReminder(l: Linked, allowTemplate = false): Promise<L
     .maybeSingle();
   if (error) throw error;
   return data as Linked | null;
+}
+export async function unlinkWhatsApp(l: Linked) {
+  const { error } = await store
+    .from("whatsapp_links")
+    .delete()
+    .eq("channel_id", l.channel_id)
+    .eq("user_id", l.user_id);
+  if (error) throw error;
 }

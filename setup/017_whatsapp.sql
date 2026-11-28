@@ -29,7 +29,8 @@ GRANT ALL ON public.whatsapp_receipts TO service_role;
 CREATE FUNCTION public.bind_whatsapp(p_nonce uuid,p_phone text,p_bsuid text,p_at timestamptz) RETURNS boolean
 LANGUAGE plpgsql SECURITY INVOKER SET search_path=public AS $$
 BEGIN
- UPDATE public.whatsapp_links SET phone=coalesce(phone,p_phone), bsuid=coalesce(bsuid,p_bsuid),link_nonce=NULL, link_expires=NULL,
+ UPDATE public.whatsapp_links SET chat_since=CASE WHEN phone IS NULL AND bsuid IS NULL THEN now() ELSE chat_since END,
+   phone=coalesce(phone,p_phone), bsuid=coalesce(bsuid,p_bsuid),link_nonce=NULL, link_expires=NULL,
    last_inbound=greatest(last_inbound,least(p_at,now()))
  WHERE link_nonce=p_nonce AND link_expires>now() AND (p_phone IS NOT NULL OR p_bsuid IS NOT NULL)
  AND ((phone IS NULL AND bsuid IS NULL) OR phone=p_phone OR bsuid=p_bsuid)
