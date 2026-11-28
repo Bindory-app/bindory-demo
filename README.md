@@ -14,3 +14,5 @@ cd <repository-name>
 npm i
 npm run dev
 ```
+
+Builds and unit tests do not need provider credentials. [`.env.example`](.env.example) lists the server configuration with mock values. Chat uses Vercel AI Gateway; HarnessRouter credentials are only for Sync from Collectr. Never commit real credentials.
