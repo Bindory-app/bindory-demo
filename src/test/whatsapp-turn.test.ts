@@ -20,7 +20,9 @@ const f = vi.hoisted(() => ({
   step: vi.fn(),
   read: vi.fn(),
   unlink: vi.fn(),
+  from: vi.fn(),
 }));
+vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: { from: f.from } }));
 vi.mock("@/lib/mori-agent.server", () => ({ runMori: f.run }));
 vi.mock("@/lib/mori-confirm.server", async (orig) => ({
   ...(await orig<typeof import("@/lib/mori-confirm.server")>()),
@@ -63,13 +65,14 @@ const sample = (kind: string, payload: MoriRow["payload"]): MoriRow => ({
   content: "Example",
   payload,
 });
-const proposal = () =>
+const proposal = (currency = "USD") =>
   sample("confirm", {
     tool: "set_order",
     status: "pending",
     side: "buy",
     price_usd: 9,
-    price: { amount: 9, currency: "USD" },
+    price: { amount: 9, currency },
+    ...(currency !== "USD" ? { fx_rate: 0.67 } : {}),
     card: { name: "Eevee", tcgdex_id: "set-1" },
   });
 const active = (r: MoriRow) => {
@@ -290,7 +293,9 @@ it("keeps fields during partial revisions and checks the proposal currency", asy
   active(proposal());
   await tap("edit:" + rowId);
   await text("GBP 25");
-  expect(out()).toContain("Enter the price in USD, the order’s original currency.");
+  expect(f.send.mock.calls.at(-1)?.[1].text.body).toBe(
+    "Enter the price in USD, the order’s original currency. Send any changes: buy or sell, a price, or 7, 30 or 90 days. For example: buy 25.50 30 days. Reply CANCEL to exit.",
+  );
   expect(l.step.kind).toBe("edit");
   await text("$1,200");
   expect(l.step.changes).toEqual({ side: "buy", price: 1200, expires_days: 30 });
@@ -306,6 +311,28 @@ it("keeps fields during partial revisions and checks the proposal currency", asy
   await tap("revise:" + l.step.key);
   await text("cancel");
   expect(l.step).toEqual({});
+  expect(f.confirm).not.toHaveBeenCalled();
+});
+it.each([
+  ["buy, 25.50, 30 days", "USD", 25.5],
+  ["buy, $25.50, 30 days", "USD", 25.5],
+  ["$25.50, 30 days", "USD", 25.5],
+  ["buy, 30 days", "USD", 9],
+  ["buy; 1,250.00; 30 days", "USD", 1250],
+  ["25.50 US$", "USD", 25.5],
+  ["25.50 A$", "AUD", 25.5],
+] as const)("previews clause or currency edit %s", async (input, currency, price) => {
+  active(proposal(currency));
+  await tap("edit:" + rowId);
+  await text(input);
+  expect(l.step.changes).toEqual({ side: "buy", price, expires_days: 30 });
+  expect(f.confirm).not.toHaveBeenCalled();
+});
+it.each(["1,2,3", "buy sell", "buy; 25; 12 days"])("rejects ambiguous edit %s", async (input) => {
+  active(proposal());
+  await tap("edit:" + rowId);
+  await text(input);
+  expect(l.step.kind).toBe("edit");
   expect(f.confirm).not.toHaveBeenCalled();
 });
 it("clears handled edits, stale previews and unrecoverable photos without trapping the next chat", async () => {
@@ -354,11 +381,95 @@ it("recovers abandoned paying steps after one minute without repeating activatio
   await text("PAYMENT");
   expect(l.step.kind).toBe("wallet");
 });
-it("returns both completed free-text answers, without dropping the second on a stale CAS", async () => {
-  rows = [sample("text", null)];
-  await Promise.all([text("first"), text("second")]);
+// Use the real setStep/paymentLink queries against a mock row; each inbound reads its own snapshot.
+async function raceTable() {
+  const state = await vi.importActual<typeof import("@/lib/whatsapp-state.server")>(
+    "@/lib/whatsapp-state.server",
+  );
+  f.touch.mockImplementation(async () => structuredClone(l));
+  f.step.mockImplementation(state.setStep);
+  f.from.mockImplementation(() => {
+    let write: Step | undefined,
+      matches = true;
+    const q = {
+      select: () => q,
+      update: (patch: { step: Step }) => {
+        write = patch.step;
+        return q;
+      },
+      eq: (key: string, value: string) => {
+        const fields: Record<string, unknown> = {
+          channel_id: l.channel_id,
+          step: JSON.stringify(l.step),
+          "step->>key": l.step.key,
+          "step->>kind": l.step.kind,
+        };
+        matches &&= fields[key] === value;
+        return q;
+      },
+      or: (filter: string) => {
+        const suffix = ",and(step->>kind.eq.rows,step->>fromText.eq.true)";
+        expect(filter.startsWith("step.eq.") && filter.endsWith(suffix)).toBe(true);
+        const previous = JSON.parse(filter.slice("step.eq.".length, -suffix.length));
+        matches &&=
+          JSON.stringify(l.step) === previous || (l.step.kind === "rows" && !!l.step.fromText);
+        return q;
+      },
+      maybeSingle: async () => {
+        if (write && matches) l.step = write;
+        return { data: matches ? structuredClone(l) : null };
+      },
+    };
+    return q;
+  });
+  return state;
+}
+it.each(["wallet", "paying"] as const)(
+  "does not replace a %s step entered while free text runs, or send dead controls",
+  async (kind) => {
+    const state = await raceTable();
+    const wallet: Step = { kind: "wallet", key: "checkout" };
+    const protectedStep = kind === "wallet" ? wallet : { ...wallet, kind, payingAt: Date.now() };
+    f.run.mockImplementation(async ({ emit }) => {
+      await state.setStep(structuredClone(l), protectedStep);
+      emit({ type: "done", rows: [proposal()] });
+    });
+    await text("new order");
+    expect(l.step).toEqual(protectedStep);
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.claim).not.toHaveBeenCalled();
+    if (kind === "paying") {
+      expect(await state.paymentLink("checkout")).toBeNull(); // No second connect while locked.
+      expect(await state.setStep(structuredClone(l), wallet)).toBe(true); // Failed activation rolls back.
+    }
+    expect((await state.paymentLink("checkout"))?.step).toEqual(wallet);
+  },
+);
+it("keeps both overlapping free-text answers, with the last finisher owning the controls", async () => {
+  await raceTable();
+  let start = () => {},
+    finish = () => {};
+  const started = new Promise<void>((r) => {
+    start = r;
+  });
+  const resumed = new Promise<void>((r) => {
+    finish = r;
+  });
+  f.run.mockImplementation(async ({ message, emit }) => {
+    if (message === "first") {
+      start();
+      await resumed;
+    }
+    emit({ type: "done", rows: [{ ...proposal(), id: message }] });
+  });
+  const first = text("first");
+  await started;
+  await text("second");
+  expect(l.step.rows).toEqual(["second"]);
+  finish();
+  await first;
+  expect(l.step.rows).toEqual(["first"]);
   expect(f.send).toHaveBeenCalledTimes(2);
-  expect(f.step.mock.calls.every((args) => args[2] === true)).toBe(true);
 });
 it("relays a legacy live confirmation without an invented payment gate or listing watcher", async () => {
   active(proposal());

@@ -108,12 +108,12 @@ function alerts(key: string) {
 function parseOrderEdit(text: string, currency: string) {
   const changes: Partial<NonNullable<Step["changes"]>> = {};
   let rest = text.trim();
-  const side = /\b(buy|sell)\b/i.exec(rest);
+  const side = /(?:[,;]\s*)?\b(buy|sell)\b(?:\s*[,;])?/i.exec(rest);
   if (side) {
     changes.side = side[1]!.toLowerCase() as "buy" | "sell";
     rest = rest.replace(side[0], " ").trim();
   }
-  const duration = /\b(\d+)\s+days?\b/i.exec(rest);
+  const duration = /(?:[,;]\s*)?\b(\d+)\s+days?\b(?:\s*[,;])?/i.exec(rest);
   if (duration) {
     const days = Number(duration[1]);
     if (![7, 30, 90].includes(days)) return null;
@@ -122,7 +122,7 @@ function parseOrderEdit(text: string, currency: string) {
   }
   if (rest) {
     const m =
-      /^(?:([a-z]{1,2}\$|[£€$]|[a-z]{3})\s*)?((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)(?:\s*([a-z]{3}|[£€$]))?$/i.exec(
+      /^(?:([a-z]{1,2}\$|[£€$]|[a-z]{3})\s*)?((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)(?:\s*([a-z]{1,2}\$|[£€$]|[a-z]{3}))?$/i.exec(
         rest,
       );
     if (!m || (m[1] && m[3])) return null;
@@ -147,17 +147,18 @@ async function editOrder(db: DB, l: Linked, text: string) {
   const r = l.step.row && (await row(db, l, l.step.row));
   const p = r && (r.payload as ProposalPayload);
   if (!r || !p || p.tool !== "set_order" || p.status !== "pending") return clearStep(l, stale);
-  const patch = parseOrderEdit(text, p.price?.currency ?? "USD");
-  if (!patch) return [textMessage(editPrompt)];
-  const previous = asObject(r.payload)["expires_days"];
-  const changes = {
-    side: p.side,
-    price: p.price?.amount ?? p.price_usd,
-    expires_days: typeof previous === "number" ? previous : 30,
-    ...l.step.changes,
-    ...patch,
-  };
+  let changes: NonNullable<Step["changes"]>;
   try {
+    const patch = parseOrderEdit(text, p.price?.currency ?? "USD");
+    if (!patch) return [textMessage(editPrompt)];
+    const previous = asObject(r.payload)["expires_days"];
+    changes = {
+      side: p.side,
+      price: p.price?.amount ?? p.price_usd,
+      expires_days: typeof previous === "number" ? previous : 30,
+      ...l.step.changes,
+      ...patch,
+    };
     orderChanges(p, changes);
   } catch (e) {
     if (e instanceof OrderEditError) return [textMessage(e.message + " " + editPrompt)];
@@ -254,6 +255,7 @@ async function turn(
       l,
       {
         kind: "rows",
+        ...(freshText ? { fromText: true } : {}),
         rows: active.map((r) => r.id),
         ...(last?.kind === "photos" && asObject(last.payload)["intent"] ? { row: last.id } : {}),
         ...(needsMedia ? { media, mediaAt: Date.now() } : {}),
@@ -261,7 +263,7 @@ async function turn(
       freshText,
     ))
   )
-    return [textMessage(stale)];
+    return freshText ? [] : [textMessage(stale)];
   return renderWhatsApp(rows);
 }
 function heldMedia(l: Linked) {

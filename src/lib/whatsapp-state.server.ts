@@ -9,6 +9,7 @@ export type Step = {
   kind?: "rows" | "edit" | "preview" | "alerts" | "wallet" | "paying" | "await_text";
   key?: string;
   rows?: string[];
+  fromText?: true;
   row?: string;
   media?: string[];
   mediaAt?: number;
@@ -86,7 +87,13 @@ export async function pairPhoto(
 // Compare and swap the previous step. Old list/checkout controls and simultaneous submissions cannot win twice.
 export async function setStep(l: Linked, next: Step, freshText = false) {
   let query = store.from("whatsapp_links").update({ step: next }).eq("channel_id", l.channel_id);
-  if (!freshText) query = query.eq("step", JSON.stringify(l.step));
+  const previous = JSON.stringify(l.step);
+  // A quoted PostgREST literal keeps JSON commas, quotes and parentheses inside the comparison.
+  query = freshText
+    ? query.or(
+        `step.eq.${JSON.stringify(previous)},and(step->>kind.eq.rows,step->>fromText.eq.true)`,
+      )
+    : query.eq("step", previous);
   const { data, error } = await query.select("user_id").maybeSingle();
   if (error) throw error;
   if (!data) return false;
