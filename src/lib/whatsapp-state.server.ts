@@ -110,7 +110,21 @@ export async function paymentLink(nonce: string): Promise<Linked | null> {
   if (error) throw error;
   return data as Linked | null;
 }
-export async function claimReminder(l: Linked, allowTemplate = false) {
+type ReminderCandidate = Pick<Linked, "user_id" | "channel_id">;
+export async function reminderCandidates(
+  after: string | null,
+  allowTemplate: boolean,
+  limit: number,
+) {
+  const { data, error } = await store.rpc("whatsapp_reminder_candidates", {
+    p_after: after,
+    p_template: allowTemplate,
+    p_limit: limit,
+  });
+  if (error || !Array.isArray(data)) throw new Error("Reminder candidates unavailable");
+  return data as ReminderCandidate[];
+}
+export async function claimReminder(l: ReminderCandidate, allowTemplate = false) {
   const { data, error } = await store
     .rpc("claim_whatsapp_reminder", {
       p_user: l.user_id,
