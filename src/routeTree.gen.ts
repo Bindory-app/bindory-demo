@@ -15,7 +15,6 @@ import { Route as ApiGateRouteImport } from './routes/api/gate'
 import { Route as ApiMoriChatRouteImport } from './routes/api/mori-chat'
 import { Route as ApiMoriConfirmRouteImport } from './routes/api/mori-confirm'
 import { Route as ApiMoriLocateRouteImport } from './routes/api/mori-locate'
-import { Route as ApiMoriMcpRouteImport } from './routes/api/mori-mcp'
 import { Route as ApiMoriSyncRouteImport } from './routes/api/mori-sync'
 import { Route as ApiTradeupRouteImport } from './routes/api/tradeup'
 
@@ -49,11 +48,6 @@ const ApiMoriLocateRoute = ApiMoriLocateRouteImport.update({
   path: '/api/mori-locate',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiMoriMcpRoute = ApiMoriMcpRouteImport.update({
-  id: '/api/mori-mcp',
-  path: '/api/mori-mcp',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiMoriSyncRoute = ApiMoriSyncRouteImport.update({
   id: '/api/mori-sync',
   path: '/api/mori-sync',
@@ -72,7 +66,6 @@ export interface FileRoutesByFullPath {
   '/api/mori-chat': typeof ApiMoriChatRoute
   '/api/mori-confirm': typeof ApiMoriConfirmRoute
   '/api/mori-locate': typeof ApiMoriLocateRoute
-  '/api/mori-mcp': typeof ApiMoriMcpRoute
   '/api/mori-sync': typeof ApiMoriSyncRoute
   '/api/tradeup': typeof ApiTradeupRoute
 }
@@ -83,7 +76,6 @@ export interface FileRoutesByTo {
   '/api/mori-chat': typeof ApiMoriChatRoute
   '/api/mori-confirm': typeof ApiMoriConfirmRoute
   '/api/mori-locate': typeof ApiMoriLocateRoute
-  '/api/mori-mcp': typeof ApiMoriMcpRoute
   '/api/mori-sync': typeof ApiMoriSyncRoute
   '/api/tradeup': typeof ApiTradeupRoute
 }
@@ -95,7 +87,6 @@ export interface FileRoutesById {
   '/api/mori-chat': typeof ApiMoriChatRoute
   '/api/mori-confirm': typeof ApiMoriConfirmRoute
   '/api/mori-locate': typeof ApiMoriLocateRoute
-  '/api/mori-mcp': typeof ApiMoriMcpRoute
   '/api/mori-sync': typeof ApiMoriSyncRoute
   '/api/tradeup': typeof ApiTradeupRoute
 }
@@ -108,7 +99,6 @@ export interface FileRouteTypes {
     | '/api/mori-chat'
     | '/api/mori-confirm'
     | '/api/mori-locate'
-    | '/api/mori-mcp'
     | '/api/mori-sync'
     | '/api/tradeup'
   fileRoutesByTo: FileRoutesByTo
@@ -119,7 +109,6 @@ export interface FileRouteTypes {
     | '/api/mori-chat'
     | '/api/mori-confirm'
     | '/api/mori-locate'
-    | '/api/mori-mcp'
     | '/api/mori-sync'
     | '/api/tradeup'
   id:
@@ -130,7 +119,6 @@ export interface FileRouteTypes {
     | '/api/mori-chat'
     | '/api/mori-confirm'
     | '/api/mori-locate'
-    | '/api/mori-mcp'
     | '/api/mori-sync'
     | '/api/tradeup'
   fileRoutesById: FileRoutesById
@@ -142,7 +130,6 @@ export interface RootRouteChildren {
   ApiMoriChatRoute: typeof ApiMoriChatRoute
   ApiMoriConfirmRoute: typeof ApiMoriConfirmRoute
   ApiMoriLocateRoute: typeof ApiMoriLocateRoute
-  ApiMoriMcpRoute: typeof ApiMoriMcpRoute
   ApiMoriSyncRoute: typeof ApiMoriSyncRoute
   ApiTradeupRoute: typeof ApiTradeupRoute
 }
@@ -191,13 +178,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMoriLocateRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/mori-mcp': {
-      id: '/api/mori-mcp'
-      path: '/api/mori-mcp'
-      fullPath: '/api/mori-mcp'
-      preLoaderRoute: typeof ApiMoriMcpRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/mori-sync': {
       id: '/api/mori-sync'
       path: '/api/mori-sync'
@@ -222,7 +202,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMoriChatRoute: ApiMoriChatRoute,
   ApiMoriConfirmRoute: ApiMoriConfirmRoute,
   ApiMoriLocateRoute: ApiMoriLocateRoute,
-  ApiMoriMcpRoute: ApiMoriMcpRoute,
   ApiMoriSyncRoute: ApiMoriSyncRoute,
   ApiTradeupRoute: ApiTradeupRoute,
 }

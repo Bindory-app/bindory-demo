@@ -66,7 +66,7 @@ export async function runReadTool(db: DB, name: string, a: Args): Promise<unknow
         card,
         r.pricing,
         marketFromArgs(a),
-        Array.isArray(a["sold_listings"]) ? (a["sold_listings"] as unknown[]) : undefined,
+        undefined,
         toCondition(a["condition"]) ?? "nm",
       );
       return {

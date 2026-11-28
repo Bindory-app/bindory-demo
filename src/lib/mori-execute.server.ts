@@ -7,16 +7,37 @@ import { isWriteTool, proposalTitle, type ProposalPayload } from "./mori-tools";
 export type MoriToolContext = {
   /** The collector's message this answer is for (memory templates keep their exact words). */
   message: string;
-  /** Card ids looked up in this chat; null when the caller cannot know them (the MCP endpoint),
-   *  in which case a card only has to exist in the catalogue. */
-  seenIds: Set<string> | null;
+  /** Card ids looked up in this chat. */
+  seenIds: Set<string>;
   /** The card most recently priced in this answer, so a pre-grade report can name it. */
   lastCard: string;
+  /** Resolve a pair from this turn or from the current chat, never model-supplied paths. */
+  orderPhotos: () => Promise<{ front: string; back: string } | null>;
 };
+
+function requestPhotos(purpose: "sell" | "grade") {
+  return {
+    rows: [
+      {
+        role: "mori" as const,
+        kind: "photos",
+        content: "Front and back photos of your card",
+        payload: { for: purpose },
+      },
+    ],
+    result: {
+      shown_to_user: true,
+      card: "photo_request",
+      ...(purpose === "sell" ? { order_proposed: false } : {}),
+      note: "Take a photo and Upload buttons are on screen, not a confirmation. Wait for front and back photos before set_order or pre_grade_report.",
+    },
+    stop: true,
+  };
+}
 
 /** Runs one of Mori's tools for this collector. `rows` are the chat cards it shows (confirmation,
  *  pre-grade report, profiles, storyboard, binders, orders); `stop` means the answer should end
- *  after it. Shared by the AI Gateway loop and the HarnessRouter MCP endpoint. */
+ *  after it. */
 export async function executeMoriTool(
   db: DB,
   userId: string,
@@ -29,7 +50,7 @@ export async function executeMoriTool(
   let result: unknown;
   if (name === "pre_grade_report") {
     const report = gradeReport(args);
-    if (!("error" in report) && !report.card && ctx.lastCard) report.card = ctx.lastCard;
+    if (!("error" in report) && ctx.lastCard) report.card = ctx.lastCard;
     if ("error" in report) result = report;
     else {
       rows.push({
@@ -125,18 +146,7 @@ export async function executeMoriTool(
       };
     }
   } else if (name === "request_card_photos") {
-    // Take a photo / Upload buttons; the photos come back as the collector's next message.
-    rows.push({
-      role: "mori",
-      kind: "photos",
-      content: "Front and back photos of your card",
-      payload: { for: args["purpose"] === "grade" ? "grade" : "sell" } as Json,
-    });
-    result = {
-      shown_to_user: true,
-      note: "Take a photo and Upload buttons are on screen. In one short line, ask for the front and back on a dark, flat background with all four corners in view. Wait for the photos before set_order or pre_grade_report.",
-    };
-    stop = true;
+    return requestPhotos(args["purpose"] === "grade" ? "grade" : "sell");
   } else if (name === "plan_video") {
     // Storyboard from the collector's own cards; they post or save it with a button.
     const scenes = (Array.isArray(args["scenes"]) ? (args["scenes"] as Args[]) : []).slice(0, 6);
@@ -233,7 +243,6 @@ export async function executeMoriTool(
     }
   } else if (
     (name === "add_to_wishlist" || name === "add_card_to_collection") &&
-    ctx.seenIds !== null &&
     !ctx.seenIds.has(stringArg(args["card_id"]) ?? "")
   ) {
     result = {
@@ -241,10 +250,13 @@ export async function executeMoriTool(
         "Look this card up first with search_catalogue (name and number) and use the id it returns.",
     };
   } else if (isWriteTool(name)) {
+    const sell = name === "set_order" && args["side"] === "sell";
+    const photos = sell ? await ctx.orderPhotos() : null;
+    if (sell && !photos) return requestPhotos("sell");
     const p = await buildProposal(db, userId, name, args, ctx.message, ctx.seenIds);
     if ("error" in p) result = p;
     else {
-      const payload: ProposalPayload = { ...p, status: "pending" };
+      const payload: ProposalPayload = { ...p, ...(photos ? { photos } : {}), status: "pending" };
       rows.push({
         role: "mori",
         kind: "confirm",
@@ -266,6 +278,6 @@ export async function executeMoriTool(
       ctx.lastCard = `${c.name}${c.number ? ` ${c.number}` : ""}${c.set ? ` (${c.set})` : ""}`;
   }
   for (const m of JSON.stringify(result ?? null).matchAll(/"(?:id|tcgdex_id)":"([^"]+)"/g))
-    if (m[1]) ctx.seenIds?.add(m[1]);
+    if (m[1]) ctx.seenIds.add(m[1]);
   return { result, rows, stop };
 }

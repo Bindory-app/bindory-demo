@@ -12,6 +12,18 @@ export function collectrSyncLink(message: string): string | null {
   return m ? (m[1] ?? "") : null;
 }
 
+/** Do not treat a new chat request as work for the last sync. Allow a few whole replies to
+ *  its proposal, or an explicit "Collectr sync:" prefix for free-form corrections. */
+export function isCollectrFollowUp(message: string): boolean {
+  const text = message.trim();
+  return (
+    /^collectr sync:\s*\S/i.test(text) ||
+    /^(?:go ahead|(?:continue|retry) (?:the |my )?(?:collectr )?sync|only the first [1-9]\d*(?: cards)?)[.!]?$/i.test(
+      text,
+    )
+  );
+}
+
 /** The binder named in the sync message: an existing one, or a new one to create. */
 export function collectrSyncBinder(message: string): { name: string; new: boolean } | null {
   const m = /\binto (the binder|a new binder called) "([^"]{1,60})"/i.exec(message);

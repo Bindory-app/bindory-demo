@@ -1,9 +1,14 @@
-import { routeMoriMessage } from "./mori-agents";
 import { SYSTEM, tools } from "./mori-prompt.server";
+import { marketFor } from "./market";
+import { usdTo } from "./fx.server";
+import { toCondition, type Condition } from "./ebay-sold.server";
+import { priceCardRow } from "./mori-prices.server";
+import { chatPhotos, saveOrderPhotos } from "./mori-order-photos.server";
 import {
   COLLECTR_BAD_LINK,
   collectrSyncBinder,
   collectrSyncLink,
+  isCollectrFollowUp,
   isCollectrLink,
 } from "./collectr";
 import { TOOL_STATUS, type MoriStreamEvent, type MoriRow } from "./mori-tools";
@@ -14,7 +19,7 @@ import {
   type ResponsesResponse,
 } from "./ai-gateway.server";
 import type { Json } from "@/integrations/supabase/types";
-import type { Args, DB } from "./mori-context.server";
+import { asObject, type Args, type DB, type MoriRowDraft } from "./mori-context.server";
 import { executeMoriTool, type MoriToolContext } from "./mori-execute.server";
 import { finishMoriTurn, history } from "./mori-turn.server";
 
@@ -61,33 +66,35 @@ async function streamWithFallback(
   }
 }
 
-/** Which agent runtime answers: "harnessrouter" (the Ask Mori harness) or "gateway" (default, and
- *  the rollback). Set with MORI_RUNTIME in the server environment. */
-const moriRuntime = (): "harnessrouter" | "gateway" =>
-  process.env["MORI_RUNTIME"]?.trim() === "harnessrouter" ? "harnessrouter" : "gateway";
-
-/** Server execution only: shared by the authenticated RPC and streaming HTTP handler. */
-export async function runMori(
-  db: DB,
-  userId: string,
-  message: string,
-  emit: (event: MoriStreamEvent) => void = () => {},
-  signal?: AbortSignal,
-  oidcToken?: string | null,
-  images: string[] = [],
-  since?: string,
-  accessToken?: string,
-  location?: string,
-  country?: string,
-) {
-  // HarnessRouter runs Mori when MORI_RUNTIME=harnessrouter; it needs the collector's session for
-  // the tool endpoint, so callers without one (the plain RPC) stay on AI Gateway.
-  const onHarness = moriRuntime() === "harnessrouter" && Boolean(accessToken);
-  const past = onHarness ? [] : await history(db, since);
-  // The stored text notes the photos so later turns know they were sent (the images themselves are not stored).
+/** Run a turn with the signed-in collector's RLS-scoped client. */
+export async function runMori({
+  db,
+  userId,
+  message,
+  emit,
+  signal,
+  oidcToken,
+  images = [],
+  since,
+  location,
+  country,
+}: {
+  db: DB;
+  userId: string;
+  message: string;
+  emit: (event: MoriStreamEvent) => void;
+  signal?: AbortSignal;
+  oidcToken?: string | null;
+  images?: string[];
+  since?: string | undefined;
+  location?: string | undefined;
+  country?: string | undefined;
+}) {
+  // Images go to the model on this turn; the transcript keeps only a note, not the image data.
   const stored = images.length
     ? `${message}\n[Sent ${images.length === 1 ? "a card photo: the front" : `${images.length} card photos: front and back`}]`
     : message;
+  const past = await history(db, since);
   const ins = await db
     .from("mori_messages")
     // The chat this message belongs to (its start time, sent by the app), so History lists one
@@ -98,11 +105,11 @@ export async function runMori(
   if (ins.error) throw ins.error;
   const askedAt = Date.parse(ins.data.created_at);
   // "Sync from Collectr" runs on its own harness in the background (collectr-sync.server.ts);
-  // a plain follow-up right after a finished sync continues that task.
+  // only an explicit follow-up can continue a finished task.
   const collectr = collectrSyncLink(message);
   const { startSync, latestSync } = await import("./collectr-sync.server");
   const priorSync =
-    collectr === null && !routeMoriMessage(message, images.length > 0)
+    collectr === null && !images.length && isCollectrFollowUp(message)
       ? await latestSync(db, userId, since)
       : null;
   if (collectr !== null || priorSync) {
@@ -135,55 +142,68 @@ export async function runMori(
       );
     }
   }
-  if (onHarness && accessToken) {
-    const { runMoriHarness } = await import("./mori-harness.server");
-    return runMoriHarness(
-      db,
-      userId,
-      accessToken,
-      message,
-      emit,
-      images,
-      since,
-      askedAt,
-      signal,
-      location,
-      country,
-    );
-  }
 
-  const input: ResponsesInputItem[] = [
-    ...past,
-    images.length
-      ? {
-          role: "user",
-          content: [
-            { type: "input_text", text: message },
-            ...images.map((image_url) => ({ type: "input_image" as const, image_url })),
-          ],
-        }
-      : { role: "user", content: message },
-  ];
-  const rows: { role: "mori"; kind: string; content: string; payload?: Json }[] = [];
+  const rows: MoriRowDraft[] = [];
+  const market = marketFor(country);
+  const priced = new Map<string, { output: Args; condition: Condition }>();
+  const onlyPrice = () => priced.size === 1 && rows.every((row) => row.kind === "status");
+  let cardsOnly = false;
   let finalText = "";
-  const ctx: MoriToolContext = { message, seenIds: new Set<string>(), lastCard: "" };
+  // Save an explicitly attached sell pair even when the price will only arrive next turn.
+  // Otherwise leave photos ephemeral until set_order actually needs them.
+  let saved: Awaited<ReturnType<typeof saveOrderPhotos>> | undefined;
+  const orderPhotos = async () => {
+    if (!images.length) return since ? chatPhotos(db, userId, since) : null;
+    if (saved === undefined) {
+      saved = await saveOrderPhotos(db, userId, images);
+      if (saved)
+        rows.push({
+          role: "mori",
+          kind: "status",
+          content: "Saved your photos for the listing",
+          payload: { photos: saved },
+        });
+    }
+    return saved;
+  };
+  const ctx: MoriToolContext = { message, seenIds: new Set<string>(), lastCard: "", orderPhotos };
   // Card ids Mori has actually looked up in this chat, so it never proposes a card from a guessed id.
   for (const id of JSON.stringify(past).match(/[a-z0-9.]+-[a-z0-9]+(?=\\?")/gi) ?? [])
-    ctx.seenIds?.add(id);
+    ctx.seenIds.add(id);
 
   try {
-    for (let turn = 0; turn < 6; turn++) {
+    const rate = market.currency === "USD" ? 1 : await usdTo(market.currency);
+    const input: ResponsesInputItem[] = [
+      ...past,
+      {
+        role: "developer",
+        content:
+          `[App note: the collector is in ${market.name} (country code ${market.country}). Show prices in ${market.currency} (${market.symbol}); their eBay site is ${market.ebay}. Pass country "${market.country}" and currency "${market.currency}" to get_card_prices. Today 1 US$ = ${rate} ${market.currency}; convert the collector's price to US$ for set_order at that rate.]` +
+          (location
+            ? `\n[App note: the collector's location, from their phone: ${location}. Use it for nearby shows, events and stores; never assume another city.]`
+            : ""),
+      },
+      images.length
+        ? {
+            role: "user",
+            content: [
+              { type: "input_text", text: message },
+              ...images.map((image_url) => ({ type: "input_image" as const, image_url })),
+            ],
+          }
+        : { role: "user", content: message },
+    ];
+    if (images.length >= 2 && /\bsell order\b|^(?:please |i want to )?sell\b/i.test(message))
+      await orderPhotos();
+    turns: for (let turn = 0; turn < 6; turn++) {
       // Questions about the collector's own cards, prices or plans must look at real data first,
       // so the first step has to use a tool (the model sometimes answers from guesswork otherwise).
-      const stream = await streamWithFallback(
-        input,
-        signal,
-        oidcToken,
-        turn === 0 && NEEDS_DATA.test(message),
-      );
+      const mustUseTool = turn === 0 && NEEDS_DATA.test(message);
+      const stream = await streamWithFallback(input, signal, oidcToken, mustUseTool);
+      const streamText = !mustUseTool && !onlyPrice();
       let res: ResponsesResponse | undefined;
       for await (const event of stream) {
-        if (event.type === "response.output_text.delta")
+        if (event.type === "response.output_text.delta" && streamText)
           emit({ type: "text", text: event.delta ?? "" });
         if (event.type === "response.completed") res = event.response;
         if (event.type === "response.incomplete") throw new Error("Mori response incomplete");
@@ -202,7 +222,6 @@ export async function runMori(
         break;
       }
 
-      let stop = false;
       for (const call of calls) {
         const name = call.name ?? "";
         const args = (() => {
@@ -228,8 +247,13 @@ export async function runMori(
         });
         const out = await executeMoriTool(db, userId, name, args, ctx);
         rows.push(...out.rows);
-        if (out.stop) stop = true;
         const result = out.result;
+        if (name === "get_card_prices") {
+          const output = asObject(result);
+          const id = asObject(output["card"])["id"];
+          if (typeof id === "string")
+            priced.set(id, { output, condition: toCondition(args["condition"]) ?? "nm" });
+        }
         statusRow.payload = {
           name,
           input: args as Json,
@@ -240,10 +264,22 @@ export async function runMori(
           call_id: call.call_id ?? "",
           output: JSON.stringify(result).slice(0, 8000),
         });
+        if (out.stop) {
+          // A batch can contain several writes. Never execute calls after the card we showed.
+          // A pre-tool sentence cannot know the sell proposal was blocked.
+          finalText = out.rows.some((r) => r.kind === "photos")
+            ? "Send clear photos of the front and back on a dark, flat background with all four corners in view."
+            : text;
+          break turns;
+        }
       }
-      if (stop) {
-        finalText = text;
-        break;
+    }
+    if (onlyPrice()) {
+      const [id, { output, condition }] = [...priced][0]!;
+      const row = await priceCardRow(id, market, output, condition).catch(() => null);
+      if (row) {
+        rows.push(row);
+        cardsOnly = true;
       }
     }
   } catch (e) {
@@ -258,5 +294,5 @@ export async function runMori(
         : "Sorry, I could not answer just now. Please try again.";
   }
 
-  return finishMoriTurn(db, rows, finalText, askedAt, emit);
+  return finishMoriTurn(db, rows, finalText, askedAt, emit, cardsOnly);
 }
