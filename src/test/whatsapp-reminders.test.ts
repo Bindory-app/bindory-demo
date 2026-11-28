@@ -54,6 +54,25 @@ it("sends the free-form CTA within 24 hours and uses the shared inbound claim", 
     },
   });
 });
+it("rejects malformed template configuration before paging, claiming or sending", async () => {
+  for (const [name, language] of [
+    ["Pending", "en_US"],
+    [" ".repeat(3), "en_US"],
+    ["x".repeat(513), "en_US"],
+    ["pending_order", "en-US"],
+    ["", "  "],
+    ["pending_order", "en_US\n"],
+  ] as const) {
+    vi.stubEnv("WHATSAPP_REMINDER_TEMPLATE", name);
+    vi.stubEnv("WHATSAPP_REMINDER_LANGUAGE", language);
+    const response = await run();
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "invalid_template_config" });
+  }
+  expect(f.page).not.toHaveBeenCalled();
+  expect(f.claim).not.toHaveBeenCalled();
+  expect(f.send).not.toHaveBeenCalled();
+});
 it("filters out-of-window recipients before claiming when the template is unset; rechecks the clock before sending", async () => {
   f.page.mockResolvedValueOnce([]);
   await run();

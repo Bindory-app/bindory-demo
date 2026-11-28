@@ -8,13 +8,20 @@ export async function sweepReminders(request: Request) {
   const secret = process.env["CRON_SECRET"];
   if (!secret || !sameText(request.headers.get("authorization") ?? "", "Bearer " + secret))
     return new Response(null, { status: 401 });
-  const name = process.env["WHATSAPP_REMINDER_TEMPLATE"]?.trim();
+  const name = process.env["WHATSAPP_REMINDER_TEMPLATE"] || "",
+    code = process.env["WHATSAPP_REMINDER_LANGUAGE"] || "en_US";
+  // Syntax only: the operator must independently verify that this exact template/locale is approved.
+  if ((name && !/^[a-z0-9_]{1,512}$/.test(name)) || !/^[a-z]{2,3}(?:_[A-Z]{2})?$/.test(code))
+    return Response.json(
+      { error: "invalid_template_config" },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
   const template: WhatsAppMessage | null = name
     ? {
         type: "template",
         template: {
           name,
-          language: { code: process.env["WHATSAPP_REMINDER_LANGUAGE"]?.trim() || "en_US" },
+          language: { code },
         },
       }
     : null;
