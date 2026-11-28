@@ -3,6 +3,7 @@ import { marketFor } from "./market";
 import { toCondition } from "./ebay-sold.server";
 import { stringArg, type Args, type DB } from "./mori-context.server";
 import { marketPrices, priceMoves } from "./mori-prices.server";
+import type { TurnTimer } from "./mori-timing.server";
 import {
   cardsByIllustrator,
   findCards,
@@ -43,7 +44,12 @@ const TREND_CARDS = [
   "sv08.5-167",
 ];
 
-export async function runReadTool(db: DB, name: string, a: Args): Promise<unknown> {
+export async function runReadTool(
+  db: DB,
+  name: string,
+  a: Args,
+  timing?: TurnTimer,
+): Promise<unknown> {
   switch (name) {
     case "search_catalogue": {
       const r = await findCards(
@@ -68,6 +74,9 @@ export async function runReadTool(db: DB, name: string, a: Args): Promise<unknow
         marketFromArgs(a),
         toCondition(a["condition"]) ?? "nm",
       );
+      if (timing && "cache" in m && m.cache) {
+        for (const [k, v] of Object.entries(m.cache)) timing.recordCache(k, v);
+      }
       return {
         card: { ...card, set: r.card.set.name, rarity: r.card.rarity },
         // Every price below is in this currency, for the collector's market.

@@ -74,47 +74,32 @@ export const Route = createFileRoute("/api/mori-chat")({
           /^[A-Za-z]{2}$/.test(body.country)
             ? body.country.toUpperCase()
             : undefined;
-        const encoder = new TextEncoder();
-        const abort = new AbortController();
-        request.signal.addEventListener("abort", () => abort.abort(), { once: true });
         const { runMori } = await import("@/lib/mori-agent.server");
-        const stream = new ReadableStream<Uint8Array>({
-          start(controller) {
-            const emit = (event: unknown) => {
-              if (!abort.signal.aborted)
-                controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-            };
-            // On Vercel each request carries a short-lived OIDC token that AI Gateway accepts directly.
-            const oidcToken = request.headers.get("x-vercel-oidc-token");
-            const task = runMori({
+        const { createMoriChatStream } = await import("@/lib/mori-chat-stream.server");
+        const { createTurnTimer } = await import("@/lib/mori-timing.server");
+        // On Vercel each request carries a short-lived OIDC token that AI Gateway accepts directly.
+        const oidcToken = request.headers.get("x-vercel-oidc-token");
+        const timing = createTurnTimer();
+        const { stream, task } = createMoriChatStream({
+          requestSignal: request.signal,
+          timing,
+          run: ({ emit, signal }) =>
+            runMori({
               db,
               userId,
               message,
               emit,
-              signal: abort.signal,
+              signal,
               oidcToken,
               images,
               since,
               location,
               country,
-            })
-              .catch((error) => {
-                console.error(
-                  "Mori chat failed",
-                  error instanceof Error ? error.message : "Unknown error",
-                );
-                emit({ type: "error", text: "I could not finish that request. Please try again." });
-              })
-              .finally(() => {
-                if (!abort.signal.aborted) controller.close();
-              });
-            // Keep the function alive until the answer is saved, even if the collector leaves.
-            waitUntil(task);
-          },
-          cancel() {
-            abort.abort();
-          },
+              timing,
+            }),
         });
+        // Keep the function alive until the answer is saved, even if the collector leaves.
+        waitUntil(task);
         return new Response(stream, {
           headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store" },
         });

@@ -1,7 +1,7 @@
 import type { Json } from "@/integrations/supabase/types";
 import type { Market } from "./market";
 import type { MoriRowDraft } from "./mori-context.server";
-import { ebaySoldPrices } from "./silphco.server";
+import { ebaySoldPricesLookup } from "./silphco.server";
 import { cardImage, getCardPricing, priceScale, usdRange } from "./tcgdex";
 
 /** A card's prices for the collector's market: today's market points converted into their currency,
@@ -15,7 +15,7 @@ export async function marketPrices(
 ) {
   const [
     { resolveMarketFx },
-    { localSoldPrices, CONDITIONS },
+    { localSoldPricesLookup, CONDITIONS },
     { browseCandidates, pickBrowseLowest },
   ] = await Promise.all([
     import("./fx.server"),
@@ -28,7 +28,7 @@ export async function marketPrices(
   // as soon as FX resolves using only the market-price floor so it runs alongside sold listings;
   // the sold-based floor is applied afterwards to the returned candidates.
   const fxPromise = resolveMarketFx(market);
-  const localPromise = localSoldPrices(card, market, condition);
+  const localPromise = localSoldPricesLookup(card, market, condition);
   const browsePromise = fxPromise.then(({ market: effMarket, rate: fxRate }) => {
     const marketFloor =
       typeof scale?.market === "number"
@@ -37,10 +37,12 @@ export async function marketPrices(
     return browseCandidates(card, effMarket, condition, marketFloor || undefined).catch(() => ({
       status: "error" as const,
       data: null,
+      fromCache: undefined,
     }));
   });
 
-  const [fx, rawLocal] = await Promise.all([fxPromise, localPromise]);
+  const [fx, localLookup] = await Promise.all([fxPromise, localPromise]);
+  const rawLocal = localLookup.data;
   const effMarket = fx.market;
   const rate = fx.rate;
   const x = (v: number | null | undefined) =>
@@ -55,9 +57,10 @@ export async function marketPrices(
   // Fall back to pooled SilphCo near-mint sold prices when local sold data failed, is
   // unconfigured, or returned zero sales (empty). Never shown for non-near-mint conditions.
   const pooledPromise =
-    hasLocalSales || condition !== "nm" ? Promise.resolve(null) : ebaySoldPrices(card.id);
+    hasLocalSales || condition !== "nm" ? Promise.resolve(null) : ebaySoldPricesLookup(card.id);
 
-  const [pooled, initialBrowse] = await Promise.all([pooledPromise, browsePromise]);
+  const [pooledLookup, initialBrowse] = await Promise.all([pooledPromise, browsePromise]);
+  const pooled = pooledLookup?.data ?? null;
   const label = CONDITIONS[condition].label;
   // Today's lowest listings (worldwide and in their country) from eBay's Browse API, applying a
   // floor at half the recent sold average when present (else 40% of the converted market price) so
@@ -92,12 +95,18 @@ export async function marketPrices(
     sales: v.n ?? null,
     status: v.status,
   });
+  const cache: Record<string, boolean> = {};
+  if (typeof fx.fromCache === "boolean") cache["fx"] = fx.fromCache;
+  if (typeof localLookup.fromCache === "boolean") cache["ebay_sold"] = localLookup.fromCache;
+  if (typeof pooledLookup?.fromCache === "boolean") cache["silphco"] = pooledLookup.fromCache;
+  if (typeof browseResult.fromCache === "boolean") cache["ebay_browse"] = browseResult.fromCache;
   return {
     rate,
     scale,
     local,
     pooled,
     listings,
+    cache,
     forTool: {
       currency: effMarket.currency,
       // Set when no exchange rate was available, so every price here is in US$ instead.

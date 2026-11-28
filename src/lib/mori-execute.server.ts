@@ -3,6 +3,7 @@ import { stringArg, type Args, type DB, type MoriRowDraft } from "./mori-context
 import { buildProposal, gradeReport } from "./mori-proposals.server";
 import { runReadTool } from "./mori-read-tools.server";
 import { isWriteTool, proposalTitle, type ProposalPayload } from "./mori-tools";
+import type { TurnTimer } from "./mori-timing.server";
 
 export type MoriToolContext = {
   /** The collector's message this answer is for (memory templates keep their exact words). */
@@ -13,6 +14,8 @@ export type MoriToolContext = {
   lastCard: string;
   /** Resolve a pair from this turn or from the current chat, never model-supplied paths. */
   orderPhotos: () => Promise<{ front: string; back: string } | null>;
+  /** Optional per-turn timing recorder shared across tool calls and deterministic flows. */
+  timing?: TurnTimer;
 };
 
 function requestPhotos(purpose: "sell" | "grade") {
@@ -267,7 +270,7 @@ export async function executeMoriTool(
       stop = true;
     }
   } else {
-    result = await runReadTool(db, name, args).catch((e: unknown) => ({
+    result = await runReadTool(db, name, args, ctx.timing).catch((e: unknown) => ({
       error: e instanceof Error ? e.message : "Tool failed",
     }));
   }

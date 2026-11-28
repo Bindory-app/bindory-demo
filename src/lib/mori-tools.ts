@@ -99,11 +99,14 @@ export function proposalTitle(p: Proposal): string {
   }
 }
 
+export type MoriErrorCode = "rate_limited" | "timeout" | "upstream" | "aborted" | "internal";
+
 export type MoriStreamEvent =
+  | { type: "ping" }
   | { type: "text"; text: string }
   | { type: "status"; name: string; text: string }
   | { type: "done"; rows: MoriRow[] }
-  | { type: "error"; text: string };
+  | { type: "error"; code: MoriErrorCode; text: string };
 export type MoriRow = {
   id: string;
   role: string;
