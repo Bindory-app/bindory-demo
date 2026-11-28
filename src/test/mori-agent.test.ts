@@ -323,6 +323,33 @@ describe("structured pre-grading", () => {
 });
 
 describe("model flow tools", () => {
+  it("recognises a collector-supplied catalogue id before sentence punctuation", async () => {
+    const { send, rows } = chat();
+    gateway(call("price_check", { card: { id: hit.id } }));
+    await send("Price base1-25.");
+    expect(requests).toHaveLength(1);
+    expect(findCards).not.toHaveBeenCalled();
+    expect(rows.some((r) => r.kind === "price")).toBe(true);
+  });
+  it("matches a hash-prefixed promo number without treating a symbolic denominator as a verified set size", async () => {
+    vi.mocked(findCards).mockResolvedValue([
+      hit,
+      { ...hit, id: "promo-001", number: "001", set: "Promo A" },
+      { ...hit, id: "other-001", number: "1", set: "Promo B" },
+    ]);
+    const { send, rows } = chat();
+    gateway(call("price_check", { card: { name: hit.name, number: "#001/SV-P" } }));
+    await send("Price Pikachu #001/SV-P.");
+    expect(requests).toHaveLength(1);
+    expect(findCards).toHaveBeenCalledWith(hit.name, "001/SV-P", undefined);
+    expect(rows.find((r) => r.kind === "choices")?.payload).toMatchObject({
+      choices: [
+        { intent: { card: { id: "promo-001" } } },
+        { intent: { card: { id: "other-001" } } },
+      ],
+    });
+    expect(getCardPricing).not.toHaveBeenCalled();
+  });
   it("uses the router's photo reading once and resolves the next condition and sell requests from history", async () => {
     vi.mocked(findCards).mockResolvedValue([hit]);
     const { send, rows } = chat();

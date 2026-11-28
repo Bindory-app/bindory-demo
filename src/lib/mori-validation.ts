@@ -28,7 +28,8 @@ const namedCard = z
       .trim()
       .min(1)
       .max(24)
-      .regex(/^[a-z0-9]+(?:\s*\/\s*[a-z0-9]+)?$/i)
+      .regex(/^#?[a-z0-9]+(?:-[a-z0-9]+)*(?:\s*\/\s*[a-z0-9]+(?:-[a-z0-9]+)*)?$/i)
+      .transform((number) => number.replace(/^#/, ""))
       .optional(),
   })
   .strict();

@@ -389,7 +389,9 @@ export async function runMori({
             !card ||
             !("id" in card) ||
             ctx.seenIds.has(card.id) ||
-            message.split(/[^a-z\d.-]+/i).includes(card.id);
+            message
+              .split(/[^a-z\d.-]+/i)
+              .some((token) => token.replace(/^\.+|\.+$/g, "") === card.id);
           if (action && knownCard) {
             const answer = await runIntent(action, kind === "memory" ? args : undefined);
             if (answer) return await finishAnswer(answer);
