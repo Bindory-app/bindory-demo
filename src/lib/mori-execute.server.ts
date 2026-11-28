@@ -7,16 +7,15 @@ import { isWriteTool, proposalTitle, type ProposalPayload } from "./mori-tools";
 export type MoriToolContext = {
   /** The collector's message this answer is for (memory templates keep their exact words). */
   message: string;
-  /** Card ids looked up in this chat; null when the caller cannot know them (the MCP endpoint),
-   *  in which case a card only has to exist in the catalogue. */
-  seenIds: Set<string> | null;
+  /** Card ids looked up in this chat. */
+  seenIds: Set<string>;
   /** The card most recently priced in this answer, so a pre-grade report can name it. */
   lastCard: string;
 };
 
 /** Runs one of Mori's tools for this collector. `rows` are the chat cards it shows (confirmation,
  *  pre-grade report, profiles, storyboard, binders, orders); `stop` means the answer should end
- *  after it. Shared by the AI Gateway loop and the HarnessRouter MCP endpoint. */
+ *  after it. */
 export async function executeMoriTool(
   db: DB,
   userId: string,
@@ -233,7 +232,6 @@ export async function executeMoriTool(
     }
   } else if (
     (name === "add_to_wishlist" || name === "add_card_to_collection") &&
-    ctx.seenIds !== null &&
     !ctx.seenIds.has(stringArg(args["card_id"]) ?? "")
   ) {
     result = {
@@ -266,6 +264,6 @@ export async function executeMoriTool(
       ctx.lastCard = `${c.name}${c.number ? ` ${c.number}` : ""}${c.set ? ` (${c.set})` : ""}`;
   }
   for (const m of JSON.stringify(result ?? null).matchAll(/"(?:id|tcgdex_id)":"([^"]+)"/g))
-    if (m[1]) ctx.seenIds?.add(m[1]);
+    if (m[1]) ctx.seenIds.add(m[1]);
   return { result, rows, stop };
 }

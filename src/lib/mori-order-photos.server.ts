@@ -1,6 +1,6 @@
 import { asObject, type DB } from "./mori-context.server";
 
-export function dataUrlBytes(url: string): { bytes: Uint8Array; type: string } | null {
+function dataUrlBytes(url: string): { bytes: Uint8Array; type: string } | null {
   const m = /^data:([\w/+.-]+);base64,(.+)$/s.exec(url);
   return m?.[1] && m[2] ? { bytes: Buffer.from(m[2], "base64"), type: m[1] } : null;
 }

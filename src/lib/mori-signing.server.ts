@@ -1,13 +1,12 @@
 import { createHmac, hkdfSync, timingSafeEqual } from "node:crypto";
 
-export function moriSecret(): string {
+function moriSecret(): string {
   const s = process.env["MORI_MCP_SECRET"]?.trim();
   if (!s || s.length < 32) throw new Error("MORI_MCP_SECRET is not configured");
   return s;
 }
-export const deriveMoriKey = (info: string) =>
-  Buffer.from(hkdfSync("sha256", moriSecret(), "", info, 32));
-export function sameText(a: string, b: string): boolean {
+const deriveMoriKey = (info: string) => Buffer.from(hkdfSync("sha256", moriSecret(), "", info, 32));
+function sameText(a: string, b: string): boolean {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);

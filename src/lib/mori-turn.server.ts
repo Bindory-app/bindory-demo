@@ -41,15 +41,13 @@ export function replyParts(text: string): string[] {
 }
 
 /** Ends one answer: pulls out the follow-up suggestions, puts the reply before any card, and saves
- *  every row in order after the question. `hr` (HarnessRouter ids) is kept on the turn's last text
- *  or status row so the next message can continue the same session. */
+ *  every row in order after the question. */
 export async function finishMoriTurn(
   db: DB,
   rows: MoriRowDraft[],
   text: string,
   askedAt: number,
   emit: (event: MoriStreamEvent) => void,
-  hr?: { response_id: string; session_id: string; agent?: string },
   /** Show only the cards (a price check's market card): the reply text is dropped, its
    *  suggestions are kept. */
   cardsOnly = false,
@@ -129,17 +127,6 @@ export async function finishMoriTurn(
     rows.push({ role: "mori", kind: "choices", content: "", payload: { choices } });
   if (suggestions.length)
     rows.push({ role: "mori", kind: "suggest", content: "", payload: { suggestions } });
-  if (hr) {
-    const holder = [...rows].reverse().find((r) => r.kind === "text" || r.kind === "status");
-    if (holder)
-      holder.payload = {
-        ...(holder.payload && typeof holder.payload === "object" && !Array.isArray(holder.payload)
-          ? holder.payload
-          : {}),
-        hr,
-      } as Json;
-    else rows.push({ role: "mori", kind: "status", content: "Answered", payload: { hr } as Json });
-  }
   // One insert gives every row the same time, and history is read back in time order, so give each
   // row its own millisecond (after the question) to keep the answer in order next time.
   const base = Math.max(Date.now(), Number.isFinite(askedAt) ? askedAt + 1 : 0);

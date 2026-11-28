@@ -86,20 +86,18 @@ export const Route = createFileRoute("/api/mori-chat")({
             };
             // On Vercel each request carries a short-lived OIDC token that AI Gateway accepts directly.
             const oidcToken = request.headers.get("x-vercel-oidc-token");
-            // The collector's own session: the HarnessRouter path seals it for Mori's tool endpoint.
-            const task = runMori(
+            const task = runMori({
               db,
               userId,
               message,
               emit,
-              abort.signal,
+              signal: abort.signal,
               oidcToken,
               images,
               since,
-              token.slice(7),
               location,
               country,
-            )
+            })
               .catch((error) => {
                 console.error(
                   "Mori chat failed",

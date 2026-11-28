@@ -1,4 +1,29 @@
 import { describe, expect, it } from "vitest";
+import { isCollectrFollowUp } from "@/lib/collectr";
+
+describe("Collectr follow-ups", () => {
+  it("accepts explicit sync instructions and whole replies to a sync proposal", () => {
+    for (const reply of [
+      "Go ahead.",
+      "Only the first 20 cards!",
+      "retry the sync",
+      "Collectr sync: skip duplicates",
+    ])
+      expect(isCollectrFollowUp(reply)).toBe(true);
+  });
+  it("leaves unrelated and mixed requests in chat", () => {
+    for (const reply of [
+      "Price Pikachu",
+      "Set a sell order",
+      "Save a memory about my sync",
+      "Go ahead and price this",
+      "Only the first 20 cards went up?",
+      "Where is a card show near me?",
+      "yes",
+    ])
+      expect(isCollectrFollowUp(reply)).toBe(false);
+  });
+});
 
 describe("Collectr sync", () => {
   it("spots the sync message, its binder, and checks the link", async () => {

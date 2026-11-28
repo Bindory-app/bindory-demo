@@ -1,9 +1,9 @@
-import { routeMoriMessage } from "./mori-agents";
 import { SYSTEM, tools } from "./mori-prompt.server";
 import {
   COLLECTR_BAD_LINK,
   collectrSyncBinder,
   collectrSyncLink,
+  isCollectrFollowUp,
   isCollectrLink,
 } from "./collectr";
 import { TOOL_STATUS, type MoriStreamEvent, type MoriRow } from "./mori-tools";
@@ -61,33 +61,35 @@ async function streamWithFallback(
   }
 }
 
-/** Which agent runtime answers: "harnessrouter" (the Ask Mori harness) or "gateway" (default, and
- *  the rollback). Set with MORI_RUNTIME in the server environment. */
-const moriRuntime = (): "harnessrouter" | "gateway" =>
-  process.env["MORI_RUNTIME"]?.trim() === "harnessrouter" ? "harnessrouter" : "gateway";
-
-/** Server execution only: shared by the authenticated RPC and streaming HTTP handler. */
-export async function runMori(
-  db: DB,
-  userId: string,
-  message: string,
-  emit: (event: MoriStreamEvent) => void = () => {},
-  signal?: AbortSignal,
-  oidcToken?: string | null,
-  images: string[] = [],
-  since?: string,
-  accessToken?: string,
-  location?: string,
-  country?: string,
-) {
-  // HarnessRouter runs Mori when MORI_RUNTIME=harnessrouter; it needs the collector's session for
-  // the tool endpoint, so callers without one (the plain RPC) stay on AI Gateway.
-  const onHarness = moriRuntime() === "harnessrouter" && Boolean(accessToken);
-  const past = onHarness ? [] : await history(db, since);
+/** Run a turn with the signed-in collector's RLS-scoped client. */
+export async function runMori({
+  db,
+  userId,
+  message,
+  emit,
+  signal,
+  oidcToken,
+  images = [],
+  since,
+  location,
+  country,
+}: {
+  db: DB;
+  userId: string;
+  message: string;
+  emit: (event: MoriStreamEvent) => void;
+  signal?: AbortSignal;
+  oidcToken?: string | null;
+  images?: string[];
+  since?: string | undefined;
+  location?: string | undefined;
+  country?: string | undefined;
+}) {
   // The stored text notes the photos so later turns know they were sent (the images themselves are not stored).
   const stored = images.length
     ? `${message}\n[Sent ${images.length === 1 ? "a card photo: the front" : `${images.length} card photos: front and back`}]`
     : message;
+  const past = await history(db, since);
   const ins = await db
     .from("mori_messages")
     // The chat this message belongs to (its start time, sent by the app), so History lists one
@@ -98,11 +100,11 @@ export async function runMori(
   if (ins.error) throw ins.error;
   const askedAt = Date.parse(ins.data.created_at);
   // "Sync from Collectr" runs on its own harness in the background (collectr-sync.server.ts);
-  // a plain follow-up right after a finished sync continues that task.
+  // only an explicit follow-up can continue a finished task.
   const collectr = collectrSyncLink(message);
   const { startSync, latestSync } = await import("./collectr-sync.server");
   const priorSync =
-    collectr === null && !routeMoriMessage(message, images.length > 0)
+    collectr === null && !images.length && isCollectrFollowUp(message)
       ? await latestSync(db, userId, since)
       : null;
   if (collectr !== null || priorSync) {
@@ -134,22 +136,6 @@ export async function runMori(
         emit,
       );
     }
-  }
-  if (onHarness && accessToken) {
-    const { runMoriHarness } = await import("./mori-harness.server");
-    return runMoriHarness(
-      db,
-      userId,
-      accessToken,
-      message,
-      emit,
-      images,
-      since,
-      askedAt,
-      signal,
-      location,
-      country,
-    );
   }
 
   const input: ResponsesInputItem[] = [

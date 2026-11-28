@@ -25,7 +25,7 @@ interface FileRef {
   filename?: string | undefined;
   download_url?: string | undefined;
 }
-export interface OutputItem {
+interface OutputItem {
   id?: string;
   type: string;
   role?: string;
@@ -42,7 +42,7 @@ export interface HRResponse {
   incomplete_details?: { reason?: string } | null;
   metadata?: { session_id?: string; [k: string]: unknown };
 }
-export class HRError extends Error {
+class HRError extends Error {
   readonly status: number;
   readonly code: string;
   constructor(status: number, body: unknown) {
@@ -55,9 +55,6 @@ export class HRError extends Error {
     this.name = "HRError";
     this.status = status;
     this.code = typeof e["code"] === "string" ? e["code"] : "unknown";
-  }
-  get retryable() {
-    return [429, 502, 503, 504].includes(this.status);
   }
 }
 
@@ -75,7 +72,7 @@ function hrApiKey(): string {
   return (cachedKey = line.slice("HR_API_KEY=".length).trim());
 }
 
-export async function callHarnessRouter(
+async function callHarnessRouter(
   path: string,
   init: RequestInit & { headers?: Record<string, string> } = {},
 ) {
