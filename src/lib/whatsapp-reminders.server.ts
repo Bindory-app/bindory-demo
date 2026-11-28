@@ -32,7 +32,7 @@ export async function sweepReminders(request: Request) {
               // Another invocation or inbound turn may have claimed the slot, activated the order, or unlinked.
               const link = await claimReminder(candidate, !!template);
               if (link) {
-                const inside = Date.parse(link.last_inbound) > Date.now() - 864e5;
+                const inside = link.freeform_until && Date.parse(link.freeform_until) > Date.now();
                 const message = inside
                   ? buttonMessage(paymentReminder, [
                       { id: "pay:resume", title: "Add payment method" },

@@ -8,10 +8,10 @@ vi.mock("@/lib/whatsapp-state.server", () => ({
 }));
 vi.mock("@/lib/whatsapp-cloud.server", () => ({ sendWhatsApp: f.send }));
 const time = Date.UTC(2026, 10, 27, 12),
-  inside = new Date(time - 864e5 + 1).toISOString(),
-  outside = new Date(time - 864e5).toISOString();
+  inside = new Date(time + 1).toISOString(),
+  outside = new Date(time).toISOString();
 const candidate = { user_id: "mock-user", channel_id: "mock-channel" };
-const link = (at: string) => ({ ...candidate, phone: null, bsuid: "US.mock", last_inbound: at });
+const link = (deadline: string) => ({ phone: null, bsuid: "US.mock", freeform_until: deadline });
 const run = (auth = "Bearer mock-secret") =>
   sweepReminders(
     new Request("https://example.invalid/api/whatsapp-reminders", {
@@ -114,7 +114,8 @@ it("keeps candidate scans service-only, read-only, keyset ordered and filtered t
     "SECURITY INVOKER",
     "p_after IS NULL OR l.user_id>p_after",
     "l.last_reminder<=now()-interval '24 hours'",
-    "p_template OR l.last_inbound>now()-interval '24 hours'",
+    "p_template OR public.whatsapp_freeform_until(l.last_inbound)>now()",
+    "GRANT SELECT ON public.market_orders TO service_role",
     "o.status='pending' AND o.expires_at>now()",
     "ORDER BY l.user_id LIMIT",
     "FROM PUBLIC,anon,authenticated",
@@ -125,17 +126,29 @@ it("keeps candidate scans service-only, read-only, keyset ordered and filtered t
 });
 it("keeps the rolling slot across unlink/relink without retaining either sender identity", () => {
   const sql = readFileSync("setup/018_whatsapp_reminders.sql", "utf8");
-  const table = sql.split("CREATE TABLE public.whatsapp_reminder_slots (")[1]!.split(");")[0]!;
+  const table = sql
+    .split("CREATE TABLE IF NOT EXISTS public.whatsapp_reminder_slots (")[1]!
+    .split(");")[0]!;
   expect(table).toContain("user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE");
   expect(table).not.toMatch(/phone|bsuid|channel|order_id/);
   for (const part of [
     "REVOKE ALL ON public.whatsapp_reminder_slots FROM PUBLIC,anon,authenticated",
     "BEFORE UPDATE OF last_reminder ON public.whatsapp_links",
     "ON CONFLICT(user_id) DO UPDATE",
+    "greatest(s.reminded_at,EXCLUDED.reminded_at)",
+    "NEW.last_reminder IS DISTINCT FROM OLD.last_reminder",
     "s.reminded_at<=EXCLUDED.reminded_at-interval '24 hours'",
     "IF NOT FOUND THEN RETURN NULL",
     "SELECT user_id,last_reminder FROM public.whatsapp_links",
     "NOT EXISTS (SELECT 1 FROM public.whatsapp_reminder_slots",
   ])
     expect(sql).toContain(part);
+});
+it("uses one database-defined 60-second guard for enumeration, claim and the returned send deadline", () => {
+  const claim = readFileSync("setup/017_whatsapp.sql", "utf8");
+  expect(claim).toContain("SELECT p_at + interval '24 hours' - interval '60 seconds'");
+  expect(claim).toContain("p_template OR public.whatsapp_freeform_until(l.last_inbound)>now()");
+  expect(claim).toContain(
+    "RETURNING l.phone,l.bsuid,public.whatsapp_freeform_until(l.last_inbound)",
+  );
 });

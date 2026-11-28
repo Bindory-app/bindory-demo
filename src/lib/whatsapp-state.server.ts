@@ -133,7 +133,7 @@ export async function claimReminder(l: ReminderCandidate, allowTemplate = false)
     })
     .maybeSingle();
   if (error) throw error;
-  return data as (Address & { freeform_until: string }) | null;
+  return data as (Address & { freeform_until: string | null }) | null;
 }
 export async function unlinkWhatsApp(l: Linked) {
   const { error } = await store
