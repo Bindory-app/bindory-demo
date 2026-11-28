@@ -103,7 +103,7 @@ export async function paymentLink(nonce: string): Promise<Linked | null> {
   if (error) throw error;
   return data as Linked | null;
 }
-export async function claimReminder(l: Linked, allowTemplate = false): Promise<Linked | null> {
+export async function claimReminder(l: Linked, allowTemplate = false) {
   const { data, error } = await store
     .rpc("claim_whatsapp_reminder", {
       p_user: l.user_id,
@@ -112,7 +112,7 @@ export async function claimReminder(l: Linked, allowTemplate = false): Promise<L
     })
     .maybeSingle();
   if (error) throw error;
-  return data as Linked | null;
+  return data as (Address & { freeform_until: string }) | null;
 }
 export async function unlinkWhatsApp(l: Linked) {
   const { error } = await store

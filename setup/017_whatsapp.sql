@@ -68,14 +68,22 @@ $$;
 
 -- Inbound and scheduled reminders must compete for the same daily slot. Recheck eligibility here.
 GRANT SELECT ON public.market_orders TO service_role;
-CREATE OR REPLACE FUNCTION public.claim_whatsapp_reminder(p_user uuid,p_channel uuid,p_template boolean)
-RETURNS SETOF public.whatsapp_links LANGUAGE sql SECURITY INVOKER SET search_path=public AS $$
+CREATE OR REPLACE FUNCTION public.whatsapp_freeform_until(p_at timestamptz) RETURNS timestamptz
+LANGUAGE sql STABLE STRICT SECURITY INVOKER SET search_path=public AS $$
+ SELECT p_at + interval '24 hours' - interval '60 seconds';
+$$;
+REVOKE ALL ON FUNCTION public.whatsapp_freeform_until(timestamptz) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.whatsapp_freeform_until(timestamptz) TO service_role;
+-- The old return type was the entire channel row. Expose only the recipient and safety deadline.
+DROP FUNCTION IF EXISTS public.claim_whatsapp_reminder(uuid,uuid,boolean);
+CREATE FUNCTION public.claim_whatsapp_reminder(p_user uuid,p_channel uuid,p_template boolean)
+RETURNS TABLE(phone text,bsuid text,freeform_until timestamptz) LANGUAGE sql SECURITY INVOKER SET search_path=public AS $$
  UPDATE public.whatsapp_links l SET last_reminder=now()
  WHERE l.user_id=p_user AND l.channel_id=p_channel AND (l.phone IS NOT NULL OR l.bsuid IS NOT NULL)
  AND (l.last_reminder IS NULL OR l.last_reminder<=now()-interval '24 hours')
- AND (p_template OR l.last_inbound>now()-interval '24 hours')
+ AND (p_template OR public.whatsapp_freeform_until(l.last_inbound)>now())
  AND EXISTS (SELECT 1 FROM public.market_orders o WHERE o.user_id=l.user_id AND o.status='pending' AND o.expires_at>now())
- RETURNING l.*;
+ RETURNING l.phone,l.bsuid,public.whatsapp_freeform_until(l.last_inbound);
 $$;
 REVOKE ALL ON FUNCTION public.bind_whatsapp(uuid,text,text,timestamptz),public.pair_whatsapp_photo(uuid,uuid,text,text),public.touch_whatsapp(text,text,timestamptz),public.claim_whatsapp_reminder(uuid,uuid,boolean) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.bind_whatsapp(uuid,text,text,timestamptz),public.pair_whatsapp_photo(uuid,uuid,text,text),public.touch_whatsapp(text,text,timestamptz),public.claim_whatsapp_reminder(uuid,uuid,boolean) TO service_role;
