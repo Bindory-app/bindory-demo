@@ -4,7 +4,7 @@ import { buildProposal, gradeReport, gradeReportRow } from "./mori-proposals.ser
 import { runReadTool } from "./mori-read-tools.server";
 import { isWriteTool, proposalTitle, type ProposalPayload } from "./mori-tools";
 import type { TurnTimer } from "./mori-timing.server";
-import type { OrderIntent } from "./mori-validation";
+import type { OrderIntent, PreGradeIntent } from "./mori-validation";
 import { NEED_USD } from "./mori-order-money.server";
 
 export type MoriToolContext = {
@@ -20,10 +20,14 @@ export type MoriToolContext = {
   orderPhotos: () => Promise<{ front: string; back: string } | null>;
   /** Optional per-turn timing recorder shared across tool calls and deterministic flows. */
   timing?: TurnTimer;
-  orderIntent?: OrderIntent;
+  photoIntent?: OrderIntent | PreGradeIntent;
 };
 
-function requestPhotos(purpose: "sell" | "grade", intent?: OrderIntent) {
+function requestPhotos(purpose: "sell" | "grade", pending?: MoriToolContext["photoIntent"]) {
+  const intent =
+    purpose === "grade"
+      ? pending?.kind === "pre_grade" && pending
+      : pending?.kind === "order" && pending.side === "sell" && pending;
   return {
     rows: [
       {
@@ -32,7 +36,7 @@ function requestPhotos(purpose: "sell" | "grade", intent?: OrderIntent) {
         content: "Front and back photos of your card",
         payload: {
           for: purpose,
-          ...(purpose === "sell" && intent?.side === "sell" ? { intent } : {}),
+          ...(intent ? { intent } : {}),
         },
       },
     ],
@@ -153,7 +157,7 @@ export async function executeMoriTool(
       };
     }
   } else if (name === "request_card_photos") {
-    return requestPhotos(args["purpose"] === "grade" ? "grade" : "sell", ctx.orderIntent);
+    return requestPhotos(args["purpose"] === "grade" ? "grade" : "sell", ctx.photoIntent);
   } else if (name === "plan_video") {
     // Storyboard from the collector's own cards; they post or save it with a button.
     const scenes = (Array.isArray(args["scenes"]) ? (args["scenes"] as Args[]) : []).slice(0, 6);
@@ -258,7 +262,7 @@ export async function executeMoriTool(
     };
   } else if (isWriteTool(name)) {
     const sell = name === "set_order" && args["side"] === "sell";
-    if (sell && !ctx.hasOrderPhotos) return requestPhotos("sell", ctx.orderIntent);
+    if (sell && !ctx.hasOrderPhotos) return requestPhotos("sell", ctx.photoIntent);
     const p = await buildProposal(db, userId, name, args, ctx.message, ctx.seenIds);
     if ("error" in p) {
       result = p;
@@ -266,7 +270,7 @@ export async function executeMoriTool(
       if (name === "set_order" && p.error === NEED_USD) stop = true;
     } else {
       const photos = sell ? await ctx.orderPhotos() : null;
-      if (sell && !photos) return requestPhotos("sell", ctx.orderIntent);
+      if (sell && !photos) return requestPhotos("sell", ctx.photoIntent);
       if (p.tool === "set_order" && ctx.orderReference?.id === p.card.tcgdex_id)
         p.market_reference = ctx.orderReference.point;
       const payload: ProposalPayload = { ...p, ...(photos ? { photos } : {}), status: "pending" };

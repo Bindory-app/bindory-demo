@@ -1,8 +1,9 @@
+import { z } from "zod";
 import type { ResponsesFunctionTool, ResponsesInputItem } from "./ai-gateway.server";
 import type { Args, MoriRowDraft } from "./mori-context.server";
 import type { Market } from "./market";
 import type { MoriStreamEvent } from "./mori-tools";
-import type { OrderIntent, PriceCheckIntent } from "./mori-validation";
+import type { OrderIntent, PreGradeIntent, PriceCheckIntent } from "./mori-validation";
 import type { findCards } from "./tcgdex";
 
 export type IntentTools = {
@@ -15,12 +16,35 @@ export type IntentTools = {
     tool: ResponsesFunctionTool,
     instructions: string,
     input: ResponsesInputItem[],
+    options?: { maxOutputTokens: number },
   ) => Promise<unknown>;
   signal?: AbortSignal | undefined;
 };
 export type IntentAnswer = { row?: MoriRowDraft; text: string; cardsOnly?: boolean };
 type Candidate = Awaited<ReturnType<typeof findCards>>[number];
 export type CardQuery = { name: string; number?: string | undefined; set?: string | undefined };
+
+export const cardReadingParameters = {
+  type: "object",
+  properties: {
+    confidence: { type: "string", enum: ["high", "low"] },
+    name: { type: "string" },
+    number: { type: "string" },
+    set: { type: "string" },
+  },
+  required: ["name", "confidence"],
+  additionalProperties: false,
+};
+const photoReading = z.object({
+  confidence: z.enum(["high", "low"]),
+  name: z.string().trim().min(1).max(160),
+  number: z.string().trim().max(24).optional(),
+  set: z.string().trim().max(160).optional(),
+});
+export function confidentCardReading(raw: unknown): CardQuery | null {
+  const result = photoReading.safeParse(raw);
+  return result.success && result.data.confidence === "high" ? result.data : null;
+}
 
 function plausibleMatches(query: CardQuery, result: unknown): Candidate[] {
   if (!Array.isArray(result)) return [];
@@ -46,7 +70,7 @@ function plausibleMatches(query: CardQuery, result: unknown): Candidate[] {
 /** Resolve the printing or return choices that resume exactly the same collector action. */
 export async function resolveIntentCard(
   card: { id: string } | CardQuery,
-  intent: PriceCheckIntent | OrderIntent,
+  intent: PriceCheckIntent | OrderIntent | PreGradeIntent,
   runTool: IntentTools["runTool"],
 ): Promise<string | IntentAnswer | null> {
   if ("id" in card) return card.id;
@@ -58,6 +82,8 @@ export async function resolveIntentCard(
   const matches = plausibleMatches(query, (await runTool("search_catalogue", query)).result);
   if (!matches.length) return null;
   if (matches.length === 1) return matches[0]!.id;
+  // A pre-grade can still show the assessment without a price for an ambiguous printing.
+  if (intent.kind === "pre_grade") return null;
   return {
     text:
       intent.kind === "order"

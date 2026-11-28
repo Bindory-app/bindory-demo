@@ -1,6 +1,7 @@
 import { SYSTEM, tools } from "./mori-prompt.server";
 import { parseMoriIntent } from "./mori-validation";
-import type { IntentTools } from "./mori-intent-card.server";
+import type { IntentAnswer, IntentTools } from "./mori-intent-card.server";
+import { runPreGrade } from "./mori-pre-grade.server";
 import { runPriceCheck } from "./mori-price-check.server";
 import { runOrder, PHOTO_INSTRUCTIONS } from "./mori-order.server";
 import { marketFor } from "./market";
@@ -135,10 +136,10 @@ export async function runMori({
     message,
     seenIds: new Set<string>(),
     lastCard: "",
-    hasOrderPhotos: images.length === 2,
+    hasOrderPhotos: images.length === 2 && intent?.kind !== "pre_grade",
     orderPhotos: () => (saved ??= saveOrderPhotos(db, userId, images)),
     timing: timer,
-    ...(intent?.kind === "order" ? { orderIntent: intent } : {}),
+    ...(intent?.kind === "order" || intent?.kind === "pre_grade" ? { photoIntent: intent } : {}),
   };
   const runTool = async (name: string, args: Args) => {
     const content = TOOL_STATUS[name] ?? "Working on it";
@@ -166,7 +167,7 @@ export async function runMori({
   };
 
   // Structured flows make at most one forced call each; it is timed like a loop turn (turn 0).
-  const callTool: IntentTools["callTool"] = async (tool, instructions, callInput) => {
+  const callTool: IntentTools["callTool"] = async (tool, instructions, callInput, options) => {
     const started = Date.now();
     let model = "";
     const record = (ok: boolean, code?: string) =>
@@ -179,6 +180,7 @@ export async function runMori({
       });
     try {
       const out = await callToolOnce(tool, instructions, callInput, {
+        ...options,
         signal,
         oidcToken,
         onModel: (m) => {
@@ -193,22 +195,28 @@ export async function runMori({
     }
   };
 
+  const options: IntentTools = { images, market, runTool, emit, signal, callTool };
+  let structured: Promise<IntentAnswer | null> | undefined;
   switch (intent?.kind) {
     case "price_check":
-    case "order": {
-      const options: IntentTools = { images, market, runTool, emit, signal, callTool };
-      const answer = await (
-        intent.kind === "order" ? runOrder(intent, options) : runPriceCheck(intent, options)
-      ).catch((error: unknown) => {
-        if (signal?.aborted) throw error;
-        console.warn("Structured Mori request unavailable; continuing in chat");
-        return null;
-      });
-      if (answer) {
-        if (answer.row) rows.push(answer.row);
-        return finishMoriTurn(db, rows, answer.text, askedAt, emit, answer.cardsOnly);
-      }
+      structured = runPriceCheck(intent, options);
       break;
+    case "order":
+      structured = runOrder(intent, options);
+      break;
+    case "pre_grade":
+      structured = runPreGrade(intent, options);
+      break;
+  }
+  if (structured) {
+    const answer = await structured.catch((error: unknown) => {
+      if (signal?.aborted) throw error;
+      console.warn("Structured Mori request unavailable; continuing in chat");
+      return null;
+    });
+    if (answer) {
+      if (answer.row) rows.push(answer.row);
+      return finishMoriTurn(db, rows, answer.text, askedAt, emit, answer.cardsOnly);
     }
   }
 

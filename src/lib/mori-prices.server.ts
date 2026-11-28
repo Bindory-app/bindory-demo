@@ -1,6 +1,6 @@
 import type { Json } from "@/integrations/supabase/types";
 import type { Market } from "./market";
-import type { MoriRowDraft } from "./mori-context.server";
+import { asObject, type Args, type MoriRowDraft } from "./mori-context.server";
 import { ebaySoldPricesLookup } from "./silphco.server";
 import { cardImage, getCardPricing, priceScale, usdRange } from "./tcgdex";
 
@@ -158,6 +158,22 @@ export async function priceMoves(ids: string[]) {
   return moves;
 }
 
+export function rawPriceHeadline(tool: Args) {
+  const raw = asObject(asObject(tool["recent_sold"])["raw"]);
+  const listings = asObject(tool["listings"]);
+  // Use the last three raw sales, pooled sales, local/worldwide listing or converted market point.
+  return [
+    raw["avg_last_3"],
+    raw["value"],
+    asObject(listings["lowest_in_country"])["total"],
+    asObject(listings["lowest_worldwide"])["total"],
+    asObject(tool["price_points"])["market"],
+  ].find(
+    (amount): amount is number =>
+      typeof amount === "number" && Number.isFinite(amount) && amount > 0,
+  );
+}
+
 /** A chat card with delivered listings and recent raw sales in the collector's currency. */
 export async function priceCardRow(
   cardId: string,
@@ -208,15 +224,7 @@ export async function priceCardRow(
     listings_read?: boolean;
   } | null;
   if (!pts && !sold && !lst) return null;
-  // Prefer the average of the last 3 sales, then the pooled fallback. Without a sold price, use
-  // the lowest local listing, then worldwide, then the converted market price.
-  const headline =
-    sold?.["raw"]?.avg_last_3 ??
-    sold?.["raw"]?.value ??
-    lst?.lowest_in_country?.total ??
-    lst?.lowest_worldwide?.total ??
-    pts?.["market"] ??
-    undefined;
+  const headline = rawPriceHeadline(tool);
   return {
     role: "mori",
     kind: "price",

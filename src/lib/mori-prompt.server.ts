@@ -66,6 +66,66 @@ export const conditionParameters = {
   required: ["overall"],
 };
 
+export const preGradeReportTool = {
+  type: "function",
+  name: "pre_grade_report",
+  description:
+    "Show the collector a pre-grade report from the card photos: Should I grade? (likely grades with probabilities), Mori's take, and a detailed subgrade report for PSA, CGC, BGS and TAG.",
+  strict: false,
+  parameters: {
+    type: "object",
+    properties: {
+      card: str("Card name and number, e.g. Mega Charizard X ex 125/094"),
+      outcomes: {
+        type: "array",
+        description:
+          "Two to four distinct whole grades from 1 to 10, probabilities adding up to 100",
+        items: {
+          type: "object",
+          properties: {
+            grade: { type: "integer", minimum: 1, maximum: 10 },
+            probability: { type: "number" },
+            reason: str("Short visible reason, e.g. Centering is outside 55/45"),
+          },
+          required: ["grade", "probability", "reason"],
+        },
+      },
+      take: str("Mori's take: one or two plain sentences, is it worth sending?"),
+      confidence: { type: "number", description: "0-100" },
+      subgrades: {
+        type: "object",
+        description: "Scores 0-100 per aspect, per grading company",
+        properties: Object.fromEntries(
+          ["centering", "corners", "edges", "surface"].map((k) => [
+            k,
+            {
+              type: "object",
+              properties: {
+                psa: { type: "number" },
+                cgc: { type: "number" },
+                bgs: { type: "number" },
+                tag: { type: "number" },
+              },
+            },
+          ]),
+        ),
+      },
+      overall: {
+        type: "object",
+        description: "Likely whole grade (1-10) per company",
+        properties: {
+          psa: { type: "number" },
+          cgc: { type: "number" },
+          bgs: { type: "number" },
+          tag: { type: "number" },
+        },
+      },
+      notes: str("Short notes line, e.g. 60/40 back · light corner whitening"),
+    },
+    required: ["outcomes", "take", "confidence", "subgrades", "overall"],
+  },
+} as const;
+
 export const tools: NonNullable<ResponsesRequest["tools"]> = [
   {
     type: "function",
@@ -105,64 +165,7 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
       required: ["card_id"],
     },
   },
-  {
-    type: "function",
-    name: "pre_grade_report",
-    description:
-      "Show the collector a pre-grade report from the card photos: Should I grade? (likely grades with probabilities), Mori's take, and a detailed subgrade report for PSA, CGC, BGS and TAG.",
-    strict: false,
-    parameters: {
-      type: "object",
-      properties: {
-        card: str("Card name and number, e.g. Mega Charizard X ex 125/094"),
-        outcomes: {
-          type: "array",
-          description: "The three most likely grades, probabilities adding up to 100",
-          items: {
-            type: "object",
-            properties: {
-              grade: { type: "number" },
-              probability: { type: "number" },
-              reason: str("Short visible reason, e.g. Centering is outside 55/45"),
-            },
-            required: ["grade", "probability", "reason"],
-          },
-        },
-        take: str("Mori's take: one or two plain sentences, is it worth sending?"),
-        confidence: { type: "number", description: "0-100" },
-        subgrades: {
-          type: "object",
-          description: "Scores 0-100 per aspect, per grading company",
-          properties: Object.fromEntries(
-            ["centering", "corners", "edges", "surface"].map((k) => [
-              k,
-              {
-                type: "object",
-                properties: {
-                  psa: { type: "number" },
-                  cgc: { type: "number" },
-                  bgs: { type: "number" },
-                  tag: { type: "number" },
-                },
-              },
-            ]),
-          ),
-        },
-        overall: {
-          type: "object",
-          description: "Likely overall grade per company",
-          properties: {
-            psa: { type: "number" },
-            cgc: { type: "number" },
-            bgs: { type: "number" },
-            tag: { type: "number" },
-          },
-        },
-        notes: str("Short notes line, e.g. 60/40 back · light corner whitening"),
-      },
-      required: ["outcomes", "take", "confidence", "subgrades", "overall"],
-    },
-  },
+  preGradeReportTool,
   {
     type: "function",
     name: "my_price_movers",

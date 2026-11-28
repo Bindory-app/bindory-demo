@@ -338,10 +338,16 @@ export async function callToolOnce(
   tool: ResponsesFunctionTool,
   instructions: string,
   input: ResponsesInputItem[],
-  options: GatewayOptions = {},
+  options: GatewayOptions & { maxOutputTokens?: number } = {},
 ): Promise<unknown> {
   const stream = await streamResponse(
-    { instructions, input, tools: [tool], tool_choice: "required", max_output_tokens: 500 },
+    {
+      instructions,
+      input,
+      tools: [tool],
+      tool_choice: "required",
+      max_output_tokens: options.maxOutputTokens ?? 500,
+    },
     options,
   );
   for await (const event of stream) {
