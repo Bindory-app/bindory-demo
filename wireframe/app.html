@@ -6451,6 +6451,10 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   // Order alerts and the demo payment method (setup/010). Only a label is stored, never payment details.
   const paymentLabels = { card: "Debit or credit card", crypto: "Crypto wallet", paypal: "PayPal", google_pay: "Google Pay" };
   const paymentReminder = "You have pending orders. Add a payment method to make them live.";
+  let walletGroup = 0, connectingOwner = null;
+  function clearPaymentSteps() {
+    app.querySelectorAll("[data-bd-payment-step]").forEach(el => el.closest(".cp-mori-msg")?.remove());
+  }
   function afterOrderConfirm(order, status, uid) {
     if (status === "pending") pendingOrderStep("alerts", uid);
     else if (!status && P.orderNext) setTimeout(() => {
@@ -6468,7 +6472,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
         option("push", "Phone notification", settings.alert_push !== false) + option("email", "Email", !!settings.alert_email);
       actions = button("alerts", "Save preferences", true) + button("skip-alerts", "Not now");
     } else if (step === "wallet") {
-      const group = "bd-wallet-" + crypto.randomUUID();
+      const group = "bd-wallet-" + (window.crypto?.randomUUID?.() || Date.now()) + "-" + ++walletGroup;
       body = '<small>2 of 2</small><b>Connect a payment method</b><p>Connect to activate all your pending, unexpired orders.</p><div class="cp-order-wallets">' +
         Object.entries(paymentLabels).map(([key, label]) => '<label><input type="radio" name="' + group + '" value="' + key + '"' +
           (key === (settings.wallet || "card") ? ' checked' : '') + '><span><b>' + label + '</b></span></label>').join("") +
@@ -6478,6 +6482,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       body = "<b>" + (step === "reminder" ? paymentReminder : "Payment skipped. Your order stays pending until you connect a payment method.") + "</b>";
       actions = button("wallet", "Add payment method", true);
     }
+    clearPaymentSteps();
     P.moriUI.say('<div class="cp-order-step" data-bd-payment-step="' + step + '" data-bd-payment-owner="' + esc(uid) + '">' + body + '<div class="cp-mori-actions">' + actions + '</div></div>');
   }
   app.addEventListener("click", async (e) => {
@@ -6485,10 +6490,11 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     if (!b || b.disabled) return;
     const box = b.closest("[data-bd-payment-owner]"), uid = box.dataset.bdPaymentOwner;
     if (session?.user.id !== uid) return;
+    const action = b.dataset.bdPayment;
+    if (action === "connect" && connectingOwner === uid) return;
     const controls = box.querySelectorAll("button,input");
     const lock = (value) => controls.forEach(el => el.disabled = value);
     lock(true);
-    const action = b.dataset.bdPayment;
     try {
       if (action === "alerts") {
         let push = box.querySelector('[data-bd-alert="push"]').checked;
@@ -6497,14 +6503,15 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
           try { push = "Notification" in window && await Notification.requestPermission() === "granted"; }
           catch { push = false; }
         }
-        if (session?.user.id !== uid) return;
+        if (session?.user.id !== uid || !app.contains(box)) return;
         const prefs = { alert_push: push, alert_email: email };
         const { error } = await sb.from("order_settings").upsert({ user_id: uid, ...prefs, updated_at: new Date().toISOString() });
         if (error) throw error;
-        if (session?.user.id !== uid) return;
+        if (session?.user.id !== uid || !app.contains(box)) return;
         Object.assign(P.orderSettings, prefs);
       }
       if (action === "connect") {
+        connectingOwner = uid;
         const wallet = box.querySelector("input:checked").value;
         const { data, error } = await sb.rpc("connect_order_payment", { p_wallet: wallet });
         if (error || !Array.isArray(data?.activated_ids)) throw new Error("activation not confirmed");
@@ -6512,15 +6519,17 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
         P.orderSettings.wallet = wallet;
         const n = data.activated_ids.length;
         P.moriUI.say("<p>" + (n === 1 ? "Payment method connected. One order is now live." : n ? "Payment method connected. " + n + " orders are now live." : "Payment method connected. No pending orders needed activation.") + "</p>");
-        app.querySelectorAll('[data-bd-payment-step="reminder"],[data-bd-payment-step="pending"]').forEach(el => el.closest(".cp-mori-msg")?.remove());
+        clearPaymentSteps();
         refreshOrders(app);
       } else {
         pendingOrderStep(action === "skip-wallet" ? "pending" : "wallet", uid);
       }
     } catch {
-      if (session?.user.id !== uid) return;
+      if (session?.user.id !== uid || !app.contains(box)) return;
       lock(false);
       P.toast(action === "connect" ? "Could not confirm activation. Try Connect again." : "Could not save notification preferences. Try again or choose Not now.");
+    } finally {
+      if (action === "connect" && connectingOwner === uid) connectingOwner = null;
     }
   });
 
@@ -6665,7 +6674,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     await fresh();
     const { data, error } = await sb.from("market_orders").update({ status: "cancelled" }).eq("id", item.dataset.orderId).in("status", ["open", "pending"]).gt("expires_at", new Date().toISOString()).select("id").maybeSingle();
     if (!data || error) { act.querySelectorAll("button").forEach((x) => (x.disabled = false)); refreshOrders(app); P.toast("Could not cancel that. Please try again."); return; }
-    showOrderStatus(item.parentElement, {id:data.id, status:"cancelled"});
+    showOrderStatus(app, {id:data.id, status:"cancelled"});
     P.toast("Order cancelled");
   });
 

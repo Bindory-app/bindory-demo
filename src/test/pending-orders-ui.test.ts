@@ -86,8 +86,9 @@ function setup(uid = "collector", pending = true, push = true) {
 describe("pending payment steps", () => {
   it("shows pending payment in order history and allows cancellation only after the second tap", async () => {
     const app = document.createElement("div");
-    app.innerHTML =
-      '<div data-order-id="my-order"><span><small>Buy order · 7 days left</small></span><div class="cp-order-item-act"><button data-bd-order-cancel>Cancel</button></div></div>';
+    const history =
+      '<section><div data-order-id="my-order"><span><small>Buy order · 7 days left</small></span><div class="cp-order-item-act"><button data-bd-order-cancel>Cancel</button></div></div></section>';
+    app.innerHTML = history + history;
     const result = {
       id: "my-order",
       status: "pending",
@@ -135,7 +136,13 @@ describe("pending payment steps", () => {
     app.querySelector<HTMLButtonElement>("[data-bd-order-cancel]")!.click();
     expect(update).not.toHaveBeenCalled();
     app.querySelector<HTMLButtonElement>("[data-bd-order-yes]")!.click();
-    await vi.waitFor(() => expect(app.querySelector("mark")?.textContent).toBe("Cancelled"));
+    await vi.waitFor(() =>
+      expect([...app.querySelectorAll("mark")].map((el) => el.textContent)).toEqual([
+        "Cancelled",
+        "Cancelled",
+      ]),
+    );
+    expect(app.querySelector("[data-bd-order-cancel]")).toBeNull();
     expect(update).toHaveBeenCalledWith({ status: "cancelled" });
     expect(statusFilter).toHaveBeenCalledWith("status", ["open", "pending"]);
   });
@@ -206,6 +213,73 @@ describe("pending payment steps", () => {
       expect(t.app.textContent).toContain("No pending orders needed activation."),
     );
     expect(t.app.textContent).not.toContain("now live");
+  });
+  it("retires stale payment steps and admits just one Connect until activation settles", async () => {
+    const t = setup();
+    t.confirm("pending");
+    const oldAlerts = t.app.querySelector<HTMLButtonElement>('[data-bd-payment="skip-alerts"]')!;
+    t.click("skip-alerts");
+    const oldSkip = t.app.querySelector<HTMLButtonElement>('[data-bd-payment="skip-wallet"]')!;
+    let finish!: (result: unknown) => void;
+    t.rpc.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    t.click("connect");
+    t.confirm("pending");
+    t.click("skip-alerts");
+    t.click("connect");
+    expect(t.rpc).toHaveBeenCalledTimes(1);
+    finish({ data: { activated_ids: ["first", "second"] }, error: null });
+    await vi.waitFor(() => expect(t.app.textContent).toContain("2 orders are now live."));
+    expect(t.app.querySelector("[data-bd-payment-step]")).toBeNull();
+    oldAlerts.click();
+    oldSkip.click();
+    expect(t.app.textContent).not.toContain("Your order stays pending");
+    expect(t.app.querySelector("[data-bd-payment-step]")).toBeNull();
+  });
+  it("does not let a late alert save resurrect the wallet after Connect succeeds", async () => {
+    const t = setup();
+    let finish!: (result: unknown) => void;
+    t.upsert.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    t.confirm("pending");
+    t.click("alerts");
+    t.confirm("pending");
+    t.click("skip-alerts");
+    t.click("connect");
+    await vi.waitFor(() => expect(t.app.textContent).toContain("2 orders are now live."));
+    finish({ error: null });
+    await Promise.resolve();
+    expect(t.app.querySelector("[data-bd-payment-step]")).toBeNull();
+  });
+  it("uses distinct wallet radio groups at the same time without secure-context randomUUID", async () => {
+    vi.stubGlobal("crypto", {});
+    vi.spyOn(Date, "now").mockReturnValue(123);
+    try {
+      const t = setup();
+      t.confirm("pending");
+      t.click("alerts");
+      await vi.waitFor(() => expect(t.app.querySelector("input[type=radio]")).not.toBeNull());
+      const radios = () =>
+        [...t.app.querySelectorAll<HTMLInputElement>("input[type=radio]")].map((el) => el.name);
+      const first = radios();
+      expect(first).toHaveLength(4);
+      expect(new Set(first).size).toBe(1);
+      t.confirm("pending");
+      t.click("skip-alerts");
+      const second = radios();
+      expect(second).toHaveLength(4);
+      expect(new Set(second).size).toBe(1);
+      expect(second[0]).not.toBe(first[0]);
+      expect(t.P.toast).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
   it("reminds on every app open, not on token refresh; local notifications are per collector per day", async () => {
     const notify = vi.fn(function () {});
