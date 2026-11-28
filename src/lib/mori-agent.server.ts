@@ -197,9 +197,9 @@ export async function runMori({
   };
 
   const options: IntentTools = { message, images, market, runTool, emit, signal, callTool };
-  // A grade or memory claims its photos even if its arguments or reading turn out to be invalid.
+  // Photos claimed by another flow never become sell photos, even if the flow fails.
   const claimPhotos = (kind: MoriIntent["kind"]) => {
-    if (kind === "pre_grade" || kind === "memory") ctx.hasOrderPhotos = false;
+    if (kind !== "order") ctx.hasOrderPhotos = false;
   };
   const runIntent = async (action: MoriIntent, reading?: Args) => {
     try {
@@ -214,12 +214,7 @@ export async function runMori({
         case "pre_grade":
           return await runPreGrade(action, options);
         case "memory":
-          // Router metadata is a model reading, never a trusted date-picker/form slot.
-          return await runMemory(
-            intent?.kind === "memory" ? intent : { kind: "memory" },
-            options,
-            reading,
-          );
+          return await runMemory(action, options, reading);
       }
     } catch (error) {
       // A gateway failure would fail the chat loop too, only later; report it now.
@@ -367,14 +362,14 @@ export async function runMori({
           claimPhotos(kind);
           const previous = failedFlows.get(name);
           if (previous) return await finishAnswer({ text: previous });
-          const { title, ...slots } = args;
-          // A routing model already saw the photo. Require a printing for price_check,
-          // rather than reading it again. A memory title belongs to its reading, not its intent.
-          const action =
+          // The router saw any photo: price needs its printing, memory needs its reading.
+          // Only an actual tagged memory supplies trusted form slots.
+          const action: MoriIntent | null | false =
             parsed === args &&
             !("kind" in args) &&
-            (kind !== "memory" || typeof title === "string") &&
-            parseMoriIntent({ ...(kind === "memory" ? slots : args), kind }, false);
+            (kind === "memory"
+              ? typeof args["title"] === "string" && (intent?.kind === "memory" ? intent : { kind })
+              : parseMoriIntent({ ...args, kind }, false));
           const card = action && "card" in action ? action.card : undefined;
           const knownCard =
             !card ||

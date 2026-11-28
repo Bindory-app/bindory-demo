@@ -425,16 +425,19 @@ describe("model flow tools", () => {
       "What target price and currency should I use?",
     );
   });
-  it("does not donate photos from a rejected routed pre-grade to a later sell call", async () => {
-    const { send, rows, upload } = chat();
-    gateway(call("pre_grade", { card: { id: "invented-25" } }));
-    gateway(order("sell"));
-    await send("Can you grade this card?", { images });
-    expect(requests).toHaveLength(2);
-    expect(upload).not.toHaveBeenCalled();
-    expect(rows.some((r) => r.kind === "confirm")).toBe(false);
-    expect(rows.at(-1)).toMatchObject({ kind: "photos", payload: { for: "sell" } });
-  });
+  it.each(["pre_grade", "price_check"])(
+    "does not donate photos from a rejected routed %s to a later sell call",
+    async (kind) => {
+      const { send, rows, upload } = chat();
+      gateway(call(kind, { card: { id: "invented-25" } }));
+      gateway(order("sell"));
+      await send("Can you check this card?", { images });
+      expect(requests).toHaveLength(2);
+      expect(upload).not.toHaveBeenCalled();
+      expect(rows.some((r) => r.kind === "confirm")).toBe(false);
+      expect(rows.at(-1)).toMatchObject({ kind: "photos", payload: { for: "sell" } });
+    },
+  );
   it("rejects retired internal tool names even if a model emits one", async () => {
     const { send, rows } = chat();
     gateway(call("save_memory", { title: "Bogus", story: "Not what I said." }));

@@ -3,7 +3,7 @@ import { findCards, getCard } from "@/lib/tcgdex";
 import { runMori } from "@/lib/mori-agent.server";
 import { parseMoriIntent, type MemoryIntent } from "@/lib/mori-validation";
 import type { ResponsesRequest, ResponsesResponse } from "@/lib/ai-gateway.server";
-import type { DB } from "@/lib/mori-context.server";
+import { asObject, type DB } from "@/lib/mori-context.server";
 import type { MoriStreamEvent } from "@/lib/mori-tools";
 import { createTurnTimer } from "@/lib/mori-timing.server";
 
@@ -506,5 +506,21 @@ describe("structured memory flow", () => {
       title: "First booster pack",
       story: "My cousin gave me my first booster pack when I was ten.",
     });
+  });
+  it("still proposes the story when the router has no usable place, person or date", async () => {
+    const c = chat();
+    const story = "I opened my first booster pack.";
+    gateway(
+      call("log_memory", { title: "My first pack", place: "", with_whom: null, date: "yesterday" }),
+    );
+    await c.send(story);
+    expect(requests).toHaveLength(1);
+    const confirm = c.rows.at(-1);
+    expect(confirm).toMatchObject({
+      kind: "confirm",
+      payload: { tool: "save_memory", title: "My first pack", story },
+    });
+    for (const key of ["place", "with_whom", "date"])
+      expect(asObject(confirm?.payload)[key]).toBeUndefined();
   });
 });
