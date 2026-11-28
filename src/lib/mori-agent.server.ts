@@ -3,7 +3,7 @@ import { parseMoriIntent, type MoriIntent } from "./mori-validation";
 import type { IntentAnswer, IntentTools } from "./mori-intent-card.server";
 import { runPreGrade } from "./mori-pre-grade.server";
 import { runPriceCheck } from "./mori-price-check.server";
-import { runOrder, PHOTO_INSTRUCTIONS } from "./mori-order.server";
+import { runOrder } from "./mori-order.server";
 import { runMemory } from "./mori-memory.server";
 import { marketFor } from "./market";
 import { toCondition, type Condition } from "./ebay-sold.server";
@@ -279,7 +279,17 @@ export async function runMori({
             },
           ],
         });
-    const failedFlows = new Map<string, string>();
+    const failedFlows = new Map<string, { turn: number; question: string }>();
+    const flowError = (callId: string, question: string) =>
+      input.push({
+        type: "function_call_output",
+        call_id: callId,
+        output: JSON.stringify({
+          error:
+            "Could not complete this flow. Do not retry it this turn; ask the collector one clarifying question.",
+          question,
+        }),
+      });
     turns: for (let turn = 0; turn < 6; turn++) {
       // Questions about the collector's own cards, prices or plans must look at real data first,
       // so the first step has to use a tool (the model sometimes answers from guesswork otherwise).
@@ -292,7 +302,7 @@ export async function runMori({
           {
             instructions: SYSTEM,
             input,
-            tools: failedFlows.size ? tools.filter((t) => !failedFlows.has(t.name)) : tools,
+            tools,
             ...(mustUseTool ? { tool_choice: "required" } : {}),
             max_output_tokens: 3000,
           },
@@ -361,7 +371,11 @@ export async function runMori({
         if (kind) {
           claimPhotos(kind);
           const previous = failedFlows.get(name);
-          if (previous) return await finishAnswer({ text: previous });
+          if (previous) {
+            if (previous.turn !== turn) return await finishAnswer({ text: previous.question });
+            flowError(call.call_id ?? "", previous.question);
+            continue;
+          }
           // The router saw any photo: price needs its printing, memory needs its reading.
           // Only an actual tagged memory supplies trusted form slots.
           const action: MoriIntent | null | false =
@@ -388,16 +402,8 @@ export async function runMori({
                 : kind === "order" && !action
                   ? "Which printing, side and target price (with currency) should I use?"
                   : "Which card name and printed collector number should I use?";
-          failedFlows.set(name, question);
-          input.push({
-            type: "function_call_output",
-            call_id: call.call_id ?? "",
-            output: JSON.stringify({
-              error:
-                "Could not complete this flow. Do not retry it this turn; ask the collector one clarifying question.",
-              question,
-            }),
-          });
+          failedFlows.set(name, { turn, question });
+          flowError(call.call_id ?? "", question);
           continue;
         }
         // Do not grant a hallucinated/retired model tool the executor's internal privileges.
@@ -410,9 +416,8 @@ export async function runMori({
           continue;
         }
         const out = await runTool(name, args);
-        const result = out.result;
         if (name === "get_card_prices") {
-          const output = asObject(result);
+          const output = asObject(out.result);
           const id = asObject(output["card"])["id"];
           if (typeof id === "string")
             priced.set(id, { output, condition: toCondition(args["condition"]) ?? "nm" });
@@ -424,11 +429,7 @@ export async function runMori({
         });
         if (out.stop) {
           // A batch can contain several writes. Never execute calls after the card we showed.
-          // A pre-tool sentence cannot know the sell proposal was blocked.
-          if (typeof asObject(result)["error"] === "string") {
-            priced.clear();
-            finalText = String(asObject(result)["error"]);
-          } else finalText = out.rows.some((r) => r.kind === "photos") ? PHOTO_INSTRUCTIONS : text;
+          finalText = text;
           break turns;
         }
       }

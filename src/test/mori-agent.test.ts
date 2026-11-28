@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { findCards, getCardPricing } from "@/lib/tcgdex";
+import { findCards, getCard, getCardPricing } from "@/lib/tcgdex";
 import { runMori } from "@/lib/mori-agent.server";
 import { resolveMarketFx } from "@/lib/fx.server";
 import { marketFor } from "@/lib/market";
@@ -27,6 +27,7 @@ vi.mock("@/lib/fx.server", () => ({
 vi.mock("@/lib/tcgdex", async (original) => ({
   ...(await original<typeof import("@/lib/tcgdex")>()),
   findCards: vi.fn(),
+  getCard: vi.fn(),
   getCardPricing: vi.fn(async (id: string) => ({
     card: { id, name: "Pikachu", localId: "25", set: { id: "base1", name: "Base Set" } },
     pricing: null,
@@ -405,7 +406,7 @@ describe("model flow tools", () => {
         images: reason === "unreadable photo" ? images.slice(0, 1) : [],
       });
       expect(requests).toHaveLength(2);
-      expect(requests[1]?.tools?.some((t) => t.name === kind)).toBe(false);
+      expect(requests[1]?.tools).toEqual(requests[0]?.tools);
       expect(
         requests[1]?.input.filter((i) => "type" in i && i.type === "function_call_output"),
       ).toMatchObject([{ output: expect.stringContaining("ask the collector") }]);
@@ -414,6 +415,29 @@ describe("model flow tools", () => {
       expect(getCardPricing).not.toHaveBeenCalled();
     },
   );
+  it("answers both failed calls in a single batch without retrying the lookup", async () => {
+    vi.mocked(findCards).mockResolvedValue([]);
+    const { send, rows } = chat();
+    const first = call("price_check", { card: printing }),
+      duplicate = call("price_check", { card: printing });
+    gateway(first, duplicate);
+    gateway(say("Could you check the printed number?"));
+    await send("Price this printing.");
+    expect(requests).toHaveLength(2);
+    const results = requests[1]?.input.filter(
+      (i) => "type" in i && i.type === "function_call_output",
+    );
+    expect(results).toMatchObject(
+      [first, duplicate].map((c) => ({
+        call_id: c.call_id,
+        output: expect.stringContaining("ask the collector"),
+      })),
+    );
+    expect(findCards).toHaveBeenCalledTimes(1);
+    expect(rows.find((r) => r.kind === "text")?.content).toBe(
+      "Could you check the printed number?",
+    );
+  });
   it("allows a natural clarification after a failed flow, not an unrelated price card", async () => {
     const { send, rows } = chat();
     gateway(priced(), call("place_order", { side: "buy" }));
@@ -454,6 +478,7 @@ describe("model flow tools", () => {
       vi.mocked(findCards).mockResolvedValue([hit]);
       gateway(call("pre_grade", { card: printing }));
       await expect(send("Pre-grade Pikachu", { images })).rejects.toBeInstanceOf(GatewayError);
+      expect(requests.length).toBeGreaterThan(1);
       expect(
         requests
           .slice(1)
@@ -675,6 +700,28 @@ describe("the direct Mori tool loop", () => {
     expect(requests).toHaveLength(1);
   });
 
+  it("stops a batch after showing a wishlist proposal from the general tool loop", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce({
+      id: hit.id,
+      name: hit.name,
+      localId: hit.number,
+      set: { id: "base1", name: hit.set },
+    });
+    const { send, rows } = chat();
+    gateway(
+      call("search_catalogue", { name: hit.name }),
+      call("add_to_wishlist", { card_id: hit.id }),
+      order("buy"),
+    );
+    await send("Add Pikachu to my wishlist.");
+    expect(requests).toHaveLength(1);
+    expect(
+      rows.filter((r) => r.kind === "confirm").map((r) => asObject(r.payload)["tool"]),
+    ).toEqual(["add_to_wishlist"]);
+    expect(rows.filter((r) => r.kind === "status").map((r) => asObject(r.payload)["name"])).toEqual(
+      ["search_catalogue", "add_to_wishlist"],
+    );
+  });
   it("keeps a ticket card rather than dropping it or replacing it with a price card", async () => {
     const { send, rows } = chat();
     gateway(
