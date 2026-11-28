@@ -42,7 +42,7 @@ it("sends the free-form CTA within 24 hours and uses the shared inbound claim", 
   f.claim.mockResolvedValue(link(inside));
   const response = await run();
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ sent: 1, skipped: 0, failed: 0 });
+  expect(await response.json()).toEqual({ sent: 1, skipped: 0, failed: 0, partial: false });
   expect(f.claim).toHaveBeenCalledWith(candidate, false);
   expect(f.send.mock.calls[0]![1]).toMatchObject({
     interactive: {
@@ -80,7 +80,7 @@ it("filters out-of-window recipients before claiming when the template is unset;
   expect(f.claim).not.toHaveBeenCalled();
   // The claim was made just inside the window; the application clock has now reached its boundary.
   f.claim.mockResolvedValue(link(outside));
-  expect(await (await run()).json()).toEqual({ sent: 0, skipped: 1, failed: 0 });
+  expect(await (await run()).json()).toEqual({ sent: 0, skipped: 1, failed: 0, partial: false });
   expect(f.send).not.toHaveBeenCalled();
 });
 it("sends only a configured static template at the exact boundary, with the approved language", async () => {
@@ -123,9 +123,28 @@ it("keyset-pages candidates, bounds recipient concurrency and continues past a f
   });
   const response = await run();
   expect(response.status).toBe(503);
-  expect(await response.json()).toEqual({ sent: 50, skipped: 0, failed: 1 });
+  expect(await response.json()).toEqual({ sent: 50, skipped: 0, failed: 1, partial: false });
   expect(peak).toBe(5);
   expect(f.page).toHaveBeenLastCalledWith("49", false, 50);
+});
+it("stops claiming partway through a page without counting untouched recipients as skipped", async () => {
+  f.page.mockResolvedValue(Array(8).fill(candidate));
+  f.claim.mockResolvedValue(link(new Date(time + 86_400_000).toISOString()));
+  f.send.mockImplementation(async () => vi.setSystemTime(time + 40_000));
+  const response = await run();
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ sent: 5, skipped: 0, failed: 0, partial: true });
+  expect(f.claim).toHaveBeenCalledTimes(5);
+  expect(f.page).toHaveBeenCalledTimes(1);
+});
+it("does not page again if a full page finishes at the admission deadline", async () => {
+  f.page.mockResolvedValue(Array(50).fill(candidate));
+  f.claim.mockImplementation(async () => {
+    if (f.claim.mock.calls.length === 50) vi.setSystemTime(time + 40_000);
+    return null;
+  });
+  expect(await (await run()).json()).toEqual({ sent: 0, skipped: 50, failed: 0, partial: true });
+  expect(f.page).toHaveBeenCalledTimes(1);
 });
 it("keeps candidate scans service-only, read-only, keyset ordered and filtered to eligible pending orders", () => {
   const sql = readFileSync("setup/018_whatsapp_reminders.sql", "utf8");

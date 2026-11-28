@@ -36,7 +36,7 @@ export default defineConfig(({ command, mode }) => {
           functionRules: {
             "/api/mori-chat": { maxDuration: 60 },
             "/api/whatsapp-webhook": { maxDuration: 60 },
-            "/api/whatsapp-reminders": { maxDuration: 300 },
+            "/api/whatsapp-reminders": { maxDuration: 60 },
           },
         },
       }),

@@ -5,6 +5,8 @@ import { buttonMessage, type WhatsAppMessage } from "./whatsapp-render";
 import { claimReminder, reminderCandidates } from "./whatsapp-state.server";
 
 export async function sweepReminders(request: Request) {
+  // Leave room for the final 8 s database claim and 8 s Graph send under the 60 s limit.
+  const stopAt = Date.now() + 40_000;
   const secret = process.env["CRON_SECRET"];
   if (!secret || !sameText(request.headers.get("authorization") ?? "", "Bearer " + secret))
     return new Response(null, { status: 401 });
@@ -26,13 +28,22 @@ export async function sweepReminders(request: Request) {
       }
     : null;
   const result = { sent: 0, skipped: 0, failed: 0 };
+  const summary = (partial: boolean) =>
+    Response.json(
+      { ...result, partial },
+      {
+        status: result.failed ? 503 : 200,
+        headers: { "Cache-Control": "no-store" },
+      },
+    );
   const batch = 50,
     concurrency = 5;
   let after: string | null = null;
   try {
-    for (;;) {
+    while (Date.now() < stopAt) {
       const page = await reminderCandidates(after, !!template, batch);
       for (let i = 0; i < page.length; i += concurrency) {
+        if (Date.now() >= stopAt) return summary(true);
         await Promise.all(
           page.slice(i, i + concurrency).map(async (candidate) => {
             try {
@@ -59,14 +70,11 @@ export async function sweepReminders(request: Request) {
           }),
         );
       }
-      if (page.length < batch) break;
+      if (page.length < batch) return summary(false);
       after = page[page.length - 1]!.user_id;
     }
   } catch {
     result.failed++;
   }
-  return Response.json(result, {
-    status: result.failed ? 503 : 200,
-    headers: { "Cache-Control": "no-store" },
-  });
+  return summary(true);
 }

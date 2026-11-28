@@ -116,11 +116,13 @@ export async function reminderCandidates(
   allowTemplate: boolean,
   limit: number,
 ) {
-  const { data, error } = await store.rpc("whatsapp_reminder_candidates", {
-    p_after: after,
-    p_template: allowTemplate,
-    p_limit: limit,
-  });
+  const { data, error } = await store
+    .rpc("whatsapp_reminder_candidates", {
+      p_after: after,
+      p_template: allowTemplate,
+      p_limit: limit,
+    })
+    .abortSignal(AbortSignal.timeout(8000));
   if (error || !Array.isArray(data)) throw new Error("Reminder candidates unavailable");
   return data as ReminderCandidate[];
 }
@@ -131,6 +133,7 @@ export async function claimReminder(l: ReminderCandidate, allowTemplate = false)
       p_channel: l.channel_id,
       p_template: allowTemplate,
     })
+    .abortSignal(AbortSignal.timeout(8000))
     .maybeSingle();
   if (error) throw error;
   return data as (Address & { freeform_until: string | null }) | null;
