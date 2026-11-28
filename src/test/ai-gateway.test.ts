@@ -31,6 +31,18 @@ afterEach(() => {
 });
 
 describe("AI Gateway streaming timeouts and retries", () => {
+  it("does not read or log request contents echoed by a rejected provider", async () => {
+    const response = new Response("private-collector-text", { status: 400 });
+    const read = vi.spyOn(response, "text");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    await expect(
+      streamResponse({ input: [] }, { oidcToken: "test-token", maxAttempts: 1 }),
+    ).rejects.toThrow("Gateway request failed (400)");
+    expect(read).not.toHaveBeenCalled();
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/private-collector-text|test-token/);
+  });
+
   it("recovers from 429 (next model), 5xx and network errors before first byte without duplicating output", async () => {
     const cases: Array<() => Promise<Response>> = [
       async () => new Response("rate limit", { status: 429 }),

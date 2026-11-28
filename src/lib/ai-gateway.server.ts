@@ -16,7 +16,6 @@ export const GATEWAY_HEADERS_TIMEOUT_MS = 15_000;
 /** Maximum silence between SSE chunks once streaming begins (ms); never retried after output starts. */
 export const GATEWAY_IDLE_TIMEOUT_MS = 20_000;
 const GATEWAY_MAX_ATTEMPTS = 2;
-const GATEWAY_ERROR_BODY_TIMEOUT_MS = 3_000;
 const MODEL = process.env["AI_GATEWAY_MODEL"] || "google/gemini-2.5-flash";
 const MODELS = [
   ...new Set([MODEL, "openai/gpt-4.1-mini", "google/gemini-2.5-flash-lite", "openai/gpt-5-mini"]),
@@ -166,32 +165,6 @@ function readChunkWithIdleTimeout(
   });
 }
 
-async function readTextBounded(res: Response, timeoutMs: number): Promise<string> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      void res.body?.cancel().catch(() => {});
-      resolve("");
-    }, timeoutMs);
-    res.text().then(
-      (txt) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(txt);
-      },
-      () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve("");
-      },
-    );
-  });
-}
-
 async function* readSse(
   body: ReadableStream<Uint8Array>,
   requestId?: string,
@@ -293,18 +266,15 @@ async function streamModelResponse(
   }
   const requestId = res.headers.get("x-vercel-id") ?? undefined;
   if (!res.ok || !res.body) {
-    const detail = await readTextBounded(res, GATEWAY_ERROR_BODY_TIMEOUT_MS);
-    // Names the credential source only, never its value.
+    // Rejected requests can echo private text, media or credentials. Do not read or log the body.
+    void res.body?.cancel().catch(() => {});
     console.error("AI Gateway rejected request", {
       status: res.status,
       credential: source,
-      detail: detail.slice(0, 300),
     });
-    throw new GatewayError(
-      codeForStatus(res.status),
-      `Gateway request failed (${res.status}): ${detail.slice(0, 300)}`,
-      { requestId },
-    );
+    throw new GatewayError(codeForStatus(res.status), `Gateway request failed (${res.status})`, {
+      requestId,
+    });
   }
   const body = res.body;
   return {

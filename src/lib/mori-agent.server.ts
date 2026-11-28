@@ -114,8 +114,8 @@ export async function runMori({
       emit({ type: "done", rows: [ins.data as unknown as MoriRow] });
       if (ownTimer) timer.flush("done");
       return;
-    } catch (e) {
-      console.error("Collectr sync failed to start", e instanceof Error ? e.message : e);
+    } catch {
+      console.error("Collectr sync failed to start");
       const done = await finishMoriTurn(
         db,
         [],
@@ -459,7 +459,7 @@ export async function runMori({
     }
     console.error(
       "Mori gateway error",
-      e instanceof GatewayError ? { code: e.code, ids: e.ids } : e,
+      e instanceof GatewayError ? { code: e.code, ids: e.ids } : { code: "internal" },
     );
     if (ownTimer) timer.flush("error", e instanceof GatewayError ? e.code : "internal");
     throw e;

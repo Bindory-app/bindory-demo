@@ -154,10 +154,7 @@ export function createMoriChatStream(options: {
         .catch((error: unknown) => {
           const safe = toCollectorError(error, abort.signal.aborted);
           if (safe.code !== "aborted") {
-            console.error("Mori chat failed", {
-              code: safe.code,
-              detail: error instanceof Error ? error.message : "Unknown error",
-            });
+            console.error("Mori chat failed", { code: safe.code });
           }
           emit({ type: "error", code: safe.code, text: safe.text });
           options.timing?.flush(safe.code === "aborted" ? "aborted" : "error", safe.code);
