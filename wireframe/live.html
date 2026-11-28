@@ -105,11 +105,20 @@
   // Order cards the collector can still change before confirming: id -> { side, price, days, ... }.
   const orders = new Map();
   const currencySymbols = { USD: "US$", AUD: "A$", CAD: "C$", GBP: "£", EUR: "€" };
-  const orderMoney = (amount, currency) => (currencySymbols[currency] || currency + " ") + Number(amount).toLocaleString("en-US", { maximumFractionDigits: 2 });
+  const orderMoney = (amount, currency) => (currencySymbols[currency] || currency + " ") + Number(amount).toLocaleString("en-US", { minimumFractionDigits: Math.round(amount * 100) % 100 ? 2 : 0, maximumFractionDigits: 2 });
+  function orderComparison(o) {
+    const ref = o.reference;
+    if (ref === undefined) return o.market ? row("Market reference", "About " + orderMoney(o.market * o.rate, o.currency)) : ""; // legacy card
+    if (!ref) return row("Market comparison", "No market reference is available.");
+    const target = ref.currency === o.currency ? o.price : ref.currency === "USD" ? o.usd : null;
+    const value = orderMoney(ref.amount, ref.currency);
+    return row("Market comparison", target === null ? "The market reference is " + value + " in a different currency." :
+      "Your target is " + (target === ref.amount ? "at" : target < ref.amount ? "below" : "above") + " the market reference of " + value + ".");
+  }
   const orderRows = (o) =>
     row(o.side === "buy" ? "Buy for up to" : "Sell for at least", orderMoney(o.price, o.currency)) +
     (o.currency !== "USD" ? row("US$ equivalent", orderMoney(o.usd, "USD")) : "") +
-    (o.market ? row("Market reference", "About " + orderMoney(o.market * o.rate, o.currency)) : "") +
+    orderComparison(o) +
     row("Watching", "Listings and collectors you follow") + row("Expires", "In " + o.days + " days") + (o.note ? row("Note", o.note) : "");
   const orderHead = (o) => "<small>" + (o.side === "buy" ? "Buy order" : "Sell order") + " · price alert</small><b>" + esc(o.name) + "</b>";
 
@@ -169,7 +178,7 @@
       art = '<div style="display:flex;gap:6px;overflow-x:auto;margin:8px 0">' + (p.cards || []).map((c) => (cardImg(c) ? '<img src="' + esc(cardImg(c)) + '" alt="' + esc(c.name) + '" style="height:84px;border-radius:6px">' : "")).join("") + "</div>";
       rows = row("Cards", String((p.cards || []).length)) + (p.description ? row("About", p.description) : "");
     } else if (p.tool === "set_order") {
-      const o = { side: p.side === "sell" ? "sell" : "buy", price: p.price?.amount ?? p.price_usd, currency: p.price?.currency || "USD", usd: p.price_usd, rate: p.fx_rate || 1, days: p.expires_days || 30, market: p.market_usd, note: p.note, name: p.card.name, hasPhotos: !!(p.photos?.front && p.photos?.back), condition: p.condition };
+      const o = { side: p.side === "sell" ? "sell" : "buy", price: p.price?.amount ?? p.price_usd, currency: p.price?.currency || "USD", usd: p.price_usd, rate: p.fx_rate || 1, days: p.expires_days || 30, market: p.market_usd, reference: p.market_reference, note: p.note, name: p.card.name, hasPhotos: !!(p.photos?.front && p.photos?.back), condition: p.condition };
       if (!done) orders.set(id, o);
       head = orderHead(o);
       art = cardImg(p.card) ? '<div class="cp-mori-ident"><img src="' + esc(cardImg(p.card)) + '" alt=""><div><small>' + esc(p.card.set_name || "") + "</small><b>" + esc(p.card.name) + "</b></div></div>" : "";
@@ -845,6 +854,8 @@
       const symbol = f.price.previousElementSibling.textContent.trim();
       const currency = Object.keys(currencySymbols).find(c => currencySymbols[c] === symbol);
       if (!currency) { P.toast("Reopen the order form to choose a currency."); return; }
+      const pasted = f.price.value.trim().match(/^(US\$|A\$|C\$|£|€)/i);
+      if (pasted && pasted[0].toUpperCase() !== symbol.toUpperCase()) { P.toast("Enter the amount in " + currency + ", as shown on the form."); return; }
       sendFormOrder(form, {kind:"order",side:form.dataset.side === "sell" ? "sell" : "buy",card:{name,number: of ? num + "/" + of : num},price:{amount:Number(price),currency}}, symbol,
         () => { form.classList.add("is-done"); form.querySelectorAll("input, select, button").forEach(x => { x.disabled = true; }); });
       return;
@@ -1942,7 +1953,7 @@
       o.side = ed.querySelector("[data-order-side].is-selected")?.dataset.orderSide === "sell" ? "sell" : "buy";
       o.days = Number(ed.querySelector("[data-order-days].is-selected")?.dataset.orderDays) || 30;
       o.price = Math.round(price * 100) / 100;
-      o.usd = Math.round(price / o.rate * 100) / 100;
+      o.usd = Math.round(Math.round(price * 100) / o.rate) / 100;
       o.changed = true;
       card.querySelector(".cp-mori-confirm-head").innerHTML = orderHead(o);
       card.querySelector("ul").innerHTML = orderRows(o) + conditionRows(o.condition) + (o.hasPhotos ? row("Photos", "Front and back, saved for your listing") : "");

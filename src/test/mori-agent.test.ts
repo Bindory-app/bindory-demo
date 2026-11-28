@@ -318,14 +318,12 @@ describe("order quotes and photo provenance", () => {
   };
   const sell: OrderIntent = { ...buy, side: "sell" };
   const cold = () =>
-    vi
-      .mocked(resolveMarketFx)
-      .mockResolvedValueOnce({
-        market: { ...marketFor("AU"), currency: "USD", symbol: "US$" },
-        rate: 1,
-        stale: false,
-        fallbackToUsd: true,
-      });
+    vi.mocked(resolveMarketFx).mockResolvedValueOnce({
+      market: { ...marketFor("AU"), currency: "USD", symbol: "US$" },
+      rate: 1,
+      stale: false,
+      fallbackToUsd: true,
+    });
   it("orders at the resolved FX quote without a model and records prices before one confirmation", async () => {
     vi.mocked(findCards).mockResolvedValue([pika]);
     const { send, rows } = chat();
@@ -350,7 +348,9 @@ describe("order quotes and photo provenance", () => {
         status: "pending",
       },
     });
-    expect(rows.at(-2)?.content).toContain("at the market reference of 10 USD");
+    expect(rows.at(-1)?.payload).toMatchObject({
+      market_reference: { amount: 10, currency: "USD" },
+    });
   });
   it("refuses a guessed conversion on cold FX, then accepts an explicit USD order in Australia", async () => {
     cold();
@@ -390,6 +390,28 @@ describe("order quotes and photo provenance", () => {
       price: buy.price,
     });
     expect(requests).toHaveLength(0);
+  });
+
+  it("falls through on an unmatched order without uploading or dropping its photos", async () => {
+    vi.mocked(findCards).mockResolvedValue([]);
+    gateway(say("Which printing did you mean?"));
+    const { send, rows, upload } = chat();
+    await send("Sell Pikachu for A$15", { intent: sell, images });
+    expect(requests).toHaveLength(1);
+    expect(JSON.stringify(requests[0]?.input)).toContain(images[1]);
+    expect(rows.filter((r) => r.role === "user")).toHaveLength(1);
+    expect(rows.some((r) => r.kind === "confirm")).toBe(false);
+    expect(upload).not.toHaveBeenCalled();
+  });
+  it("does not upload sell photos for an unquotable price", async () => {
+    cold();
+    vi.mocked(findCards).mockResolvedValue([pika]);
+    gateway(call("read_order_condition", { overall: "Near mint" }));
+    const { send, rows, upload } = chat();
+    await send("Sell Pikachu for A$15", { intent: sell, images, country: "AU" });
+    expect(rows.some((r) => r.kind === "confirm")).toBe(false);
+    expect(rows.find((r) => r.kind === "text")?.content).toContain("What US$ price");
+    expect(upload).not.toHaveBeenCalled();
   });
   it.each([[], images.slice(0, 1)])(
     "never substitutes another order's stored pair for missing images (%j)",
@@ -561,6 +583,12 @@ describe("explicit price-check turns", () => {
 
   it.each([
     { kind: "order" },
+    {
+      kind: "order",
+      side: "buy",
+      card: { id: "base1-25" },
+      price: { amount: -10, currency: "USD" },
+    },
     { kind: "price_check", card: { name: "" } },
     { kind: "price_check" },
   ])("logs and ignores malformed, unsupported or image-less intents", async (bad) => {

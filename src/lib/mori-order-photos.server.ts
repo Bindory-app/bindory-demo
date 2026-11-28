@@ -1,4 +1,4 @@
-import { asObject, type DB } from "./mori-context.server";
+import type { DB } from "./mori-context.server";
 
 function dataUrlBytes(url: string): { bytes: Uint8Array; type: string } | null {
   const m = /^data:([\w/+.-]+);base64,(.+)$/s.exec(url);
@@ -43,20 +43,4 @@ export async function saveOrderPhotos(db: DB, userId: string, images: string[]) 
     return null;
   }
   return paths;
-}
-
-/** The latest order photos saved in this chat, if any. */
-export async function chatPhotos(db: DB, userId: string, since?: string) {
-  let q = db
-    .from("mori_messages")
-    .select("payload")
-    .eq("role", "mori")
-    .eq("kind", "status")
-    .not("payload->photos", "is", null);
-  if (since) q = q.gt("created_at", since);
-  const { data } = await q.order("created_at", { ascending: false }).limit(1).maybeSingle();
-  const ph = asObject(asObject(data?.payload)["photos"]);
-  const ok = (v: unknown): v is string =>
-    typeof v === "string" && v.startsWith(`${userId}/orders/`) && !v.includes("..");
-  return ok(ph["front"]) && ok(ph["back"]) ? { front: ph["front"], back: ph["back"] } : null;
 }

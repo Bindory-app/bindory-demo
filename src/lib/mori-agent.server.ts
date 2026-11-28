@@ -5,7 +5,7 @@ import { runOrder, PHOTO_INSTRUCTIONS } from "./mori-order.server";
 import { marketFor } from "./market";
 import { toCondition, type Condition } from "./ebay-sold.server";
 import { priceCardRow } from "./mori-prices.server";
-import { chatPhotos, saveOrderPhotos } from "./mori-order-photos.server";
+import { saveOrderPhotos } from "./mori-order-photos.server";
 import {
   COLLECTR_BAD_LINK,
   collectrSyncBinder,
@@ -127,27 +127,14 @@ export async function runMori({
   const onlyPrice = () => priced.size === 1 && rows.every((row) => row.kind === "status");
   let cardsOnly = false;
   let finalText = "";
-  // Structured orders only use this submission, never unbound photos from chat history.
-  let saved: Awaited<ReturnType<typeof saveOrderPhotos>> | undefined;
-  const orderPhotos = async () => {
-    if (!images.length) return !intent && since ? chatPhotos(db, userId, since) : null;
-    if (saved === undefined) {
-      saved = await saveOrderPhotos(db, userId, images);
-      if (saved && !intent)
-        rows.push({
-          role: "mori",
-          kind: "status",
-          content: "Saved your photos for the listing",
-          payload: { photos: saved },
-        });
-    }
-    return saved;
-  };
+  // Never reuse a previous card's photos, including on a free-text fallback.
+  let saved: ReturnType<typeof saveOrderPhotos> | undefined;
   const ctx: MoriToolContext = {
     message,
     seenIds: new Set<string>(),
     lastCard: "",
-    orderPhotos,
+    hasOrderPhotos: images.length === 2,
+    orderPhotos: () => (saved ??= saveOrderPhotos(db, userId, images)),
     timing: timer,
     ...(intent?.kind === "order" ? { orderIntent: intent } : {}),
   };

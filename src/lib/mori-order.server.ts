@@ -74,23 +74,10 @@ export async function runOrder(
           "I couldn't prepare that order. Please check its details.",
       ),
     };
-  const reference = asObject(output["price_points"])["market"];
-  const cur = output["currency"];
-  const amount =
-    cur === intent.price.currency
-      ? intent.price.amount
-      : cur === "USD"
-        ? asObject(confirm.payload)["price_usd"]
-        : null;
-  const comparison =
-    typeof amount === "number" && typeof reference === "number" && reference > 0
-      ? `Your target is ${amount === reference ? "at" : amount < reference ? "below" : "above"} the market reference of ${reference} ${cur}.`
-      : "No comparable market price is available for this target.";
   return {
     text:
-      comparison +
-      (intent.side === "sell" && !condition
-        ? " I couldn't assess condition from the photos, so none is listed."
-        : ""),
+      intent.side === "sell" && !condition
+        ? "I couldn't assess condition from the photos, so none is listed."
+        : "",
   };
 }
