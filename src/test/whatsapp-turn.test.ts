@@ -101,6 +101,48 @@ beforeEach(() => {
   f.db.mockReturnValue({ from: () => query });
 });
 afterEach(() => vi.unstubAllEnvs());
+it("honors delayed STOP without attempting a free-form response outside the window", async () => {
+  await handleInbound({
+    ...base,
+    kind: "text",
+    text: "STOP",
+    at: new Date(Date.now() - 2 * 864e5).toISOString(),
+  });
+  expect(f.unlink).toHaveBeenCalledWith(l);
+  expect(f.send).not.toHaveBeenCalled();
+});
+it("carries the photo pair only into the same sell-order printing pick", async () => {
+  const sell = {
+    kind: "order",
+    side: "sell",
+    price: { currency: "USD", amount: 10 },
+    card: { id: "set-1" },
+  };
+  const choice = sample("choices", {
+    choices: [
+      { label: "Eevee sell", intent: sell },
+      { label: "Eevee price", intent: { kind: "price_check", card: { id: "set-1" } } },
+    ],
+  });
+  f.pair.mockResolvedValue({ media: ["100", "200"], caption: "Sell" });
+  rows = [choice];
+  await photo("200");
+  expect(l.step.media).toEqual(["100", "200"]);
+  f.read.mockResolvedValue({ data: choice });
+  await tap("pick:" + rowId + ":1");
+  expect(f.run).toHaveBeenLastCalledWith(
+    expect.objectContaining({ images: [], selectionOnly: true }),
+  );
+  await photo("200");
+  await tap("pick:" + rowId + ":0");
+  expect(f.run).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      images: ["data:100", "data:200"],
+      selectionOnly: true,
+      intent: sell,
+    }),
+  );
+});
 it("handles PAYMENT and STOP without a model or an extra reminder", async () => {
   f.has.mockResolvedValue(false);
   await text("payment");

@@ -144,6 +144,10 @@ async function confirm(db: DB, l: Linked, r: MoriRow, changes?: Step["changes"])
   } else await setStep(l, {});
   return msgs;
 }
+function sellChoice(choice: unknown) {
+  const intent = asObject(asObject(choice)["intent"]);
+  return intent["kind"] === "order" && intent["side"] === "sell";
+}
 async function turn(
   db: DB,
   l: Linked,
@@ -181,7 +185,12 @@ async function turn(
   if (!rows) return [textMessage(failure ?? toCollectorError(null).text)];
   const active = rows.filter((r) => ["choices", "photos", "confirm", "suggest"].includes(r.kind));
   const last = active.at(-1);
-  const needsMedia = media.length && active.some((r) => r.kind === "choices");
+  const needsMedia =
+    media.length &&
+    active.some((r) => {
+      const choices = asObject(r.payload)["choices"];
+      return r.kind === "choices" && Array.isArray(choices) && choices.some(sellChoice);
+    });
   if (
     !(await setStep(l, {
       kind: "rows",
@@ -262,7 +271,7 @@ async function action(
     const choice = options[Number(index)],
       obj = asObject(choice);
     const text = typeof choice === "string" ? choice : (obj["send"] ?? obj["label"]);
-    const media = kind === "pick" ? heldMedia(l) : [];
+    const media = kind === "pick" && sellChoice(choice) ? heldMedia(l) : [];
     if (!media) return [textMessage(expiredPhotos)];
     if (typeof text === "string")
       return turn(db, l, text, media, obj["intent"], oidc, kind === "pick" && !!obj["intent"]);
@@ -298,7 +307,9 @@ async function reply(db: DB, l: Linked, m: Inbound, oidc?: string | null) {
 export async function handleInbound(m: Inbound, oidc?: string | null) {
   if (!(await firstDelivery(m.id))) return;
   // Delayed retries do not reopen the customer service window.
-  if (Date.parse(m.at) <= Date.now() - 864e5) return;
+  const delayed = Date.parse(m.at) <= Date.now() - 864e5,
+    stop = m.kind === "text" && /^stop$/i.test(m.text);
+  if (delayed && !stop) return;
   if (m.kind === "text" && /^link\s/i.test(m.text)) {
     const nonce = whatsappNonce("link", m.text.slice(5).trim());
     const ok = nonce && (await bindLink(nonce, m));
@@ -312,14 +323,15 @@ export async function handleInbound(m: Inbound, oidc?: string | null) {
     );
   }
   const l = await touchLink(m);
-  if (!l && m.kind === "text" && /^stop$/i.test(m.text)) return;
+  if (!l && stop) return;
   if (!l)
     return sendWhatsApp(
       m,
       textMessage("To chat with Mori here, open Settings in Bindory and choose Link WhatsApp."),
     );
-  if (m.kind === "text" && /^stop$/i.test(m.text)) {
+  if (stop) {
     await unlinkWhatsApp(l);
+    if (delayed) return;
     return sendWhatsApp(
       l,
       textMessage("WhatsApp is unlinked. You will not receive more Bindory reminders here."),
