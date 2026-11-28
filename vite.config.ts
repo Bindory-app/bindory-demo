@@ -20,8 +20,21 @@ export default defineConfig(({ command, mode }) => {
     }),
   ];
 
-  // Build for Vercel.
-  if (command === "build") plugins.push(nitro({ preset: "vercel" }));
+  // Build for Vercel. Give /api/mori-chat an explicit 60 s ceiling (supported across all Vercel
+  // plans including Hobby without Fluid Compute) so a worst-case tool turn (25 s Apify sold lookup
+  // in parallel with 12 s Browse + two 15 s-header AI Gateway calls) finishes instead of being
+  // cut off silently by the default function timeout.
+  if (command === "build")
+    plugins.push(
+      nitro({
+        preset: "vercel",
+        vercel: {
+          functionRules: {
+            "/api/mori-chat": { maxDuration: 60 },
+          },
+        },
+      }),
+    );
 
   plugins.push(viteReact());
 

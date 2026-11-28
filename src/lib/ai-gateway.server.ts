@@ -8,7 +8,15 @@
  * Server only: these credentials must never reach browser code.
  */
 
+import { upstreamFetch } from "./upstream-fetch";
+
 const GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/responses";
+/** Maximum wait for AI Gateway response headers (ms); retried only on 429/5xx/network before bytes flow. */
+export const GATEWAY_HEADERS_TIMEOUT_MS = 15_000;
+/** Maximum silence between SSE chunks once streaming begins (ms); never retried after output starts. */
+export const GATEWAY_IDLE_TIMEOUT_MS = 20_000;
+const GATEWAY_MAX_ATTEMPTS = 2;
+const GATEWAY_ERROR_BODY_TIMEOUT_MS = 3_000;
 
 type ResponsesFunctionTool = {
   type: "function";
@@ -66,6 +74,7 @@ type GatewayErrorCode =
   | "payment_required"
   | "rate_limited"
   | "bad_request"
+  | "timeout"
   | "upstream";
 
 export class GatewayError extends Error {
@@ -91,7 +100,91 @@ function codeForStatus(status: number): GatewayErrorCode {
   return "upstream";
 }
 
-async function* readSse(body: ReadableStream<Uint8Array>, requestId?: string) {
+function readChunkWithIdleTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleTimeoutMs: number,
+  requestId?: string,
+  signal?: AbortSignal,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (signal?.aborted) {
+    return Promise.reject(
+      signal.reason ??
+        (typeof DOMException !== "undefined"
+          ? new DOMException("The operation was aborted", "AbortError")
+          : Object.assign(new Error("The operation was aborted"), { name: "AbortError" })),
+    );
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      fn();
+    };
+    const onAbort = () =>
+      finish(() => {
+        void reader.cancel().catch(() => {});
+        reject(
+          signal?.reason ??
+            (typeof DOMException !== "undefined"
+              ? new DOMException("The operation was aborted", "AbortError")
+              : Object.assign(new Error("The operation was aborted"), { name: "AbortError" })),
+        );
+      });
+    const timer = setTimeout(
+      () =>
+        finish(() => {
+          void reader.cancel().catch(() => {});
+          reject(
+            new GatewayError("timeout", `Gateway stream stalled after ${idleTimeoutMs}ms`, {
+              requestId,
+            }),
+          );
+        }),
+      idleTimeoutMs,
+    );
+    signal?.addEventListener("abort", onAbort, { once: true });
+    reader.read().then(
+      (chunk) => finish(() => resolve(chunk)),
+      (err: unknown) => finish(() => reject(err)),
+    );
+  });
+}
+
+async function readTextBounded(res: Response, timeoutMs: number): Promise<string> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      void res.body?.cancel().catch(() => {});
+      resolve("");
+    }, timeoutMs);
+    res.text().then(
+      (txt) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(txt);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve("");
+      },
+    );
+  });
+}
+
+async function* readSse(
+  body: ReadableStream<Uint8Array>,
+  requestId?: string,
+  idleTimeoutMs = GATEWAY_IDLE_TIMEOUT_MS,
+  signal?: AbortSignal,
+) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -99,7 +192,12 @@ async function* readSse(body: ReadableStream<Uint8Array>, requestId?: string) {
   let event = "";
   try {
     while (true) {
-      const { value, done } = await reader.read();
+      const { value, done } = await readChunkWithIdleTimeout(
+        reader,
+        idleTimeoutMs,
+        requestId,
+        signal,
+      );
       buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
       let nl: number;
       while ((nl = buffer.search(/\r?\n/)) !== -1) {
@@ -136,7 +234,13 @@ async function* readSse(body: ReadableStream<Uint8Array>, requestId?: string) {
 /** POST a streaming Responses request to AI Gateway and iterate its SSE events. */
 export async function streamResponse(
   payload: ResponsesRequest,
-  options: { signal?: AbortSignal; oidcToken?: string | null } = {},
+  options: {
+    signal?: AbortSignal;
+    oidcToken?: string | null;
+    headersTimeoutMs?: number;
+    idleTimeoutMs?: number;
+    maxAttempts?: number;
+  } = {},
 ): Promise<AsyncIterable<ResponsesStreamEvent>> {
   const sources: [string, string | null | undefined][] = [
     ["request OIDC token", options.oidcToken],
@@ -146,15 +250,41 @@ export async function streamResponse(
   const [source, key] = sources.find(([, v]) => !!v) ?? ["none", undefined];
   if (!key)
     throw new GatewayError("not_configured", "No AI Gateway credential (OIDC token or API key)");
-  const res = await fetch(GATEWAY_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ ...payload, stream: true }),
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
+  const headersTimeoutMs = options.headersTimeoutMs ?? GATEWAY_HEADERS_TIMEOUT_MS;
+  const idleTimeoutMs = options.idleTimeoutMs ?? GATEWAY_IDLE_TIMEOUT_MS;
+  const maxAttempts = options.maxAttempts ?? GATEWAY_MAX_ATTEMPTS;
+  let res: Response;
+  try {
+    // Retries happen strictly before any stream byte is consumed (429 / 5xx / network errors).
+    // Header timeouts are not retried so a hung upstream never doubles latency inside the 60 s turn.
+    res = await upstreamFetch(GATEWAY_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, stream: true }),
+      timeoutMs: headersTimeoutMs,
+      maxAttempts,
+      baseDelayMs: 400,
+      maxDelayMs: 2_000,
+      retryOnTimeout: false,
+      retryOnNetworkError: true,
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+  } catch (err) {
+    if (options.signal?.aborted) throw err;
+    if (err instanceof Error && err.name === "TimeoutError") {
+      throw new GatewayError(
+        "timeout",
+        `Gateway timed out waiting for headers after ${headersTimeoutMs}ms`,
+      );
+    }
+    throw new GatewayError(
+      "upstream",
+      err instanceof Error ? `Gateway network error: ${err.message}` : "Gateway network error",
+    );
+  }
   const requestId = res.headers.get("x-vercel-id") ?? undefined;
   if (!res.ok || !res.body) {
-    const detail = await res.text().catch(() => "");
+    const detail = await readTextBounded(res, GATEWAY_ERROR_BODY_TIMEOUT_MS);
     // Names the credential source only, never its value.
     console.error("AI Gateway rejected request", {
       status: res.status,
@@ -168,5 +298,7 @@ export async function streamResponse(
     );
   }
   const body = res.body;
-  return { [Symbol.asyncIterator]: () => readSse(body, requestId) };
+  return {
+    [Symbol.asyncIterator]: () => readSse(body, requestId, idleTimeoutMs, options.signal),
+  };
 }
