@@ -274,7 +274,7 @@ describe("structured memory flow", () => {
     expect((secondConfirm?.payload as Record<string, unknown>)["traded_card"]).toBeUndefined();
   });
 
-  it("prefers deterministic templateDate and validated intent slots over model values", async () => {
+  it("prefers the form slots and the date written in the template over model values", async () => {
     vi.mocked(findCards).mockResolvedValue([]);
     gateway(
       call("extract_memory", {
@@ -317,6 +317,40 @@ describe("structured memory flow", () => {
     });
     expect(bare.rows.find((r) => r.kind === "confirm")?.payload).toMatchObject({
       date: "2026-09-09",
+    });
+  });
+
+  it("never puts a place, person or card on the memory that the collector did not write", async () => {
+    vi.mocked(findCards).mockResolvedValue([]);
+    gateway(
+      call("extract_memory", {
+        title: "A binder at the shop",
+        place: "Osaka",
+        with_whom: "@mina",
+        card_name: "Umbreon 215/203",
+      }),
+    );
+    const c = chat();
+    await c.send("I saw a binder with @mina. Help me save this memory.", {
+      intent: { kind: "memory", place: "Paris", card_name: "Charizard 4/102" },
+    });
+    const payload = c.rows.find((r) => r.kind === "confirm")?.payload as Record<string, unknown>;
+    expect(payload).toMatchObject({ story: "I saw a binder with @mina.", with_whom: "@mina" });
+    expect(payload["place"]).toBeUndefined();
+    expect(payload["card"]).toBeUndefined();
+    expect(payload["card_name"]).toBeUndefined();
+    expect(findCards).not.toHaveBeenCalled();
+  });
+
+  it("uses the picked date even when the collector's own words contain another date", async () => {
+    gateway(call("extract_memory", { title: "Perth show" }));
+    const c = chat();
+    await c.send(
+      "I went to a show called Notes on 1 Jan 2020 in Perth on 2 Nov 2026. Help me save this memory.",
+      { intent: { kind: "memory", date: "2026-11-02" } },
+    );
+    expect(c.rows.find((r) => r.kind === "confirm")?.payload).toMatchObject({
+      date: "2026-11-02",
     });
   });
 

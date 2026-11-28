@@ -62,6 +62,15 @@ const extractedMemory = z.object({
   traded_card_name: optShort,
 });
 
+/** A place, person or card label is kept only when every word of it is in the collector's story,
+ *  so neither a wrong reading nor a mismatched form slot can put something they never wrote on
+ *  the memory. */
+function writtenInStory(value: string | undefined, story: string): string | undefined {
+  const words = value?.toLowerCase().match(/[\p{L}\p{N}/@']+/gu);
+  const text = story.toLowerCase();
+  return words?.length && words.every((w) => text.includes(w)) ? value : undefined;
+}
+
 function checkAborted(signal: AbortSignal | undefined) {
   if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
 }
@@ -72,11 +81,11 @@ export async function runMemory(
   intent: MemoryIntent,
   { message, images, runTool, emit, callTool, signal }: IntentTools,
 ): Promise<IntentAnswer | null> {
+  checkAborted(signal);
   // Structured extraction is text-only; keep attached photos intact by falling through to chat.
   if (images.length > 0) return null;
   const story = memoryStory(message);
   if (!story || story.length > 2000) return null;
-  checkAborted(signal);
   emit({ type: "status", name: "extract_memory", text: "Reading your memory" });
   const raw = await callTool(EXTRACT_MEMORY_TOOL, EXTRACT_INSTRUCTIONS, [
     { role: "user", content: story },
@@ -86,11 +95,15 @@ export async function runMemory(
   if (!parsed.success) return null;
 
   const { title, place, with_whom, date, card_name, traded_card_name } = parsed.data;
-  const resolvedPlace = intent.place ?? place;
-  const resolvedWith = intent.with_whom ?? with_whom;
-  const resolvedDate = templateDate(message) ?? intent.date ?? date;
-  const resolvedCard = intent.card_name ?? card_name;
-  const resolvedTraded = intent.traded_card_name ?? traded_card_name;
+  // The form's own slot wins, then the model's reading; either must be in the collector's words.
+  const pick = (slot: string | undefined, read: string | undefined) =>
+    writtenInStory(slot, story) ?? writtenInStory(read, story);
+  const resolvedPlace = pick(intent.place, place);
+  const resolvedWith = pick(intent.with_whom, with_whom);
+  // The date picker is exact; "on 2 Nov 2026" in the text may be part of the collector's own words.
+  const resolvedDate = intent.date ?? templateDate(message) ?? date;
+  const resolvedCard = pick(intent.card_name, card_name);
+  const resolvedTraded = pick(intent.traded_card_name, traded_card_name);
   const photoPath = messagePhotoPath(message);
 
   const args: Args = {

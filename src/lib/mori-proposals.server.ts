@@ -3,6 +3,7 @@ import { asObject, stringArg, type Args, type DB, type MoriRowDraft } from "./mo
 import { isWriteTool, type Proposal, type ProposalCard } from "./mori-tools";
 import { cardImage, getCard, getCardPricing, findCards, usdRange } from "./tcgdex";
 import { isIsoDate, validateWriteArgs, ownPhotoPath, writeSchemas } from "./mori-validation";
+import { plausibleMatches } from "./mori-intent-card.server";
 import { quoteOrder } from "./mori-order-money.server";
 
 async function briefCard(id: string, reason?: string): Promise<ProposalCard | null> {
@@ -50,7 +51,11 @@ export function memoryStory(message: string): string {
 export async function cardFromLabel(label: string | undefined): Promise<ProposalCard | undefined> {
   const m = /^(.*?)\s+#?([A-Z]{0,3}\d{1,4}(?:\/[A-Z]{0,3}\d{1,4})?)$/i.exec(label?.trim() ?? "");
   if (!m?.[1] || !m[2]) return undefined;
-  const found = await findCards(m[1], m[2]).catch(() => []);
+  // The search keeps a lone hit whose set size differs ("4/999" finding 4/102); that is not a match.
+  const found = plausibleMatches(
+    { name: m[1], number: m[2] },
+    await findCards(m[1], m[2]).catch(() => []),
+  );
   if (found.length !== 1 || !found[0]) return undefined;
   return (await briefCard(found[0].id).catch(() => null)) ?? undefined;
 }
@@ -143,7 +148,7 @@ export async function buildProposal(
   // From the fill-in template, the story is exactly what the collector wrote (facts, feelings, ratings).
   const fromTemplate = message.endsWith(TEMPLATE_END);
   const story = fromTemplate ? memoryStory(message) : (stringArg(a["story"]) ?? "");
-  const date = (fromTemplate ? templateDate(message) : undefined) ?? stringArg(a["date"]);
+  const date = stringArg(a["date"]) ?? (fromTemplate ? templateDate(message) : undefined);
   // A trade card the agent passed only by name ("Charizard 125/094") is looked up here, so the
   // memory shows the real card whenever the catalogue has exactly one match.
   const [resolvedCard, resolvedTraded] = await Promise.all([

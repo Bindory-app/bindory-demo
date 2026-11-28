@@ -104,6 +104,8 @@ describe("Catalogue resilience", () => {
       name: "Mega Charizard X ex",
       set_name: "Phantasmal Flames",
     });
+    // The lone search hit is from a 94-card set; a label written as /999 is a different card.
+    expect(await cardFromLabel("Charizard 125/999")).toBeUndefined();
     expect(await cardFromLabel("just words")).toBeUndefined();
   });
 });
