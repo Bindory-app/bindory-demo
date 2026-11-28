@@ -1,9 +1,9 @@
-import { SYSTEM, tools } from "./mori-prompt.server";
-import { parseMoriIntent } from "./mori-validation";
-import type { IntentTools } from "./mori-intent-card.server";
+import { SYSTEM, tools, flowKinds } from "./mori-prompt.server";
+import { parseMoriIntent, type MoriIntent } from "./mori-validation";
+import type { IntentAnswer, IntentTools } from "./mori-intent-card.server";
 import { runPreGrade } from "./mori-pre-grade.server";
 import { runPriceCheck } from "./mori-price-check.server";
-import { runOrder, PHOTO_INSTRUCTIONS } from "./mori-order.server";
+import { runOrder } from "./mori-order.server";
 import { runMemory } from "./mori-memory.server";
 import { marketFor } from "./market";
 import { toCondition, type Condition } from "./ebay-sold.server";
@@ -137,12 +137,12 @@ export async function runMori({
     message,
     seenIds: new Set<string>(),
     lastCard: "",
-    hasOrderPhotos: images.length === 2 && intent?.kind !== "pre_grade",
+    hasOrderPhotos: images.length === 2,
     orderPhotos: () => (saved ??= saveOrderPhotos(db, userId, images)),
     timing: timer,
-    ...(intent?.kind === "order" || intent?.kind === "pre_grade" ? { photoIntent: intent } : {}),
   };
   const runTool = async (name: string, args: Args) => {
+    signal?.throwIfAborted();
     const content = TOOL_STATUS[name] ?? "Working on it";
     emit({ type: "status", name, text: content });
     const status: MoriRowDraft = {
@@ -196,32 +196,44 @@ export async function runMori({
     }
   };
 
-  if (intent) {
-    const options: IntentTools = { message, images, market, runTool, emit, signal, callTool };
-    const runIntent = () => {
-      switch (intent.kind) {
+  const options: IntentTools = { message, images, market, runTool, emit, signal, callTool };
+  // Photos claimed by another flow never become sell photos, even if the flow fails.
+  const claimPhotos = (kind: MoriIntent["kind"]) => {
+    if (kind !== "order") ctx.hasOrderPhotos = false;
+  };
+  const runIntent = async (action: MoriIntent, reading?: Args) => {
+    try {
+      signal?.throwIfAborted();
+      if (action.kind === "order" || action.kind === "pre_grade") ctx.photoIntent = action;
+      else delete ctx.photoIntent;
+      switch (action.kind) {
         case "price_check":
-          return runPriceCheck(intent, options);
+          return await runPriceCheck(action, options);
         case "order":
-          return runOrder(intent, options);
+          return await runOrder(action, ctx.hasOrderPhotos ? options : { ...options, images: [] });
         case "pre_grade":
-          return runPreGrade(intent, options);
+          return await runPreGrade(action, options);
         case "memory":
-          return runMemory(intent, options);
+          return await runMemory(action, options, reading);
       }
-    };
-    const answer = await runIntent().catch((error: unknown) => {
+    } catch (error) {
       // A gateway failure would fail the chat loop too, only later; report it now.
       if (signal?.aborted || error instanceof GatewayError) throw error;
       console.warn("Structured Mori request unavailable; continuing in chat");
       return null;
-    });
-    if (answer) {
-      if (answer.row) rows.push(answer.row);
-      const done = await finishMoriTurn(db, rows, answer.text, askedAt, emit, answer.cardsOnly);
-      if (ownTimer) timer.flush("done");
-      return done;
     }
+  };
+  const finishAnswer = async (answer: IntentAnswer) => {
+    signal?.throwIfAborted();
+    if (answer.row) rows.push(answer.row);
+    const done = await finishMoriTurn(db, rows, answer.text, askedAt, emit, answer.cardsOnly);
+    if (ownTimer) timer.flush("done");
+    return done;
+  };
+  if (intent) {
+    claimPhotos(intent.kind);
+    const answer = await runIntent(intent);
+    if (answer) return finishAnswer(answer);
   }
 
   // Successful structured turns never need to load the conversation. Exclude this turn's
@@ -267,6 +279,17 @@ export async function runMori({
             },
           ],
         });
+    const failedFlows = new Map<string, { turn: number; question: string }>();
+    const flowError = (callId: string, question: string) =>
+      input.push({
+        type: "function_call_output",
+        call_id: callId,
+        output: JSON.stringify({
+          error:
+            "Could not complete this flow. Do not retry it this turn; ask the collector one clarifying question.",
+          question,
+        }),
+      });
     turns: for (let turn = 0; turn < 6; turn++) {
       // Questions about the collector's own cards, prices or plans must look at real data first,
       // so the first step has to use a tool (the model sometimes answers from guesswork otherwise).
@@ -330,23 +353,73 @@ export async function runMori({
 
       for (const call of calls) {
         const name = call.name ?? "";
-        const args = (() => {
+        const parsed: unknown = (() => {
           try {
-            return JSON.parse(call.arguments ?? "{}") as Args;
+            return JSON.parse(call.arguments ?? "");
           } catch {
-            return {};
+            return null;
           }
         })();
+        const args = asObject(parsed);
         input.push({
           type: "function_call",
           call_id: call.call_id ?? "",
           name,
           arguments: call.arguments ?? "{}",
         });
+        const kind = flowKinds.get(name);
+        if (kind) {
+          claimPhotos(kind);
+          const previous = failedFlows.get(name);
+          if (previous) {
+            if (previous.turn !== turn) return await finishAnswer({ text: previous.question });
+            flowError(call.call_id ?? "", previous.question);
+            continue;
+          }
+          // The router saw any photo: price needs its printing, memory needs its reading.
+          // Only an actual tagged memory supplies trusted form slots.
+          const action: MoriIntent | null | false =
+            parsed === args &&
+            !("kind" in args) &&
+            (kind === "memory"
+              ? typeof args["title"] === "string" && (intent?.kind === "memory" ? intent : { kind })
+              : parseMoriIntent({ ...args, kind }, false));
+          const card = action && "card" in action ? action.card : undefined;
+          const knownCard =
+            !card ||
+            !("id" in card) ||
+            ctx.seenIds.has(card.id) ||
+            message
+              .split(/[^a-z\d.-]+/i)
+              .some((token) => token.replace(/^\.+|\.+$/g, "") === card.id);
+          if (action && knownCard) {
+            const answer = await runIntent(action, kind === "memory" ? args : undefined);
+            if (answer) return await finishAnswer(answer);
+          }
+          const question =
+            kind === "memory"
+              ? "What would you like to remember?"
+              : kind === "pre_grade"
+                ? "Could you send clear front and back photos of this card?"
+                : kind === "order" && !action
+                  ? "Which printing, side and target price (with currency) should I use?"
+                  : "Which card name and printed collector number should I use?";
+          failedFlows.set(name, { turn, question });
+          flowError(call.call_id ?? "", question);
+          continue;
+        }
+        // Do not grant a hallucinated/retired model tool the executor's internal privileges.
+        if (!tools.some((t) => t.name === name)) {
+          input.push({
+            type: "function_call_output",
+            call_id: call.call_id ?? "",
+            output: '{"error":"Tool unavailable. Use a listed tool or ask for clarification."}',
+          });
+          continue;
+        }
         const out = await runTool(name, args);
-        const result = out.result;
         if (name === "get_card_prices") {
-          const output = asObject(result);
+          const output = asObject(out.result);
           const id = asObject(output["card"])["id"];
           if (typeof id === "string")
             priced.set(id, { output, condition: toCondition(args["condition"]) ?? "nm" });
@@ -358,16 +431,12 @@ export async function runMori({
         });
         if (out.stop) {
           // A batch can contain several writes. Never execute calls after the card we showed.
-          // A pre-tool sentence cannot know the sell proposal was blocked.
-          if (typeof asObject(result)["error"] === "string") {
-            priced.clear();
-            finalText = String(asObject(result)["error"]);
-          } else finalText = out.rows.some((r) => r.kind === "photos") ? PHOTO_INSTRUCTIONS : text;
+          finalText = text;
           break turns;
         }
       }
     }
-    if (onlyPrice()) {
+    if (!failedFlows.size && onlyPrice()) {
       const priceCardStarted = Date.now();
       const [id, { output, condition }] = [...priced][0]!;
       const row = await priceCardRow(id, market, output, condition).catch(() => null);

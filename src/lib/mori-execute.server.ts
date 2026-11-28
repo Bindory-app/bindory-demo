@@ -44,7 +44,7 @@ function requestPhotos(purpose: "sell" | "grade", pending?: MoriToolContext["pho
       shown_to_user: true,
       card: "photo_request",
       ...(purpose === "sell" ? { order_proposed: false } : {}),
-      note: "Take a photo and Upload buttons are on screen, not a confirmation. Wait for front and back photos before set_order or pre_grade_report.",
+      note: "Take a photo and Upload buttons are on screen, not a confirmation. Wait for the collector to send front and back photos.",
     },
     stop: true,
   };

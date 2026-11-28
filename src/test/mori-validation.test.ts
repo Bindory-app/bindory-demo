@@ -1,5 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { validateWriteArgs, ownPhotoPath, ownMessagePhotos } from "@/lib/mori-validation";
+import {
+  validateWriteArgs,
+  ownPhotoPath,
+  ownMessagePhotos,
+  parseMoriIntent,
+} from "@/lib/mori-validation";
+
+describe("named intent cards", () => {
+  it.each([
+    ["25/102", "25/102"],
+    ["TG01 / TG30", "TG01 / TG30"],
+    ["001/SV-P", "001/SV-P"],
+    ["#XY-P/099", "XY-P/099"],
+  ])("accepts tagged collector number %s", (number, expected) => {
+    const card = { name: "Pikachu", number };
+    expect(parseMoriIntent({ kind: "price_check", card }, false)).toStrictEqual({
+      kind: "price_check",
+      card: { ...card, number: expected },
+    });
+  });
+  it.each([
+    { kind: "price_check" },
+    { kind: "order", side: "buy", price: { amount: 12, currency: "USD" } },
+  ])("keeps existing $kind cards and allows only the additional set", (base) => {
+    const card = { name: "Pikachu", number: "25/102" };
+    for (const c of [card, { ...card, set: "Base Set" }]) {
+      expect(parseMoriIntent({ ...base, card: c }, false)).toStrictEqual({ ...base, card: c });
+    }
+    expect(parseMoriIntent({ ...base, card: { ...card, unexpected: true } }, false)).toBeNull();
+  });
+});
 
 describe("Mori writing tools", () => {
   it("requires a one-line reason for every binder card", () => {

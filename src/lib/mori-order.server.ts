@@ -60,6 +60,7 @@ export async function runOrder(
     card_id: id,
     price: intent.price.amount,
     currency: intent.price.currency,
+    ...(intent.note ? { note: intent.note } : {}),
     ...(condition ? { condition } : {}),
   });
   if (proposal.rows.some((r) => r.kind === "photos"))

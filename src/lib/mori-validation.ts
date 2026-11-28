@@ -22,12 +22,14 @@ const side = z.enum(["buy", "sell"]);
 const namedCard = z
   .object({
     name: short,
+    set: short.optional(),
     number: z
       .string()
       .trim()
       .min(1)
       .max(24)
-      .regex(/^[a-z0-9]+(?:\s*\/\s*[a-z0-9]+)?$/i)
+      .regex(/^#?[a-z0-9]+(?:-[a-z0-9]+)*(?:\s*\/\s*[a-z0-9]+(?:-[a-z0-9]+)*)?$/i)
+      .transform((number) => number.replace(/^#/, ""))
       .optional(),
   })
   .strict();
@@ -49,6 +51,7 @@ const orderIntent = z
     kind: z.literal("order"),
     side,
     card: intentCard,
+    note: text.optional(),
     price: z.object({ amount: orderAmount, currency: orderCurrency }).strict(),
   })
   .strict();
@@ -56,7 +59,7 @@ export type OrderIntent = z.infer<typeof orderIntent>;
 const preGradeIntent = z
   .object({
     kind: z.literal("pre_grade"),
-    card: z.union([catalogId, namedCard.extend({ set: short.optional() })]).optional(),
+    card: intentCard.optional(),
   })
   .strict();
 export type PreGradeIntent = z.infer<typeof preGradeIntent>;
@@ -77,6 +80,7 @@ const moriIntent = z.discriminatedUnion("kind", [
   preGradeIntent,
   memoryIntent,
 ]);
+export type MoriIntent = z.infer<typeof moriIntent>;
 
 export function parseMoriIntent(raw: unknown, hasPhotos: boolean) {
   if (raw === undefined) return null;
