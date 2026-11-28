@@ -1,3 +1,4 @@
+import type { ResponsesFunctionTool, ResponsesInputItem } from "./ai-gateway.server";
 import type { Args, MoriRowDraft } from "./mori-context.server";
 import type { Market } from "./market";
 import type { MoriStreamEvent } from "./mori-tools";
@@ -9,8 +10,13 @@ export type IntentTools = {
   market: Market;
   runTool: (name: string, args: Args) => Promise<{ result: unknown; rows: MoriRowDraft[] }>;
   emit: (event: MoriStreamEvent) => void;
+  /** One forced function call; the runtime owns credentials, cancellation and timing. */
+  callTool: (
+    tool: ResponsesFunctionTool,
+    instructions: string,
+    input: ResponsesInputItem[],
+  ) => Promise<unknown>;
   signal?: AbortSignal | undefined;
-  oidcToken?: string | null | undefined;
 };
 export type IntentAnswer = { row?: MoriRowDraft; text: string; cardsOnly?: boolean };
 type Candidate = Awaited<ReturnType<typeof findCards>>[number];

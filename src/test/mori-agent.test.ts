@@ -9,6 +9,7 @@ import { latestSync, startSync } from "@/lib/collectr-sync.server";
 import { marketPrices } from "@/lib/mori-prices.server";
 import { asObject, type DB } from "@/lib/mori-context.server";
 import type { MoriStreamEvent } from "@/lib/mori-tools";
+import { createTurnTimer } from "@/lib/mori-timing.server";
 
 vi.mock("@/lib/collectr-sync.server", () => ({ latestSync: vi.fn(), startSync: vi.fn() }));
 vi.mock("@/lib/fx.server", () => ({
@@ -76,7 +77,10 @@ function chat(rows: Row[] = []) {
   const events: MoriStreamEvent[] = [];
   const send = (
     message: string,
-    opts: Pick<Parameters<typeof runMori>[0], "images" | "location" | "country" | "intent"> = {},
+    opts: Pick<
+      Parameters<typeof runMori>[0],
+      "images" | "location" | "country" | "intent" | "timing"
+    > = {},
   ) =>
     runMori({
       db,
@@ -640,7 +644,12 @@ describe("explicit price-check turns", () => {
       }),
     );
     const { send, rows, events } = chat();
-    await send("What is this card worth?", { intent: { kind: "price_check" }, images });
+    const timing = createTurnTimer(Date.now, () => {});
+    await send("What is this card worth?", { intent: { kind: "price_check" }, images, timing });
+    // The one-shot photo read is in the turn's timing line next to the tools it led to.
+    const summary = timing.finish("done");
+    expect(summary.models).toMatchObject([{ turn: 0, ok: true }]);
+    expect(summary.tools.map((t) => t.name)).toEqual(["search_catalogue", "get_card_prices"]);
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       tool_choice: "required",

@@ -1,5 +1,6 @@
 import { SYSTEM, tools } from "./mori-prompt.server";
 import { parseMoriIntent } from "./mori-validation";
+import type { IntentTools } from "./mori-intent-card.server";
 import { runPriceCheck } from "./mori-price-check.server";
 import { runOrder, PHOTO_INSTRUCTIONS } from "./mori-order.server";
 import { marketFor } from "./market";
@@ -15,6 +16,7 @@ import {
 } from "./collectr";
 import { TOOL_STATUS, type MoriStreamEvent, type MoriRow } from "./mori-tools";
 import {
+  callToolOnce,
   streamResponse,
   GatewayError,
   type ResponsesInputItem,
@@ -163,17 +165,38 @@ export async function runMori({
     return { ...out, serialized };
   };
 
+  // Structured flows make at most one forced call each; it is timed like a loop turn (turn 0).
+  const callTool: IntentTools["callTool"] = async (tool, instructions, callInput) => {
+    const started = Date.now();
+    let model = "";
+    const record = (ok: boolean, code?: string) =>
+      timer.recordModel({
+        turn: 0,
+        model,
+        ms: Date.now() - started,
+        ok,
+        ...(code ? { code } : {}),
+      });
+    try {
+      const out = await callToolOnce(tool, instructions, callInput, {
+        signal,
+        oidcToken,
+        onModel: (m) => {
+          model = m;
+        },
+      });
+      record(true);
+      return out;
+    } catch (e) {
+      record(false, e instanceof GatewayError ? e.code : undefined);
+      throw e;
+    }
+  };
+
   switch (intent?.kind) {
     case "price_check":
     case "order": {
-      const options = {
-        images,
-        market,
-        runTool,
-        emit,
-        signal,
-        oidcToken,
-      };
+      const options: IntentTools = { images, market, runTool, emit, signal, callTool };
       const answer = await (
         intent.kind === "order" ? runOrder(intent, options) : runPriceCheck(intent, options)
       ).catch((error: unknown) => {
