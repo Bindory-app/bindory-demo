@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { findCards, getCardPricing } from "@/lib/tcgdex";
 import { runMori } from "@/lib/mori-agent.server";
+import { resolveMarketFx } from "@/lib/fx.server";
+import { marketFor } from "@/lib/market";
+import type { OrderIntent } from "@/lib/mori-validation";
 import type { ResponsesRequest, ResponsesResponse } from "@/lib/ai-gateway.server";
 import { latestSync, startSync } from "@/lib/collectr-sync.server";
 import { marketPrices } from "@/lib/mori-prices.server";
@@ -214,36 +217,22 @@ describe("the direct Mori tool loop", () => {
     ).toBe(true);
   });
 
-  it.each([
-    null,
-    "Here are photos of the front and back for my sell order.",
-    "Set a sell order for this card",
-  ])(
-    "attaches the collector's private sell photos (earlier photo message: %s)",
-    async (earlier) => {
-      const { send, rows, bucket, upload } = chat();
-      if (earlier) {
-        gateway(say("What price did you have in mind?"));
-        await send(earlier, { images });
-      }
-      gateway(order("sell"));
-      await send(earlier ? "$10" : "Set a sell order at $10", earlier ? {} : { images });
-      expect(bucket).toHaveBeenCalledWith("memory-photos");
-      expect(upload).toHaveBeenCalledTimes(2);
-      const paths = rows.find((r) => asObject(r.payload)["photos"] && r.kind === "status")?.payload;
-      expect(paths).toMatchObject({
-        photos: {
-          front: expect.stringMatching(/^collector\/orders\/.+-front.jpg$/),
-          back: expect.stringMatching(/^collector\/orders\/.+-back.jpg$/),
-        },
-      });
-      expect(rows.find((r) => r.kind === "confirm")?.payload).toMatchObject({
-        ...asObject(paths),
-        side: "sell",
-        status: "pending",
-      });
-    },
-  );
+  it("keeps free-text sell photos only when a sell tool actually requests them", async () => {
+    const { send, rows, upload } = chat();
+    gateway(say("What price?"));
+    await send("Set a sell order", { images });
+    expect(upload).not.toHaveBeenCalled();
+    gateway(order("sell"));
+    await send("Sell at US$10", { images });
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(rows.find((r) => r.kind === "confirm")?.payload).toMatchObject({
+      side: "sell",
+      photos: {
+        front: expect.stringMatching(/^collector\/orders\/.+-front.jpg$/),
+        back: expect.stringMatching(/^collector\/orders\/.+-back.jpg$/),
+      },
+    });
+  });
 
   it("does not save photos sent only for pre-grading; the grade keeps the last priced card label", async () => {
     const { send, rows, upload } = chat();
@@ -316,6 +305,163 @@ describe("the direct Mori tool loop", () => {
       prior,
     });
     expect(requests).toHaveLength(4);
+  });
+});
+
+describe("order quotes and photo provenance", () => {
+  const pika = { id: "base1-25", name: "Pikachu", number: "25", set: "Base Set", set_size: 102 };
+  const buy: OrderIntent = {
+    kind: "order",
+    side: "buy",
+    card: { name: "Pikachu", number: "25/102" },
+    price: { amount: 15, currency: "AUD" },
+  };
+  const sell: OrderIntent = { ...buy, side: "sell" };
+  const cold = () =>
+    vi
+      .mocked(resolveMarketFx)
+      .mockResolvedValueOnce({
+        market: { ...marketFor("AU"), currency: "USD", symbol: "US$" },
+        rate: 1,
+        stale: false,
+        fallbackToUsd: true,
+      });
+  it("orders at the resolved FX quote without a model and records prices before one confirmation", async () => {
+    vi.mocked(findCards).mockResolvedValue([pika]);
+    const { send, rows } = chat();
+    await send("Buy Pikachu for A$15", { intent: buy, country: "AU" });
+    expect(requests).toHaveLength(0);
+    expect(vi.mocked(resolveMarketFx)).toHaveBeenCalledWith(
+      expect.objectContaining({ currency: "AUD" }),
+    );
+    expect(rows.filter((r) => r.kind === "status").map((r) => asObject(r.payload)["name"])).toEqual(
+      ["search_catalogue", "get_card_prices", "set_order"],
+    );
+    expect(rows.filter((r) => r.kind === "confirm")).toHaveLength(1);
+    expect(rows.at(-1)).toMatchObject({
+      kind: "confirm",
+      content: "Buy Pikachu 25 at 15 AUD (US$10)",
+      payload: {
+        tool: "set_order",
+        side: "buy",
+        price: buy.price,
+        price_usd: 10,
+        fx_rate: 1.5,
+        status: "pending",
+      },
+    });
+    expect(rows.at(-2)?.content).toContain("at the market reference of 10 USD");
+  });
+  it("refuses a guessed conversion on cold FX, then accepts an explicit USD order in Australia", async () => {
+    cold();
+    vi.mocked(findCards).mockResolvedValue([pika]);
+    const { send, rows } = chat();
+    await send("A$15", { intent: buy, country: "AU" });
+    expect(rows.some((r) => r.kind === "confirm")).toBe(false);
+    expect(rows.find((r) => r.kind === "text")?.content).toContain("What US$ price");
+    await send("Use US$11", {
+      intent: { ...buy, price: { amount: 11, currency: "USD" } },
+      country: "AU",
+    });
+    expect(rows.at(-1)?.payload).toMatchObject({
+      price_usd: 11,
+      price: { amount: 11, currency: "USD" },
+    });
+    expect(requests).toHaveLength(0);
+  });
+  it("keeps the whole order on each printing choice; the chosen ID does not search again", async () => {
+    const second = { ...pika, id: "promo-25", set: "Promos" };
+    vi.mocked(findCards).mockResolvedValue([pika, second]);
+    const { send, rows } = chat();
+    await send("Buy Pikachu", { intent: buy });
+    const choices = asObject(rows.at(-1)?.payload)["choices"] as {
+      intent: OrderIntent;
+      label: string;
+    }[];
+    expect(choices.map((c) => c.intent)).toEqual(
+      [pika, second].map((c) => ({ ...buy, card: { id: c.id } })),
+    );
+    expect(marketPrices).not.toHaveBeenCalled();
+    await send(choices[1]!.label, { intent: choices[1]!.intent });
+    expect(findCards).toHaveBeenCalledTimes(1);
+    expect(rows.at(-1)?.payload).toMatchObject({
+      card: { tcgdex_id: second.id },
+      side: "buy",
+      price: buy.price,
+    });
+    expect(requests).toHaveLength(0);
+  });
+  it.each([[], images.slice(0, 1)])(
+    "never substitutes another order's stored pair for missing images (%j)",
+    async (...photo) => {
+      const { send, rows, upload } = chat([
+        {
+          role: "mori",
+          kind: "status",
+          content: "Old photos",
+          payload: { photos: { front: "collector/orders/a.jpg", back: "collector/orders/b.jpg" } },
+        },
+      ]);
+      await send("Sell this card", { intent: sell, images: photo });
+      expect(rows.at(-1)).toMatchObject({ kind: "photos", payload: { for: "sell", intent: sell } });
+      expect(rows.some((r) => r.kind === "confirm")).toBe(false);
+      expect(requests).toHaveLength(0);
+      expect(upload).not.toHaveBeenCalled();
+      expect(findCards).not.toHaveBeenCalled();
+    },
+  );
+  it.each([true, false])("sells from the supplied pair; condition read success=%s", async (ok) => {
+    const { send, rows, upload } = chat();
+    const condition = {
+      overall: "Lightly played",
+      edges: "Light whitening",
+      centering: { front: "55/45" },
+      corners: { top_left: "Sharp" },
+      surface: "Clean",
+    };
+    gateway(ok ? call("read_order_condition", condition) : say("I can't tell."));
+    vi.mocked(findCards).mockResolvedValue([pika]);
+    await send("Sell Pikachu", { intent: sell, images });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      tool_choice: "required",
+      tools: [{ name: "read_order_condition" }],
+    });
+    for (const image of images) expect(JSON.stringify(requests[0]?.input)).toContain(image);
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(rows.at(-1)?.payload).toMatchObject({
+      side: "sell",
+      price: sell.price,
+      price_usd: 10,
+      photos: {
+        front: expect.stringMatching(/-front.jpg$/),
+        back: expect.stringMatching(/-back.jpg$/),
+      },
+    });
+    if (ok) expect(asObject(rows.at(-1)?.payload)["condition"]).toEqual(condition);
+    else {
+      expect(asObject(rows.at(-1)?.payload)["condition"]).toBeUndefined();
+      expect(rows.at(-2)?.content).toContain("couldn't assess condition");
+    }
+    expect(JSON.stringify(rows)).not.toContain("data:image");
+  });
+  it("converts the free-text set_order tool on the server and stops it from guessing USD on FX failure", async () => {
+    const args = { side: "buy", card_id: pika.id, price: 30, currency: "AUD" };
+    const { send, rows } = chat();
+    gateway(call("set_order", args));
+    await send("Buy for A$30");
+    expect(rows.at(-1)?.payload).toMatchObject({
+      price_usd: 20,
+      price: { amount: 30, currency: "AUD" },
+    });
+    const tool = requests[0]?.tools?.find((t) => t.name === "set_order");
+    expect(tool?.parameters["required"]).toEqual(["side", "card_id", "price", "currency"]);
+    cold();
+    gateway(call("set_order", args), order("buy"));
+    await send("Another A$30 order");
+    expect(rows.filter((r) => r.kind === "confirm")).toHaveLength(1);
+    expect(rows.filter((r) => r.kind === "text").at(-1)?.content).toContain("What US$ price");
+    expect(requests).toHaveLength(2);
   });
 });
 
