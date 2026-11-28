@@ -2,7 +2,6 @@ import { SYSTEM, tools } from "./mori-prompt.server";
 import { parseMoriIntent } from "./mori-validation";
 import { runPriceCheck } from "./mori-price-check.server";
 import { marketFor } from "./market";
-import { usdTo } from "./fx.server";
 import { toCondition, type Condition } from "./ebay-sold.server";
 import { priceCardRow } from "./mori-prices.server";
 import { chatPhotos, saveOrderPhotos } from "./mori-order-photos.server";
@@ -208,13 +207,12 @@ export async function runMori({
     ctx.seenIds.add(id);
 
   try {
-    const rate = market.currency === "USD" ? 1 : await usdTo(market.currency);
     const input: ResponsesInputItem[] = [
       ...past,
       {
         role: "developer",
         content:
-          `[App note: the collector is in ${market.name} (country code ${market.country}). Show prices in ${market.currency} (${market.symbol}); their eBay site is ${market.ebay}. Pass country "${market.country}" and currency "${market.currency}" to get_card_prices. ${rate ? `Today 1 US$ = ${rate} ${market.currency}; convert the collector's price to US$ for set_order at that rate.` : "Live FX conversion is unavailable right now; fall back to US$ if needed."}]` +
+          `[App note: the collector is in ${market.name} (country code ${market.country}). Show prices in ${market.currency} (${market.symbol}); their eBay site is ${market.ebay}. Pass country "${market.country}" and currency "${market.currency}" to get_card_prices. If the tool reports fx_fallback, its prices are US$.]` +
           (location
             ? `\n[App note: the collector's location, from their phone: ${location}. Use it for nearby shows, events and stores; never assume another city.]`
             : ""),

@@ -47,7 +47,8 @@ describe("Sell orders with photos", () => {
     const ok = writeSchemas.set_order.safeParse({
       side: "sell",
       card_id: "me02-125",
-      price_usd: 550,
+      price: 550,
+      currency: "USD",
       condition: {
         overall: "Near mint",
         centering: { front: "55/45", back: "60/40" },

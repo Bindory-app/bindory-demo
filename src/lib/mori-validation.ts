@@ -3,6 +3,14 @@ import { z } from "zod";
 const text = z.string().trim().min(1).max(2000);
 const cardId = z.string().trim().min(1).max(100);
 const short = z.string().trim().min(1).max(160);
+export const orderCurrency = z.enum(["USD", "AUD", "CAD", "GBP", "EUR"]);
+export const orderAmount = z
+  .number()
+  .finite()
+  .positive()
+  .max(9_999_999.99)
+  .refine((v) => Number(v.toFixed(2)) === v);
+const side = z.enum(["buy", "sell"]);
 
 const namedCard = z
   .object({
@@ -16,20 +24,31 @@ const namedCard = z
       .optional(),
   })
   .strict();
+const intentCard = z.union([
+  namedCard,
+  z.object({ id: cardId.regex(/^[a-z\d.-]+-[a-z\d.-]+$/i) }).strict(),
+]);
 const priceCheckIntent = z
   .object({
     kind: z.literal("price_check"),
     // Omit only when asking to identify an attached photo.
-    card: z
-      .union([namedCard, z.object({ id: cardId.regex(/^[a-z\d.-]+-[a-z\d.-]+$/i) }).strict()])
-      .optional(),
+    card: intentCard.optional(),
     condition: z
       .enum(["near_mint", "lightly_played", "moderately_played", "heavily_played"])
       .optional(),
   })
   .strict();
 export type PriceCheckIntent = z.infer<typeof priceCheckIntent>;
-const moriIntent = z.discriminatedUnion("kind", [priceCheckIntent]);
+const orderIntent = z
+  .object({
+    kind: z.literal("order"),
+    side,
+    card: intentCard,
+    price: z.object({ amount: orderAmount, currency: orderCurrency }).strict(),
+  })
+  .strict();
+export type OrderIntent = z.infer<typeof orderIntent>;
+const moriIntent = z.discriminatedUnion("kind", [priceCheckIntent, orderIntent]);
 
 export function parseMoriIntent(raw: unknown, hasPhotos: boolean) {
   if (raw === undefined) return null;
@@ -84,9 +103,10 @@ export const writeSchemas = {
     photo_path: text.optional(),
   }),
   set_order: z.object({
-    side: z.enum(["buy", "sell"]),
+    side,
     card_id: cardId,
-    price_usd: z.coerce.number().positive().max(1_000_000),
+    price: orderAmount,
+    currency: orderCurrency,
     note: text.optional(),
     condition: orderCondition.optional(),
   }),

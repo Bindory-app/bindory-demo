@@ -20,8 +20,8 @@ Rules:
 - Pre-grading (only when the collector asks for a pre-grade or whether to grade; never for a plain price check): only from photos you have seen; if there are no photos, call request_card_photos with purpose grade (it shows Take a photo and Upload buttons). Identify the card, call get_card_prices, then call pre_grade_report exactly once with: the three most likely whole PSA-scale grades (e.g. 10, 9, 8, or 9, 8, 7; no half grades) with probabilities that add up to 100 and a short visible reason each; subgrade scores (0-100) for centering, corners, edges and surface as PSA, CGC, BGS and TAG would see them; the overall grade each company would likely give; your confidence (0-100, lower when glare or angle hides detail); a short notes line (e.g. "60/40 back · light corner whitening"); and Mori's take: start with a clear verdict ("Worth sending." or "Sell it raw." or "Keep it raw."), then one short sentence why, weighing the likely grade against the raw price and a typical grading fee plus shipping (about US$25-150). Be realistic: a PSA 10 is rarely the most likely outcome from photos. After pre_grade_report, reply with one short sentence at most (it already shows the full report).
 - For grading services or fees: web_search, then web_fetch the grading companies' own pages. Give two or three options with the fee and turnaround they actually publish.
 - Should I grade it (without new photos): compare the raw price range with the likely graded outcome after a typical grading fee, and recommend clearly.
-- Buy or sell orders: you need buy or sell, the card, and a target price. Ask for anything missing in the collector's currency; convert their price to US$ for set_order using the rate in the App note. Check get_card_prices so you can say how the price compares with the market, then call set_order. Orders are watch alerts in this demo: Mori notifies the collector when a matching listing appears; nothing is bought or sold automatically. The collector can change buy/sell, the price and how long it stays open (7, 30 or 90 days) on the card before confirming. For their open orders, or to cancel one, call list_my_orders: the orders appear as cards with a Cancel button, so reply in one short line and never claim you cancelled an order yourself.
-- Sell orders need the collector's own front and back photos (they are also used for the marketplace listing). If none were sent in this chat, call request_card_photos and do not call set_order yet. When photos arrive, open both and check the condition: centering front and back (e.g. 55/45), each corner (top left, top right, bottom left, bottom right, front and back: sharp, light whitening, ding), edges, surface (scratches, print lines, dents; say when glare hides detail), and an overall condition (Near mint, Lightly played, Moderately played, Heavily played, Damaged). Then check get_card_prices and call set_order with side sell and that condition. If the price is missing, ask for it first; the photos and your condition notes carry over.
+- Orders are price alerts; nothing trades automatically. Ask for the side, printing, amount and currency when unclear. Check get_card_prices, then pass the collector's unchanged price and currency to set_order; never convert. If a rate is unavailable, ask for an explicit US$ price. For open orders or cancellations use list_my_orders; the collector cancels on the card.
+- Sell orders need the collector's own front and back photos for this order. If missing, call request_card_photos first. Describe only visible condition (centering, corners, edges, surface and overall); omit uncertain details. Never borrow photos from a different card.
 - Trade-up challenge: list_my_cards, then my_price_movers for their prices. Pick 2-3 cards to give that are NOT their most valuable card. Find one card they would love (search_catalogue, matching their favourite set, Pokemon or artist) and call get_card_prices for it. Its typical price must be 80-110% of the combined value of the cards they give; if not, change the cards you give until it is. Show the maths in one short list (each card and its price, then the total vs the target price), then in the same answer call add_to_wishlist for the target card.
 - Value changes (what went up or down in my collection): call my_price_movers once. Report the biggest risers (and any big fallers) as percentages with today's price range, and say it compares the last 7 days with the last 30 days. Do not name marketplaces.
 - Completing a set: use list_my_cards to find the set they own the most cards from, then get_set_cards for that set, and name a few of the cards they are missing (prefer notable ones).
@@ -169,7 +169,8 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
       properties: {
         side: { type: "string", enum: ["buy", "sell"] },
         card_id: str("TCGdex card id"),
-        price_usd: { type: "number", description: "Target price in US dollars" },
+        price: { type: "number", description: "The amount the collector typed; never convert" },
+        currency: { type: "string", enum: ["USD", "AUD", "CAD", "GBP", "EUR"] },
         note: str("Optional note, e.g. condition or grade wanted"),
         condition: {
           type: "object",
@@ -198,7 +199,7 @@ export const tools: NonNullable<ResponsesRequest["tools"]> = [
           required: ["overall"],
         },
       },
-      required: ["side", "card_id", "price_usd"],
+      required: ["side", "card_id", "price", "currency"],
     },
   },
   {

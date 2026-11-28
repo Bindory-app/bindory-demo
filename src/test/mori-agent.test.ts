@@ -8,7 +8,14 @@ import { asObject, type DB } from "@/lib/mori-context.server";
 import type { MoriStreamEvent } from "@/lib/mori-tools";
 
 vi.mock("@/lib/collectr-sync.server", () => ({ latestSync: vi.fn(), startSync: vi.fn() }));
-vi.mock("@/lib/fx.server", () => ({ usdTo: () => Promise.resolve(1.5) }));
+vi.mock("@/lib/fx.server", () => ({
+  resolveMarketFx: vi.fn(async (market) => ({
+    market,
+    rate: market.currency === "USD" ? 1 : 1.5,
+    stale: false,
+    fallbackToUsd: false,
+  })),
+}));
 vi.mock("@/lib/tcgdex", async (original) => ({
   ...(await original<typeof import("@/lib/tcgdex")>()),
   findCards: vi.fn(),
@@ -90,7 +97,7 @@ function gateway(...output: NonNullable<ResponsesResponse["output"]>) {
 }
 const priced = (id = "base1-25") => call("get_card_prices", { card_id: id, country: "US" });
 const order = (side: "sell" | "buy") =>
-  call("set_order", { card_id: "base1-25", side, price_usd: 10 });
+  call("set_order", { card_id: "base1-25", side, price: 10, currency: "USD" });
 const images = ["data:image/jpeg;base64,Zg==", "data:image/jpeg;base64,Yg=="];
 beforeEach(() => {
   vi.clearAllMocks();
@@ -124,7 +131,7 @@ afterEach(() => {
 });
 
 describe("the direct Mori tool loop", () => {
-  it("sends the market, exchange rate, phone location and prior card outcomes to the model", async () => {
+  it("sends the market, location and prior outcomes but no conversion arithmetic to the model", async () => {
     const { send } = chat(
       ["confirmed", "edited"].map((status) => ({
         role: "mori",
@@ -137,17 +144,10 @@ describe("the direct Mori tool loop", () => {
     await send("Shows near me?", { country: "AU", location: "Melbourne" });
     const input = requests[0]!.input;
     const appNote = input.find((item) => "role" in item && item.role === "developer");
-    for (const detail of [
-      "Australia",
-      "country code AU",
-      "AUD (A$)",
-      "ebay.com.au",
-      "1 US$ = 1.5 AUD",
-      "US$ for set_order",
-      "Melbourne",
-    ])
+    for (const detail of ["Australia", "country code AU", "AUD (A$)", "ebay.com.au", "Melbourne"])
       expect(JSON.stringify(appNote)).toContain(detail);
     for (const status of ["confirmed", "edited"]) expect(JSON.stringify(input)).toContain(status);
+    expect(JSON.stringify(appNote)).not.toContain("1 US$ =");
   });
 
   it("shows one price card, not prose; keeps suggestions and ignores model-supplied sales", async () => {
