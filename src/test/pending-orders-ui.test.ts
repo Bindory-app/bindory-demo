@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { paymentLabels, paymentReminder, paymentConnected } from "@/lib/mori-order-payment.server";
 
 // Exercise the shipped live layer, not a second implementation of the checkout.
 const file = readFileSync("wireframe/live.html", "utf8");
@@ -88,6 +89,28 @@ function setup(uid = "collector", pending = true, push = true) {
 }
 
 describe("pending payment steps", () => {
+  it.each([0, 1, 2])(
+    "keeps the server payment copy identical to the shipped web step (%i activations)",
+    async (n) => {
+      const t = setup();
+      await t.load();
+      expect(t.app.querySelector("[data-bd-payment-step] b")?.textContent).toBe(paymentReminder);
+      t.click("wallet");
+      expect(
+        Object.fromEntries(
+          [...t.app.querySelectorAll<HTMLInputElement>("input[type=radio]")].map((r) => [
+            r.value,
+            r.parentElement!.textContent,
+          ]),
+        ),
+      ).toEqual(paymentLabels);
+      t.rpc.mockResolvedValue({
+        data: { activated_ids: Array.from({ length: n }, (_, i) => String(i)) },
+      });
+      t.click("connect");
+      await vi.waitFor(() => expect(t.app.textContent).toBe(paymentConnected(n)));
+    },
+  );
   it("shows pending payment in order history and allows cancellation only after the second tap", async () => {
     const app = document.createElement("div");
     const history =
