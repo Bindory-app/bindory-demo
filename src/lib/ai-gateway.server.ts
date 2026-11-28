@@ -16,10 +16,33 @@ export const GATEWAY_HEADERS_TIMEOUT_MS = 15_000;
 /** Maximum silence between SSE chunks once streaming begins (ms); never retried after output starts. */
 export const GATEWAY_IDLE_TIMEOUT_MS = 20_000;
 const GATEWAY_MAX_ATTEMPTS = 2;
-const MODEL = process.env["AI_GATEWAY_MODEL"] || "google/gemini-2.5-flash";
-const MODELS = [
-  ...new Set([MODEL, "openai/gpt-4.1-mini", "google/gemini-2.5-flash-lite", "openai/gpt-5-mini"]),
+type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+type GatewayModel = { model: string; effort: ReasoningEffort };
+
+/** How hard the chat model thinks before answering: higher is smarter but slower to start. */
+const REASONING_EFFORT: ReasoningEffort = "medium";
+/** Tried in order: the default, then one model per other supplier when a model is rate limited. */
+const DEFAULT_MODELS: GatewayModel[] = [
+  { model: "openai/gpt-6.2-sol", effort: REASONING_EFFORT },
+  { model: "anthropic/claude-sonnet-5.5", effort: REASONING_EFFORT },
+  // Kept at low: at medium this model is too slow to start answering for a chat turn.
+  { model: "google/gemini-4-carbon", effort: "low" },
 ];
+/** Optional override: AI_GATEWAY_MODEL goes first, at REASONING_EFFORT unless listed above. */
+const OVERRIDE_MODEL = process.env["AI_GATEWAY_MODEL"];
+const MODELS: GatewayModel[] = OVERRIDE_MODEL
+  ? [
+      DEFAULT_MODELS.find((m) => m.model === OVERRIDE_MODEL) ?? {
+        model: OVERRIDE_MODEL,
+        effort: REASONING_EFFORT,
+      },
+      ...DEFAULT_MODELS.filter((m) => m.model !== OVERRIDE_MODEL),
+    ]
+  : DEFAULT_MODELS;
+/** Reasoning tokens count toward max_output_tokens, so every request gets this much on top of the
+ *  caller's budget for visible output. Without it a thinking model can spend the whole budget
+ *  before it writes the reply or tool call. */
+export const REASONING_HEADROOM_TOKENS = 4000;
 type GatewayOptions = {
   signal?: AbortSignal | undefined;
   oidcToken?: string | null | undefined;
@@ -60,6 +83,7 @@ export type ResponsesRequest = {
   tools?: ResponsesFunctionTool[];
   tool_choice?: "auto" | "required";
   max_output_tokens?: number;
+  reasoning?: { effort: ReasoningEffort };
 };
 
 type OutputContent = { type: string; text?: string };
@@ -282,19 +306,29 @@ async function streamModelResponse(
   };
 }
 
-/** Chat and single-purpose calls share the same model selection and rate-limit fallback. */
+/** Chat and single-purpose calls share the same model selection, reasoning effort and rate-limit
+ *  fallback. */
 export async function streamResponse(
-  payload: Omit<ResponsesRequest, "model">,
+  payload: Omit<ResponsesRequest, "model" | "reasoning">,
   options: GatewayOptions = {},
 ) {
-  for (const model of MODELS) {
+  const budget = payload.max_output_tokens;
+  for (const { model, effort } of MODELS) {
     options.onModel?.(model);
     try {
-      return await streamModelResponse({ ...payload, model }, options);
+      return await streamModelResponse(
+        {
+          ...payload,
+          model,
+          reasoning: { effort },
+          ...(budget ? { max_output_tokens: budget + REASONING_HEADROOM_TOKENS } : {}),
+        },
+        options,
+      );
     } catch (error) {
       if (
         !(error instanceof GatewayError && error.code === "rate_limited") ||
-        model === MODELS.at(-1)
+        model === MODELS.at(-1)?.model
       )
         throw error;
     }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GatewayError, streamResponse } from "@/lib/ai-gateway.server";
+import { GatewayError, REASONING_HEADROOM_TOKENS, streamResponse } from "@/lib/ai-gateway.server";
 
 function sseResponse(chunks: string[], headers: Record<string, string> = {}) {
   const enc = new TextEncoder();
@@ -83,6 +83,32 @@ describe("AI Gateway streaming timeouts and retries", () => {
       expect(events.filter((e) => e.type === "response.output_text.delta")).toHaveLength(1);
       expect(events.at(-1)?.type).toBe("response.completed");
     }
+  });
+
+  it("sends each model in order with its reasoning effort and room to think", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return bodies.length < 3
+          ? new Response("rate limit", { status: 429 })
+          : sseResponse([eventLine({ type: "response.completed", response: { output: [] } })]);
+      }),
+    );
+
+    await streamResponse(
+      { input: [{ role: "user", content: "hi" }], max_output_tokens: 500 },
+      { oidcToken: "test-token" },
+    );
+
+    expect(bodies.map((b) => [b["model"], b["reasoning"]])).toEqual([
+      ["openai/gpt-6.2-sol", { effort: "medium" }],
+      ["anthropic/claude-sonnet-5.5", { effort: "medium" }],
+      ["google/gemini-4-carbon", { effort: "low" }],
+    ]);
+    for (const body of bodies)
+      expect(body["max_output_tokens"]).toBe(500 + REASONING_HEADROOM_TOKENS);
   });
 
   it("never retries once headers arrived and stream output has begun", async () => {
