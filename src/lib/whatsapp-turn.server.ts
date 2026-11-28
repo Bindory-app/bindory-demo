@@ -12,7 +12,7 @@ import {
 } from "./mori-order-payment.server";
 import { whatsappNonce, whatsappToken } from "./mori-signing.server";
 import { toCollectorError, TURN_DEADLINE_MS } from "./mori-chat-stream.server";
-import { downloadPhoto, sendWhatsApp, type Inbound } from "./whatsapp-cloud.server";
+import { BodyTooLarge, downloadPhoto, sendWhatsApp, type Inbound } from "./whatsapp-cloud.server";
 import {
   bindLink,
   claimReminder,
@@ -35,9 +35,13 @@ import {
 
 const stale = "That step is no longer active. Send Mori a message to continue.";
 const editPrompt =
-  "Send the side, price in the original currency, and duration (7, 30 or 90 days). For example: buy 25.50 30 days.";
+  "Send any changes: buy or sell, a price, or 7, 30 or 90 days. For example: buy 25.50 30 days. Reply CANCEL to exit.";
 const expiredPhotos = "Those photos are no longer available. Send the front and back again.";
 const skip = "Payment skipped. Your order stays pending until you connect a payment method.";
+async function clearStep(l: Linked, message: string) {
+  await setStep(l, {});
+  return [textMessage(message)];
+}
 async function row(db: DB, l: Linked, id: string): Promise<MoriRow | null> {
   const { data, error } = await db
     .from("mori_messages")
@@ -98,24 +102,61 @@ function alerts(key: string) {
       ["none", "Neither"],
       ["skip", "Not now"],
     ].map(([value, title]) => ({ id: "alerts:" + key + ":" + value, title: title! })),
+    { sectionTitle: "Notifications" },
   );
 }
-export function parseOrderEdit(text: string) {
-  const m = /^(buy|sell)[\s,]+(\d+(?:\.\d{1,2})?)[\s,]+(7|30|90)(?:\s+days?)?$/i.exec(text.trim());
-  return m
-    ? {
-        side: m[1]!.toLowerCase() as "buy" | "sell",
-        price: Number(m[2]),
-        expires_days: Number(m[3]),
-      }
-    : null;
+function parseOrderEdit(text: string, currency: string) {
+  const changes: Partial<NonNullable<Step["changes"]>> = {};
+  let rest = text.trim();
+  const side = /\b(buy|sell)\b/i.exec(rest);
+  if (side) {
+    changes.side = side[1]!.toLowerCase() as "buy" | "sell";
+    rest = rest.replace(side[0], " ").trim();
+  }
+  const duration = /\b(\d+)\s+days?\b/i.exec(rest);
+  if (duration) {
+    const days = Number(duration[1]);
+    if (![7, 30, 90].includes(days)) return null;
+    changes.expires_days = days;
+    rest = rest.replace(duration[0], " ").trim();
+  }
+  if (rest) {
+    const m =
+      /^(?:([a-z]{1,2}\$|[£€$]|[a-z]{3})\s*)?((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)(?:\s*([a-z]{3}|[£€$]))?$/i.exec(
+        rest,
+      );
+    if (!m || (m[1] && m[3])) return null;
+    const mark = (m[1] ?? m[3])?.toUpperCase();
+    const aliases: Record<string, string[]> = {
+      USD: ["$", "US$"],
+      AUD: ["$", "A$", "AU$"],
+      CAD: ["$", "C$", "CA$"],
+      GBP: ["£"],
+      EUR: ["€"],
+    };
+    if (mark && mark !== currency && !aliases[currency]?.includes(mark))
+      throw new OrderEditError(
+        "Enter the price in " + currency + ", the order’s original currency.",
+      );
+    changes.price = Number(m[2]!.replaceAll(",", ""));
+  }
+  return Object.keys(changes).length ? changes : null;
 }
 async function editOrder(db: DB, l: Linked, text: string) {
-  const changes = parseOrderEdit(text);
-  if (!changes) return [textMessage(editPrompt)];
+  if (/^cancel$/i.test(text)) return clearStep(l, "Edit canceled. Nothing was saved.");
   const r = l.step.row && (await row(db, l, l.step.row));
   const p = r && (r.payload as ProposalPayload);
-  if (!r || !p || p.tool !== "set_order" || p.status !== "pending") return [textMessage(stale)];
+  if (!r || !p || p.tool !== "set_order" || p.status !== "pending") return clearStep(l, stale);
+  const patch = parseOrderEdit(text, p.price?.currency ?? "USD");
+  if (!patch) return [textMessage(editPrompt)];
+  const previous = asObject(r.payload)["expires_days"];
+  const changes = {
+    side: p.side,
+    price: p.price?.amount ?? p.price_usd,
+    expires_days: typeof previous === "number" ? previous : 30,
+    ...l.step.changes,
+    ...patch,
+  };
   try {
     orderChanges(p, changes);
   } catch (e) {
@@ -137,7 +178,18 @@ async function editOrder(db: DB, l: Linked, text: string) {
 }
 async function confirm(db: DB, l: Linked, r: MoriRow, changes?: Step["changes"]) {
   const result = await confirmWith(db, r.id, "confirm", changes);
-  const msgs: WhatsAppMessage[] = result.reply ? [textMessage(result.reply.content)] : [];
+  // SQL 015 actually opens the order, but its last sentence promises a watcher that does not exist.
+  const content = result.reply?.content;
+  const legacy = result.order_status === undefined && asObject(r.payload)["tool"] === "set_order";
+  const msgs: WhatsAppMessage[] = content
+    ? [
+        textMessage(
+          legacy
+            ? content.replace(/ I will tell you as soon as a matching listing appears\.$/, "")
+            : content,
+        ),
+      ]
+    : [];
   if (result.order_status === "pending") {
     const key = randomUUID();
     if (await setStep(l, { kind: "alerts", key })) msgs.push(alerts(key));
@@ -156,14 +208,20 @@ async function turn(
   intent?: unknown,
   oidc?: string | null,
   selectionOnly = false,
+  freshText = false,
 ): Promise<WhatsAppMessage[]> {
   if (text.length > 2000) return [textMessage("Please keep your message under 2,000 characters.")];
   if (!ownMessagePhotos(text, l.user_id)) return [textMessage("Photo must belong to you")];
   let images: string[];
   try {
     images = await Promise.all(media.map(downloadPhoto));
-  } catch {
-    return [textMessage(expiredPhotos)];
+  } catch (e) {
+    return clearStep(
+      l,
+      e instanceof BodyTooLarge
+        ? "That photo is too large. Send the front and back again, each under 1.5 MB."
+        : expiredPhotos,
+    );
   }
   let rows: MoriRow[] | undefined, failure: string | undefined;
   await runMori({
@@ -192,12 +250,16 @@ async function turn(
       return r.kind === "choices" && Array.isArray(choices) && choices.some(sellChoice);
     });
   if (
-    !(await setStep(l, {
-      kind: "rows",
-      rows: active.map((r) => r.id),
-      ...(last?.kind === "photos" && asObject(last.payload)["intent"] ? { row: last.id } : {}),
-      ...(needsMedia ? { media, mediaAt: Date.now() } : {}),
-    }))
+    !(await setStep(
+      l,
+      {
+        kind: "rows",
+        rows: active.map((r) => r.id),
+        ...(last?.kind === "photos" && asObject(last.payload)["intent"] ? { row: last.id } : {}),
+        ...(needsMedia ? { media, mediaAt: Date.now() } : {}),
+      },
+      freshText,
+    ))
   )
     return [textMessage(stale)];
   return renderWhatsApp(rows);
@@ -242,17 +304,20 @@ async function action(
   if (kind === "skip" && id === l.step.key && l.step.kind === "wallet" && (await setStep(l, {})))
     return [buttonMessage(skip, [{ id: "pay:resume", title: "Add payment method" }])];
   if (l.step.kind === "preview" && l.step.key === id && l.step.row) {
-    if (kind === "revise" && (await setStep(l, { kind: "edit", row: l.step.row })))
+    if (kind === "revise" && (await setStep(l, { ...l.step, kind: "edit" })))
       return [textMessage(editPrompt)];
     if (kind === "approve") {
       const r = await row(db, l, l.step.row);
-      if (r && l.step.changes) return confirm(db, l, r, l.step.changes);
+      if (r && asObject(r.payload)["status"] === "pending" && l.step.changes)
+        return confirm(db, l, r, l.step.changes);
+      return clearStep(l, stale);
     }
   }
   if (l.step.kind !== "rows" || !l.step.rows?.includes(id)) return [textMessage(stale)];
   const r = await row(db, l, id);
-  if (!r) return [textMessage(stale)];
+  if (!r) return clearStep(l, stale);
   const p = asObject(r.payload);
+  if (r.kind === "confirm" && p["status"] !== "pending") return clearStep(l, stale);
   if (r.kind === "confirm" && p["status"] === "pending") {
     if (kind === "save") return confirm(db, l, r);
     if (kind === "edit") {
@@ -272,7 +337,7 @@ async function action(
       obj = asObject(choice);
     const text = typeof choice === "string" ? choice : (obj["send"] ?? obj["label"]);
     const media = kind === "pick" && sellChoice(choice) ? heldMedia(l) : [];
-    if (!media) return [textMessage(expiredPhotos)];
+    if (!media) return clearStep(l, expiredPhotos);
     if (typeof text === "string")
       return turn(db, l, text, media, obj["intent"], oidc, kind === "pick" && !!obj["intent"]);
   }
@@ -301,8 +366,8 @@ async function reply(db: DB, l: Linked, m: Inbound, oidc?: string | null) {
   }
   if (l.step.kind === "edit") return editOrder(db, l, m.text);
   const media = l.step.kind === "await_text" ? heldMedia(l) : [];
-  if (!media) return [textMessage(expiredPhotos)];
-  return turn(db, l, m.text, media, undefined, oidc);
+  if (!media) return clearStep(l, expiredPhotos);
+  return turn(db, l, m.text, media, undefined, oidc, false, l.step.kind !== "await_text");
 }
 export async function handleInbound(m: Inbound, oidc?: string | null) {
   if (!(await firstDelivery(m.id))) return;
@@ -310,7 +375,8 @@ export async function handleInbound(m: Inbound, oidc?: string | null) {
   const delayed = Date.parse(m.at) <= Date.now() - 864e5,
     stop = m.kind === "text" && /^stop$/i.test(m.text);
   if (delayed && !stop) return;
-  if (m.kind === "text" && /^link\s/i.test(m.text)) {
+  // Ordinary "link my binder" is chat. Never send even a damaged capability to the model.
+  if (m.kind === "text" && /^link\s+[a-f0-9]{8}-[a-f0-9-]{12,}/i.test(m.text)) {
     const nonce = whatsappNonce("link", m.text.slice(5).trim());
     const ok = nonce && (await bindLink(nonce, m));
     return sendWhatsApp(
@@ -337,20 +403,30 @@ export async function handleInbound(m: Inbound, oidc?: string | null) {
       textMessage("WhatsApp is unlinked. You will not receive more Bindory reminders here."),
     );
   }
-  const db = collectorClient(l.user_id);
-  if (m.kind === "text" && /^payment$/i.test(m.text)) {
-    for (const msg of await action(db, l, "pay:resume", oidc)) await sendWhatsApp(l, msg);
-    return;
-  }
   let messages: WhatsAppMessage[];
   try {
+    const db = collectorClient(l.user_id);
+    if (l.step.kind === "paying" && (l.step.payingAt ?? 0) <= Date.now() - 60_000)
+      await setStep(l, {});
+    const payment = m.kind === "text" && /^payment$/i.test(m.text);
     const mayRemind =
+      !payment &&
       (m.kind !== "action" || /^(pick|suggest):/.test(m.action)) &&
       l.step.kind !== "edit" &&
       l.step.kind !== "paying";
-    messages = await reply(db, l, m, oidc);
+    messages =
+      l.step.kind === "paying"
+        ? [textMessage(stale)]
+        : payment
+          ? await action(db, l, "pay:resume", oidc)
+          : await reply(db, l, m, oidc);
     // A failed bookkeeping read must not discard a successful answer or confirmation.
-    if (mayRemind && messages.length < 3 && (await claimReminder(l).catch(() => null)))
+    if (
+      mayRemind &&
+      messages.length > 0 &&
+      messages.length < 3 &&
+      (await claimReminder(l).catch(() => null))
+    )
       messages.push(
         buttonMessage(paymentReminder, [{ id: "pay:resume", title: "Add payment method" }]),
       );

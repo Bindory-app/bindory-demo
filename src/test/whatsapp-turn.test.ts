@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { handleInbound } from "@/lib/whatsapp-turn.server";
+import { BodyTooLarge } from "@/lib/whatsapp-cloud.server";
 import { type Linked, type Step } from "@/lib/whatsapp-state.server";
 import { whatsappToken } from "@/lib/mori-signing.server";
 import type { MoriRow, MoriStreamEvent } from "@/lib/mori-tools";
@@ -31,7 +32,11 @@ vi.mock("@/lib/mori-order-payment.server", async (orig) => ({
   hasPendingOrders: f.has,
 }));
 vi.mock("@/integrations/supabase/collector.server", () => ({ collectorClient: f.db }));
-vi.mock("@/lib/whatsapp-cloud.server", () => ({ sendWhatsApp: f.send, downloadPhoto: f.download }));
+vi.mock("@/lib/whatsapp-cloud.server", async (orig) => ({
+  ...(await orig<typeof import("@/lib/whatsapp-cloud.server")>()),
+  sendWhatsApp: f.send,
+  downloadPhoto: f.download,
+}));
 vi.mock("@/lib/whatsapp-state.server", () => ({
   firstDelivery: f.first,
   touchLink: f.touch,
@@ -266,7 +271,7 @@ it("validates edits deterministically, previews before save, allows revision and
   await tap("save:" + rowId);
   expect(f.confirm).not.toHaveBeenCalled();
   await tap("revise:" + l.step.key);
-  await text("buy 31.50 90");
+  await text("buy 31.50 90 days");
   const key = l.step.key;
   f.confirm.mockResolvedValue({
     reply: { content: "Your order is saved." },
@@ -280,6 +285,95 @@ it("validates edits deterministically, previews before save, allows revision and
   });
   expect(l.step.kind).toBe("alerts");
   expect(out()).toContain("Choose your notification preferences");
+});
+it("keeps fields during partial revisions and checks the proposal currency", async () => {
+  active(proposal());
+  await tap("edit:" + rowId);
+  await text("GBP 25");
+  expect(out()).toContain("Enter the price in USD, the order’s original currency.");
+  expect(l.step.kind).toBe("edit");
+  await text("$1,200");
+  expect(l.step.changes).toEqual({ side: "buy", price: 1200, expires_days: 30 });
+  await tap("revise:" + l.step.key);
+  await text("7 days");
+  expect(l.step.changes).toEqual({ side: "buy", price: 1200, expires_days: 7 });
+  await tap("revise:" + l.step.key);
+  await text("30");
+  expect(l.step.changes).toEqual({ side: "buy", price: 30, expires_days: 7 });
+  await tap("revise:" + l.step.key);
+  await text("buy");
+  expect(l.step.changes?.price).toBe(30);
+  await tap("revise:" + l.step.key);
+  await text("cancel");
+  expect(l.step).toEqual({});
+  expect(f.confirm).not.toHaveBeenCalled();
+});
+it("clears handled edits, stale previews and unrecoverable photos without trapping the next chat", async () => {
+  active(proposal());
+  await tap("edit:" + rowId);
+  f.read.mockResolvedValue({ data: null });
+  await text("12");
+  expect(l.step).toEqual({});
+  l.step = {
+    kind: "preview",
+    row: rowId,
+    key: "k",
+    changes: { price: 12, side: "buy", expires_days: 30 },
+  };
+  f.read.mockResolvedValue({ data: sample("confirm", { status: "confirmed" }) });
+  await tap("approve:k");
+  expect(f.confirm).not.toHaveBeenCalled();
+  expect(l.step).toEqual({});
+  l.step = { kind: "await_text", media: ["1", "2"], mediaAt: 0 };
+  await text("grade");
+  expect(l.step).toEqual({});
+  l.step = { kind: "await_text", media: ["1", "2"], mediaAt: Date.now() };
+  f.download.mockRejectedValue(new BodyTooLarge());
+  await text("grade");
+  expect(out()).toContain("each under 1.5 MB");
+  expect(l.step).toEqual({});
+  await text("link my binder");
+  expect(f.run).toHaveBeenCalledWith(expect.objectContaining({ message: "link my binder" }));
+});
+it("does not interrupt the first photo, and sends a safe reply on PAYMENT failure", async () => {
+  f.pair.mockResolvedValue(null);
+  await photo("1");
+  expect(f.claim).not.toHaveBeenCalled();
+  expect(f.send).not.toHaveBeenCalled();
+  f.has.mockRejectedValue(new Error("private failure"));
+  await text("PAYMENT");
+  expect(out()).toContain("I could not finish that request.");
+  expect(out()).not.toContain("private failure");
+});
+it("recovers abandoned paying steps after one minute without repeating activation", async () => {
+  l.step = { kind: "paying", key: "a", payingAt: Date.now() };
+  await text("PAYMENT");
+  expect(f.has).not.toHaveBeenCalled();
+  l.step.payingAt = Date.now() - 61000;
+  f.has.mockResolvedValue(true);
+  await text("PAYMENT");
+  expect(l.step.kind).toBe("wallet");
+});
+it("returns both completed free-text answers, without dropping the second on a stale CAS", async () => {
+  rows = [sample("text", null)];
+  await Promise.all([text("first"), text("second")]);
+  expect(f.send).toHaveBeenCalledTimes(2);
+  expect(f.step.mock.calls.every((args) => args[2] === true)).toBe(true);
+});
+it("relays a legacy live confirmation without an invented payment gate or listing watcher", async () => {
+  active(proposal());
+  f.confirm.mockResolvedValue({
+    reply: {
+      content:
+        "Your buy order for Eevee at US$9.00 is live for 30 days. I will tell you as soon as a matching listing appears.",
+    },
+  });
+  await tap("save:" + rowId);
+  expect(f.send.mock.calls[0]?.[1].text.body).toBe(
+    "Your buy order for Eevee at US$9.00 is live for 30 days.",
+  );
+  expect(f.send).toHaveBeenCalledTimes(1);
+  expect(l.step).toEqual({});
 });
 it.each([
   ["push", true, false],

@@ -12,6 +12,7 @@ export type Step = {
   row?: string;
   media?: string[];
   mediaAt?: number;
+  payingAt?: number;
   changes?: { side: "buy" | "sell"; price: number; expires_days: number };
 };
 export type Linked = Address & {
@@ -83,14 +84,10 @@ export async function pairPhoto(
   return data;
 }
 // Compare and swap the previous step. Old list/checkout controls and simultaneous submissions cannot win twice.
-export async function setStep(l: Linked, next: Step) {
-  const { data, error } = await store
-    .from("whatsapp_links")
-    .update({ step: next })
-    .eq("channel_id", l.channel_id)
-    .eq("step", JSON.stringify(l.step))
-    .select("user_id")
-    .maybeSingle();
+export async function setStep(l: Linked, next: Step, freshText = false) {
+  let query = store.from("whatsapp_links").update({ step: next }).eq("channel_id", l.channel_id);
+  if (!freshText) query = query.eq("step", JSON.stringify(l.step));
+  const { data, error } = await query.select("user_id").maybeSingle();
   if (error) throw error;
   if (!data) return false;
   l.step = next;

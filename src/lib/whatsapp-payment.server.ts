@@ -87,7 +87,7 @@ export async function submitPayment(request: Request) {
   const wallet = form.get("wallet") ?? "";
   if (form.get("action") !== "connect" || !Object.hasOwn(paymentLabels, wallet)) return invalid();
   const previous = l.step;
-  if (!(await setStep(l, { kind: "paying", key: nonce }))) return invalid();
+  if (!(await setStep(l, { kind: "paying", key: nonce, payingAt: Date.now() }))) return invalid();
   let count: number;
   try {
     count = await connectPayment(db, wallet);
