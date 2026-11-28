@@ -346,7 +346,8 @@ export async function handleInbound(m: Inbound, oidc?: string | null) {
   try {
     const mayRemind =
       (m.kind !== "action" || /^(pick|suggest):/.test(m.action)) &&
-      !["edit", "preview", "alerts", "wallet", "paying"].includes(l.step.kind ?? "");
+      l.step.kind !== "edit" &&
+      l.step.kind !== "paying";
     messages = await reply(db, l, m, oidc);
     // A failed bookkeeping read must not discard a successful answer or confirmation.
     if (mayRemind && (await claimReminder(l).catch(() => null)))

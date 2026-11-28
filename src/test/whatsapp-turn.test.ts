@@ -183,6 +183,7 @@ it("never feeds link tokens into chat; accepts only purpose-bound, unexpired tok
   expect(f.run).not.toHaveBeenCalled();
 });
 it("passes typed text, the link's market and since to Mori; a reminder is sent only on winning the daily claim", async () => {
+  l.step = { kind: "wallet", key: "previously-offered" };
   f.claim.mockResolvedValueOnce(l);
   await text("price Eevee");
   await text("again");
