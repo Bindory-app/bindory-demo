@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import type { DB } from "@/lib/mori-context.server";
+import { runReadTool } from "@/lib/mori-read-tools.server";
 import { orderChanges } from "@/lib/mori-confirm.server";
 import type { ProposalPayload } from "@/lib/mori-tools";
 
@@ -46,5 +49,68 @@ describe("order confirmation edits", () => {
       price_amount: 2.01,
       price_usd: 1.01,
     });
+  });
+});
+
+describe("pending order contracts", () => {
+  it("lists the collector's unexpired pending and open orders with their status", async () => {
+    const rows = [
+      { id: "one", status: "pending" },
+      { id: "two", status: "open" },
+    ];
+    const db = {
+      from: (table: string) => {
+        expect(table).toBe("market_orders");
+        const query = {
+          select(fields: string) {
+            expect(fields.split(",").map((s) => s.trim())).toContain("status");
+            return this;
+          },
+          in(key: string, values: string[]) {
+            expect(key).toBe("status");
+            expect(values).toEqual(["open", "pending"]);
+            return this;
+          },
+          gt(key: string, value: string) {
+            expect(key).toBe("expires_at");
+            expect(Date.parse(value)).toBeGreaterThan(0);
+            return this;
+          },
+          order() {
+            return this;
+          },
+          limit() {
+            return { data: rows, error: null };
+          },
+        };
+        return query;
+      },
+    };
+    expect(await runReadTool(db as unknown as DB, "list_my_orders", {})).toEqual(rows);
+  });
+  it("keeps the 015 confirmation safeguards and installs both 016 RPCs atomically", () => {
+    const base = readFileSync("setup/015_order_confirmation.sql", "utf8");
+    const sql = readFileSync("setup/016_pending_orders.sql", "utf8");
+    expect(sql).not.toMatch(/[^\x00-\x7f]/);
+    expect(sql).toContain(
+      base.slice(
+        base.indexOf("CREATE OR REPLACE FUNCTION"),
+        base.indexOf("  INSERT INTO public.market_orders"),
+      ),
+    );
+    expect(sql).toContain("o_price,p->>'note','pending'");
+    expect(sql).toContain("jsonb_build_object('order_status','pending')");
+    expect(sql).toContain("BEGIN;");
+    expect(sql.trimEnd()).toMatch(/COMMIT;$/);
+    const connect = sql.slice(
+      sql.indexOf("CREATE OR REPLACE FUNCTION public.connect_order_payment"),
+    );
+    expect(connect).toContain("SECURITY INVOKER");
+    expect(connect).toContain("uid uuid := auth.uid()");
+    expect(connect).toContain(
+      "IF p_wallet IS NULL OR p_wallet NOT IN ('card','crypto','paypal','google_pay')",
+    );
+    expect(connect).toContain("WHERE user_id=uid AND status='pending' AND expires_at>now()");
+    expect(connect).toContain("expires_at=now() + (expires_at - created_at)");
   });
 });

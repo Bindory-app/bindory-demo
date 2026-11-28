@@ -128,12 +128,12 @@ export async function runReadTool(
       const { data, error } = await (db as unknown as SupabaseClient)
         .from("market_orders")
         .select("id, side, card_name, image_url, price_usd, status, expires_at, created_at")
-        .eq("status", "open")
+        .in("status", ["open", "pending"])
         .gt("expires_at", new Date().toISOString())
         .order("created_at", { ascending: false })
         .limit(20);
       if (error) throw error;
-      return data?.length ? data : { results: [], note: "No open orders" };
+      return data?.length ? data : { results: [], note: "No open or pending orders" };
     }
     case "my_price_movers": {
       const { data, error } = await db
