@@ -161,9 +161,10 @@ export async function buildProposal(
 
 /** Checks and tidies the model's pre-grade report before it is shown. */
 export function gradeReport(a: Args) {
+  // A missing value stays missing: Number(null) is 0, which would show as the lowest score.
   const num = (v: unknown, lo: number, hi: number) => {
-    const n = Number(v);
-    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : undefined;
+    const n = typeof v === "string" && v.trim() ? Number(v) : v;
+    return typeof n === "number" && Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : undefined;
   };
   const list = a["outcomes"];
   const take = stringArg(a["take"])?.slice(0, 400);
@@ -203,8 +204,6 @@ export function gradeReport(a: Args) {
   if (outcomes.length < 2) return null;
   outcomes.sort((x, y) => y.grade - x.grade);
   const companies = ["psa", "cgc", "bgs", "tag"] as const;
-  const overall = asObject(a["overall"]);
-  if (companies.some((c) => overall[c] != null && !wholeGrade(overall[c]))) return null;
   const block = (v: unknown, lo: number, hi: number) =>
     Object.fromEntries(
       companies.map((c) => [
@@ -230,7 +229,13 @@ export function gradeReport(a: Args) {
         ),
       ]),
     ),
-    overall: block(a["overall"], 1, 10),
+    // Companies such as BGS and CGC issue half grades; anything finer is not a real grade.
+    overall: Object.fromEntries(
+      Object.entries(block(a["overall"], 1, 10)).map(([c, v]) => [
+        c,
+        v !== null && Number.isInteger(v * 2) ? v : null,
+      ]),
+    ),
     notes: stringArg(a["notes"])?.slice(0, 160),
   };
 }

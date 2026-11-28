@@ -61,4 +61,20 @@ describe("pre-grade outcomes", () => {
   ])("allocates exactly 100 whole points for %j", (weights, expected) => {
     expect(assess([10, 9, 8], weights)?.outcomes.map((o) => o.probability)).toEqual(expected);
   });
+
+  it("keeps real half grades per company and leaves missing scores missing", () => {
+    const report = gradeReport({
+      outcomes: [
+        { grade: 9, probability: 60 },
+        { grade: 8, probability: 40 },
+      ],
+      take: "Keep it raw.",
+      confidence: null,
+      overall: { psa: 9, cgc: null, bgs: 8.5, tag: 8.3 },
+      subgrades: { centering: { psa: null, bgs: 9 } },
+    });
+    expect(report?.overall).toEqual({ psa: 9, cgc: null, bgs: 8.5, tag: null });
+    expect(report?.confidence).toBe(70);
+    expect(report?.subgrades["centering"]).toMatchObject({ psa: null, bgs: 90 });
+  });
 });

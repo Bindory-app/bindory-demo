@@ -112,7 +112,8 @@ export const preGradeReportTool = {
       },
       overall: {
         type: "object",
-        description: "Likely whole grade (1-10) per company",
+        description:
+          "Likely grade (1-10) per company; a half grade only where that company issues one",
         properties: {
           psa: { type: "number" },
           cgc: { type: "number" },
