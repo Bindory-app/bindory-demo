@@ -15,11 +15,15 @@ export async function marketPrices(
   /** The raw card's condition; sold prices are for this condition only. */
   condition: import("./ebay-sold.server").Condition = "nm",
 ) {
-  const { usdTo } = await import("./fx.server");
-  const { localSoldPrices, summarise, CONDITIONS } = await import("./ebay-sold.server");
-  const rate = market.currency === "USD" ? 1 : await usdTo(market.currency);
-  const x = (v: number | null | undefined) =>
-    typeof v === "number" ? Math.round(v * rate * 100) / 100 : null;
+  const [
+    { resolveMarketFx },
+    { localSoldPrices, summarise, CONDITIONS },
+    { browseCandidates, pickBrowseLowest },
+  ] = await Promise.all([
+    import("./fx.server"),
+    import("./ebay-sold.server"),
+    import("./ebay-browse.server"),
+  ]);
   const scale = priceScale(pricing);
   const sales = (agentSales ?? []).filter(
     (
@@ -34,19 +38,60 @@ export async function marketPrices(
   // Without item locations the sales can't be limited to the collector's country, so the server
   // looks them up itself instead.
   const located = sales.some((x) => "itemLocation" in x);
-  const local =
+
+  // Run independent work in parallel: FX and local sold listings start immediately (local sold
+  // queries the collector's eBay site in its native currency and does not need FX). Browse starts
+  // as soon as FX resolves using only the market-price floor so it runs alongside sold listings;
+  // the sold-based floor is applied afterwards to the returned candidates.
+  const fxPromise = resolveMarketFx(market);
+  const localPromise =
     sales.length && located
-      ? summarise(sales.slice(0, 60), card.number, market, condition)
-      : await localSoldPrices(card, market, condition);
-  // The pooled fallback is near mint only, so it is never shown for another condition.
-  const pooled = local || condition !== "nm" ? null : await ebaySoldPrices(card.id);
+      ? Promise.resolve(summarise(sales.slice(0, 60), card.number, market, condition))
+      : localSoldPrices(card, market, condition);
+  const browsePromise = fxPromise.then(({ market: effMarket, rate: fxRate }) => {
+    const marketFloor =
+      typeof scale?.market === "number"
+        ? (Math.round(scale.market * fxRate * 100) / 100) * 0.4
+        : undefined;
+    return browseCandidates(card, effMarket, condition, marketFloor || undefined).catch(() => ({
+      status: "error" as const,
+      data: null,
+    }));
+  });
+
+  const [fx, rawLocal] = await Promise.all([fxPromise, localPromise]);
+  const effMarket = fx.market;
+  const rate = fx.rate;
+  const x = (v: number | null | undefined) =>
+    typeof v === "number" ? Math.round(v * rate * 100) / 100 : null;
+
+  // On a cold FX failure that fell back to US$, never mix foreign local sold prices into a US$
+  // response.
+  const local = rawLocal && rawLocal.currency === effMarket.currency ? rawLocal : null;
+  const hasLocalSales = Boolean(
+    local && (local.raw.n > 0 || local.psa9.n > 0 || local.psa10.n > 0),
+  );
+  // Fall back to pooled SilphCo near-mint sold prices when local sold data failed, is
+  // unconfigured, or returned zero sales (empty). Never shown for non-near-mint conditions.
+  const pooledPromise =
+    hasLocalSales || condition !== "nm" ? Promise.resolve(null) : ebaySoldPrices(card.id);
+
+  const [pooled, initialBrowse] = await Promise.all([pooledPromise, browsePromise]);
   const label = CONDITIONS[condition].label;
-  // Today's lowest listings (worldwide and in their country) from eBay's own Browse API, with a
-  // floor at half the recent sold average (else 40% of the converted market price) so skins, cases
-  // and fan art drop out. No scraping and no Apify here.
-  const { browseLowest } = await import("./ebay-browse.server");
+  // Today's lowest listings (worldwide and in their country) from eBay's Browse API, applying a
+  // floor at half the recent sold average when present (else 40% of the converted market price) so
+  // skins, cases and fan art drop out.
   const ref = local?.raw.avg_last_3 ? local.raw.avg_last_3 * 0.5 : (x(scale?.market) ?? 0) * 0.4;
-  const lowest = await browseLowest(card, market, condition, ref || undefined).catch(() => null);
+  // Only if the sold-based floor is strictly lower than the market-based floor queried upstream do
+  // we refetch at the lower floor so valid cheaper listings aren't missed.
+  const browseResult =
+    initialBrowse.data && ref > 0 && initialBrowse.data.queryFloor > Math.floor(ref)
+      ? await browseCandidates(card, effMarket, condition, ref).catch(() => initialBrowse)
+      : initialBrowse;
+  const lowest =
+    browseResult.data && (browseResult.status === "ok" || browseResult.status === "empty")
+      ? pickBrowseLowest(browseResult.data, card, effMarket, condition, ref || undefined)
+      : null;
   // Without listings (no keys yet, or eBay unavailable) the card still shows its new layout, with
   // "–" in place of the listing prices.
   const listings = {
@@ -73,8 +118,8 @@ export async function marketPrices(
     pooled,
     listings,
     forTool: {
-      currency: market.currency,
-      ebay_site: market.ebay,
+      currency: effMarket.currency,
+      ebay_site: effMarket.ebay,
       listings: {
         condition: label,
         lowest_worldwide: listings.lowest_worldwide,
@@ -84,11 +129,13 @@ export async function marketPrices(
       price_points: scale
         ? { lowest_listing: x(scale.low), market: x(scale.market), mid: x(scale.mid) }
         : null,
-      recent_sold: local
-        ? { from: market.ebay, condition: label, raw: soldOut(local.raw) }
+      recent_sold: hasLocalSales
+        ? { from: effMarket.ebay, condition: label, raw: soldOut(local!.raw) }
         : pooled
           ? { condition: label, raw: { value: x(pooled.raw.value_usd), status: pooled.raw.status } }
-          : null,
+          : local
+            ? { from: effMarket.ebay, condition: label, raw: soldOut(local.raw) }
+            : null,
     },
   };
 }
