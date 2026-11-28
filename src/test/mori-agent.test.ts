@@ -1,23 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { findCards, getCardPricing } from "@/lib/tcgdex";
 import { runMori } from "@/lib/mori-agent.server";
-import { streamResponse, type ResponsesResponse } from "@/lib/ai-gateway.server";
+import type { ResponsesRequest, ResponsesResponse } from "@/lib/ai-gateway.server";
 import { latestSync, startSync } from "@/lib/collectr-sync.server";
 import { marketPrices } from "@/lib/mori-prices.server";
 import { asObject, type DB } from "@/lib/mori-context.server";
 import type { MoriStreamEvent } from "@/lib/mori-tools";
 
-vi.mock("@/lib/ai-gateway.server", async (original) => ({
-  ...(await original<typeof import("@/lib/ai-gateway.server")>()),
-  streamResponse: vi.fn(),
-}));
 vi.mock("@/lib/collectr-sync.server", () => ({ latestSync: vi.fn(), startSync: vi.fn() }));
 vi.mock("@/lib/fx.server", () => ({ usdTo: () => Promise.resolve(1.5) }));
 vi.mock("@/lib/tcgdex", async (original) => ({
   ...(await original<typeof import("@/lib/tcgdex")>()),
-  getCardPricing: async (id: string) => ({
+  findCards: vi.fn(),
+  getCardPricing: vi.fn(async (id: string) => ({
     card: { id, name: "Pikachu", localId: "25", set: { id: "base1", name: "Base Set" } },
     pricing: null,
-  }),
+  })),
 }));
 vi.mock("@/lib/mori-prices.server", async (original) => ({
   ...(await original<typeof import("@/lib/mori-prices.server")>()),
@@ -65,7 +63,7 @@ function chat(rows: Row[] = []) {
   const events: MoriStreamEvent[] = [];
   const send = (
     message: string,
-    opts: Pick<Parameters<typeof runMori>[0], "images" | "location" | "country"> = {},
+    opts: Pick<Parameters<typeof runMori>[0], "images" | "location" | "country" | "intent"> = {},
   ) =>
     runMori({
       db,
@@ -85,15 +83,10 @@ const call = (name: string, args: Record<string, unknown>) => ({
   call_id: crypto.randomUUID(),
 });
 const say = (text: string) => ({ type: "message", content: [{ type: "output_text", text }] });
+const requests: ResponsesRequest[] = [];
+const replies: NonNullable<ResponsesResponse["output"]>[] = [];
 function gateway(...output: NonNullable<ResponsesResponse["output"]>) {
-  vi.mocked(streamResponse).mockResolvedValueOnce(
-    (async function* () {
-      for (const item of output)
-        if (item.type === "message")
-          yield { type: "response.output_text.delta", delta: item.content?.[0]?.text ?? "" };
-      yield { type: "response.completed", response: { output } };
-    })(),
-  );
+  replies.push(output);
 }
 const priced = (id = "base1-25") => call("get_card_prices", { card_id: id, country: "US" });
 const order = (side: "sell" | "buy") =>
@@ -101,17 +94,33 @@ const order = (side: "sell" | "buy") =>
 const images = ["data:image/jpeg;base64,Zg==", "data:image/jpeg;base64,Yg=="];
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(streamResponse).mockReset();
+  requests.length = replies.length = 0;
+  vi.mocked(findCards).mockReset();
+  vi.stubEnv("AI_GATEWAY_API_KEY", "mock-key");
+  vi.stubEnv("VERCEL_OIDC_TOKEN", "");
   vi.stubGlobal(
     "fetch",
-    vi.fn(() => {
-      throw new Error("Unexpected network call");
+    vi.fn(async (url: string, options: RequestInit) => {
+      if (url !== "https://ai-gateway.vercel.sh/v1/responses") throw new Error("Unexpected URL");
+      requests.push(JSON.parse(String(options.body)) as ResponsesRequest);
+      const output = replies.shift();
+      if (!output) throw new Error("Unexpected gateway call");
+      const events = output
+        .filter((o) => o.type === "message")
+        .map((o) => ({ type: "response.output_text.delta", delta: o.content?.[0]?.text ?? "" }));
+      return new Response(
+        [...events, { type: "response.completed", response: { output } }]
+          .map((e) => "data: " + JSON.stringify(e) + "\n\n")
+          .join(""),
+      );
     }),
   );
 });
 afterEach(() => {
-  expect(fetch).not.toHaveBeenCalled();
+  expect(fetch).toHaveBeenCalledTimes(requests.length);
+  expect(replies).toHaveLength(0);
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("the direct Mori tool loop", () => {
@@ -126,7 +135,7 @@ describe("the direct Mori tool loop", () => {
     );
     gateway(say("Here you go."));
     await send("Shows near me?", { country: "AU", location: "Melbourne" });
-    const input = vi.mocked(streamResponse).mock.calls[0]![0].input;
+    const input = requests[0]!.input;
     const appNote = input.find((item) => "role" in item && item.role === "developer");
     for (const detail of [
       "Australia",
@@ -167,9 +176,7 @@ describe("the direct Mori tool loop", () => {
     expect(events.some((e) => e.type === "text")).toBe(false);
     // marketPrices takes no sales argument: card, pricing, market, condition.
     expect(vi.mocked(marketPrices).mock.calls[0]?.slice(3)).toEqual(["nm"]);
-    const schema = vi
-      .mocked(streamResponse)
-      .mock.calls[0]![0].tools?.find((t) => t.name === "get_card_prices");
+    const schema = requests[0]!.tools?.find((t) => t.name === "get_card_prices");
     expect(schema).toBeDefined();
     expect(JSON.stringify(schema)).not.toContain("sold_listings");
   });
@@ -196,7 +203,7 @@ describe("the direct Mori tool loop", () => {
     });
     gateway(say("I need the front and back."));
     await send("What are you waiting for?");
-    const next = vi.mocked(streamResponse).mock.calls[1]![0].input;
+    const next = requests[1]!.input;
     expect(
       next.some(
         (i) =>
@@ -266,7 +273,7 @@ describe("the direct Mori tool loop", () => {
     await send("Set a buy order");
     expect(rows.filter((r) => r.kind === "status")).toHaveLength(1);
     expect(rows.filter((r) => r.kind === "confirm")).toHaveLength(1);
-    expect(streamResponse).toHaveBeenCalledTimes(1);
+    expect(requests).toHaveLength(1);
   });
 
   it("keeps a ticket card rather than dropping it or replacing it with a price card", async () => {
@@ -308,6 +315,166 @@ describe("the direct Mori tool loop", () => {
       followUp: "Only the first 20",
       prior,
     });
-    expect(streamResponse).toHaveBeenCalledTimes(4);
+    expect(requests).toHaveLength(4);
+  });
+});
+
+describe("explicit price-check turns", () => {
+  const pika = { id: "base1-25", name: "Pikachu", number: "25", set: "Base Set", set_size: 102 };
+  const intent = {
+    kind: "price_check",
+    card: { name: "Pikachu", number: "25/102" },
+    condition: "lightly_played",
+  };
+
+  it("prices the one exact printing with no gateway call and keeps a normal tool transcript", async () => {
+    const { send, rows, events } = chat();
+    vi.mocked(findCards).mockResolvedValue([
+      pika,
+      { ...pika, id: "base1-26", name: "Flying Pikachu" },
+    ]);
+    await send("Price check: Pikachu 25/102, Lightly played", { intent });
+    expect(requests).toHaveLength(0);
+    expect(findCards).toHaveBeenCalledWith("Pikachu", "25/102", undefined);
+    expect(rows[0]?.content).toBe("Price check: Pikachu 25/102, Lightly played");
+    expect(rows.slice(1).map((r) => r.kind)).toEqual(["status", "status", "price", "suggest"]);
+    expect(rows[1]?.payload).toMatchObject({
+      name: "search_catalogue",
+      output: [pika, expect.anything()],
+    });
+    expect(rows[2]?.payload).toMatchObject({
+      name: "get_card_prices",
+      input: { card_id: pika.id, country: "US", currency: "USD", condition: "lightly_played" },
+      output: { card: { id: pika.id } },
+    });
+    expect(marketPrices).toHaveBeenCalledTimes(1);
+    expect(rows[3]?.payload).toMatchObject({ card: { id: pika.id } });
+    expect(rows[4]?.payload).toEqual({
+      suggestions: [
+        "Set a buy order for this card",
+        "Pre-grade this card",
+        "Add this card to my wishlist",
+      ],
+    });
+    expect(events.map((e) => (e.type === "status" ? e.name : e.type))).toEqual([
+      "search_catalogue",
+      "get_card_prices",
+      "done",
+    ]);
+    gateway(say("That was Pikachu."));
+    await send("Which card was that?");
+    expect(JSON.stringify(requests[0]?.input)).toContain(pika.id);
+  });
+
+  it("shows several plausible printings as ID-backed choices; choosing one bypasses name search", async () => {
+    const { send, rows } = chat();
+    const second = { ...pika, id: "promo-25", set: "Promos" };
+    vi.mocked(findCards).mockResolvedValue([pika, second]);
+    await send("Check Pikachu", { intent });
+    expect(rows.slice(1).map((r) => r.kind)).toEqual(["status", "text", "choices"]);
+    const choices = asObject(rows.at(-1)?.payload)["choices"] as {
+      label: string;
+      intent: unknown;
+    }[];
+    expect(choices).toEqual(
+      [pika, second].map((c) => ({
+        label: `Pikachu 25/102 (${c.set})`,
+        intent: { kind: "price_check", card: { id: c.id }, condition: "lightly_played" },
+      })),
+    );
+    expect(marketPrices).not.toHaveBeenCalled();
+    await send(choices[1]!.label, { intent: choices[1]!.intent });
+    expect(findCards).toHaveBeenCalledTimes(1);
+    expect(rows.at(-3)?.payload).toMatchObject({
+      name: "get_card_prices",
+      input: { card_id: second.id, condition: "lightly_played" },
+    });
+    expect(rows.at(-2)?.payload).toMatchObject({ card: { id: second.id } });
+    expect(requests).toHaveLength(0);
+  });
+
+  it.each(["not found", "lookup error", "contradictory set size"])(
+    "falls through to chat on %s without inserting another question",
+    async (reason) => {
+      if (reason === "lookup error")
+        vi.mocked(findCards).mockRejectedValue(new Error("unavailable"));
+      else
+        vi.mocked(findCards).mockResolvedValue(
+          reason === "not found" ? [] : [{ ...pika, set_size: 108 }],
+        );
+      const { send, rows } = chat();
+      gateway(say("Which printing did you mean?"));
+      await send("Look up Pikachu", { intent });
+      expect(requests).toHaveLength(1);
+      expect(rows.filter((r) => r.role === "user")).toHaveLength(1);
+      expect(requests[0]?.input.filter((i) => "role" in i && i.role === "user")).toHaveLength(1);
+      expect(rows.find((r) => r.kind === "text")?.content).toBe("Which printing did you mean?");
+      expect(rows.some((r) => r.kind === "price")).toBe(false);
+    },
+  );
+
+  it.each([
+    { kind: "order" },
+    { kind: "price_check", card: { name: "" } },
+    { kind: "price_check" },
+  ])("logs and ignores malformed, unsupported or image-less intents", async (bad) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      gateway(say("How can I help?"));
+      await chat().send("A free-text question", { intent: bad });
+      expect(warn).toHaveBeenCalledWith("Invalid or unsupported Mori intent; using chat");
+      expect(requests).toHaveLength(1);
+      expect(findCards).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("reads the photo with one forced tool call then prices the actual catalogue card", async () => {
+    vi.mocked(findCards).mockResolvedValue([pika]);
+    gateway(
+      call("identify_card", {
+        confidence: "high",
+        name: pika.name,
+        number: "25/102",
+        set: pika.set,
+      }),
+    );
+    const { send, rows, events } = chat();
+    await send("What is this card worth?", { intent: { kind: "price_check" }, images });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      tool_choice: "required",
+      tools: [{ name: "identify_card" }],
+    });
+    expect(JSON.stringify(requests[0]?.input)).toContain(images[0]);
+    expect(findCards).toHaveBeenCalledWith("Pikachu", "25/102", "Base Set");
+    expect(events[0]).toMatchObject({ type: "status", name: "identify_card" });
+    expect(rows.slice(1).map((r) => r.kind)).toEqual(["status", "status", "price", "suggest"]);
+    expect(JSON.stringify(rows)).not.toContain("data:image");
+  });
+
+  it.each([
+    call("identify_card", { confidence: "low", name: "Pikachu" }),
+    say("I cannot tell."),
+    { ...call("identify_card", {}), arguments: "bad json" },
+  ])("keeps the original photo in chat when identification fails", async (output) => {
+    gateway(output);
+    gateway(say("Could you take a clearer photo?"));
+    const { send, rows } = chat();
+    await send("Photo price check", { intent: { kind: "price_check" }, images });
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[1]?.input)).toContain(images[0]);
+    expect(rows.find((r) => r.kind === "text")?.content).toBe("Could you take a clearer photo?");
+    expect(findCards).not.toHaveBeenCalled();
+  });
+
+  it("returns to chat if a previously selected catalogue ID no longer exists", async () => {
+    vi.mocked(getCardPricing).mockResolvedValueOnce(null);
+    gateway(say("Which card was that?"));
+    const { send, rows } = chat();
+    await send("Pikachu 25", { intent: { kind: "price_check", card: { id: "removed-25" } } });
+    expect(requests).toHaveLength(1);
+    expect(rows.some((r) => r.kind === "price")).toBe(false);
   });
 });
