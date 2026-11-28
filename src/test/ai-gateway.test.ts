@@ -85,14 +85,17 @@ describe("AI Gateway streaming timeouts and retries", () => {
     }
   });
 
-  it("sends each model in order with its reasoning effort and room to think", async () => {
+  it("moves down the model list on 403 and 429, sending each model its reasoning effort", async () => {
     const bodies: Record<string, unknown>[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: unknown, init?: RequestInit) => {
         bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-        return bodies.length < 3
-          ? new Response("rate limit", { status: 429 })
+        // 403: this key may not use the model. 429: the model is rate limited.
+        const refusals = [403, 429, 403];
+        const status = refusals[bodies.length - 1];
+        return status
+          ? new Response("refused", { status })
           : sseResponse([eventLine({ type: "response.completed", response: { output: [] } })]);
       }),
     );
@@ -106,6 +109,7 @@ describe("AI Gateway streaming timeouts and retries", () => {
       ["openai/gpt-6.2-sol", { effort: "medium" }],
       ["anthropic/claude-sonnet-5.5", { effort: "medium" }],
       ["google/gemini-4-carbon", { effort: "low" }],
+      ["google/gemini-2.5-flash", undefined],
     ]);
     for (const body of bodies)
       expect(body["max_output_tokens"]).toBe(500 + REASONING_HEADROOM_TOKENS);

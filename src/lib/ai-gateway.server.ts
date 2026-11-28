@@ -17,16 +17,19 @@ export const GATEWAY_HEADERS_TIMEOUT_MS = 15_000;
 export const GATEWAY_IDLE_TIMEOUT_MS = 20_000;
 const GATEWAY_MAX_ATTEMPTS = 2;
 type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-type GatewayModel = { model: string; effort: ReasoningEffort };
+type GatewayModel = { model: string; effort?: ReasoningEffort };
 
 /** How hard the chat model thinks before answering: higher is smarter but slower to start. */
 const REASONING_EFFORT: ReasoningEffort = "medium";
-/** Tried in order: the default, then one model per other supplier when a model is rate limited. */
+/** Tried in order: the default, then one model per other supplier when a model is rate limited or
+ *  this key is not allowed to use it. */
 const DEFAULT_MODELS: GatewayModel[] = [
   { model: "openai/gpt-6.2-sol", effort: REASONING_EFFORT },
   { model: "anthropic/claude-sonnet-5.5", effort: REASONING_EFFORT },
   // Kept at low: at medium this model is too slow to start answering for a chat turn.
   { model: "google/gemini-4-carbon", effort: "low" },
+  // Last resort, sent without an effort like the request this app first ran on.
+  { model: "google/gemini-2.5-flash" },
 ];
 /** Optional override: AI_GATEWAY_MODEL goes first, at REASONING_EFFORT unless listed above. */
 const OVERRIDE_MODEL = process.env["AI_GATEWAY_MODEL"];
@@ -49,7 +52,7 @@ type GatewayOptions = {
   headersTimeoutMs?: number;
   idleTimeoutMs?: number;
   maxAttempts?: number;
-  /** Told which model each attempt uses (the next one is tried when a model is rate limited). */
+  /** Told which model each attempt uses (the next one is tried when a model is rate limited or refused). */
   onModel?: (model: string) => void;
 };
 
@@ -107,6 +110,7 @@ type ResponsesStreamEvent = {
 type GatewayErrorCode =
   | "not_configured"
   | "unauthorized"
+  | "forbidden"
   | "payment_required"
   | "rate_limited"
   | "bad_request"
@@ -129,7 +133,8 @@ export class GatewayError extends Error {
 }
 
 function codeForStatus(status: number): GatewayErrorCode {
-  if (status === 401 || status === 403) return "unauthorized";
+  if (status === 401) return "unauthorized";
+  if (status === 403) return "forbidden";
   if (status === 402) return "payment_required";
   if (status === 429) return "rate_limited";
   if (status >= 400 && status < 500) return "bad_request";
@@ -294,6 +299,7 @@ async function streamModelResponse(
     void res.body?.cancel().catch(() => {});
     console.error("AI Gateway rejected request", {
       status: res.status,
+      model: payload.model,
       credential: source,
     });
     throw new GatewayError(codeForStatus(res.status), `Gateway request failed (${res.status})`, {
@@ -306,8 +312,8 @@ async function streamModelResponse(
   };
 }
 
-/** Chat and single-purpose calls share the same model selection, reasoning effort and rate-limit
- *  fallback. */
+/** Chat and single-purpose calls share the same model selection and reasoning effort. The next
+ *  model is tried when one is rate limited (429) or refused for this key (403). */
 export async function streamResponse(
   payload: Omit<ResponsesRequest, "model" | "reasoning">,
   options: GatewayOptions = {},
@@ -320,17 +326,16 @@ export async function streamResponse(
         {
           ...payload,
           model,
-          reasoning: { effort },
+          ...(effort ? { reasoning: { effort } } : {}),
           ...(budget ? { max_output_tokens: budget + REASONING_HEADROOM_TOKENS } : {}),
         },
         options,
       );
     } catch (error) {
-      if (
-        !(error instanceof GatewayError && error.code === "rate_limited") ||
-        model === MODELS.at(-1)?.model
-      )
-        throw error;
+      const tryNext =
+        error instanceof GatewayError &&
+        (error.code === "rate_limited" || error.code === "forbidden");
+      if (!tryNext || model === MODELS.at(-1)?.model) throw error;
     }
   }
   throw new Error("No gateway model configured");
