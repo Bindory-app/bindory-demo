@@ -1,4 +1,5 @@
 /** Public TCGdex card service. Images are hotlinked from TCGdex and never stored. */
+import { createCache } from "./cache.server";
 import { upstreamFetchJson, type UpstreamJsonResponse } from "./upstream-fetch";
 
 const BASE = "https://api.tcgdex.net/v2/en";
@@ -85,13 +86,33 @@ export async function findCards(
   return out.slice(0, limit);
 }
 
+// One turn reads the same card several times (catalogue match, prices, proposal). The detail
+// carries TCGdex's daily prices, so a few minutes in this process is enough; errors are not kept.
+const CARD_TTL_MS = 5 * 60_000;
+const cardCache = createCache<CardDetail | null>({
+  namespace: "tcgdex-card",
+  ttlMs: CARD_TTL_MS,
+  emptyTtlMs: 60_000,
+  shared: false,
+});
+
+/** Forgets cached card details (tests only). */
+export function resetCardCacheForTest(): void {
+  cardCache.clear();
+}
+
 export async function getCard(id: string): Promise<CardDetail | null> {
   const clean = id.trim();
   if (!clean) return null;
-  const res = await tcgFetchJson<CardDetail>(`${BASE}/cards/${encodeURIComponent(clean)}`);
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`TCGdex card lookup failed (${res.status})`);
-  return res.data;
+  let status = 0;
+  const found = await cardCache.getOrLoad(clean, async () => {
+    const res = await tcgFetchJson<CardDetail>(`${BASE}/cards/${encodeURIComponent(clean)}`);
+    status = res.status;
+    if (res.status === 404) return { kind: "empty", value: null };
+    return res.ok ? { kind: "hit", value: res.data } : { kind: "error" };
+  });
+  if (!found.ok) throw new Error(`TCGdex card lookup failed (${status || "no response"})`);
+  return found.value;
 }
 
 type CardPricing = {
