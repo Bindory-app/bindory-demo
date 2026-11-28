@@ -3,21 +3,22 @@ import type { ResponsesInputItem } from "./ai-gateway.server";
 import type { DB, MoriRowDraft } from "./mori-context.server";
 import type { MoriStreamEvent } from "./mori-tools";
 
-/** The conversation so far: everything since `since` (when the collector opened Ask Mori or tapped
- *  New chat), so a new chat starts with a clean slate instead of every message ever sent. */
+/** Maximum recent `mori_messages` rows loaded into model context per turn (~8–15 turns at
+ *  4–7 rows/turn including status/confirm/suggest rows). Bounds DB reads and prompt tokens when
+ *  `since` is omitted or a chat grows long. */
+export const HISTORY_LIMIT = 60;
+
+/** The conversation so far: up to the most recent `HISTORY_LIMIT` rows since `since` (when the
+ *  collector opened Ask Mori or tapped New chat), returned in chronological order. */
 export async function history(db: DB, since?: string): Promise<ResponsesInputItem[]> {
-  const data: { role: string; kind: string; content: string; payload: Json | null }[] = [];
-  for (let offset = 0; ; offset += 500) {
-    let q = db.from("mori_messages").select("role, kind, content, payload");
-    if (since) q = q.gt("created_at", since);
-    const page = await q
-      .order("created_at")
-      .order("id")
-      .range(offset, offset + 499);
-    if (page.error) throw page.error;
-    data.push(...page.data);
-    if (page.data.length < 500) break;
-  }
+  let q = db.from("mori_messages").select("role, kind, content, payload");
+  if (since) q = q.gt("created_at", since);
+  const page = await q
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .range(0, HISTORY_LIMIT - 1);
+  if (page.error) throw page.error;
+  const data = [...page.data].reverse();
   return data
     .filter((m) => m.kind !== "suggest")
     .map((m): ResponsesInputItem => {

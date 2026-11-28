@@ -16,16 +16,31 @@ export async function saveOrderPhotos(db: DB, userId: string, images: string[]) 
     back: `${userId}/orders/${id}-back.jpg`,
   };
   const bucket = db.storage.from("memory-photos");
-  for (const [i, path] of [paths.front, paths.back].entries()) {
-    const img = parts[i]!;
-    const { error } = await bucket.upload(path, img.bytes, {
-      contentType: img.type,
-      upsert: false,
+  const uploaded: string[] = [];
+  const cleanup = async () => {
+    if (!uploaded.length || typeof bucket.remove !== "function") return;
+    await bucket.remove(uploaded).catch((err: unknown) => {
+      console.error("Order photo cleanup failed", err instanceof Error ? err.message : err);
     });
-    if (error) {
-      console.error("Order photo upload failed", error.message);
-      return null;
+  };
+  try {
+    for (const [i, path] of [paths.front, paths.back].entries()) {
+      const img = parts[i]!;
+      const { error } = await bucket.upload(path, img.bytes, {
+        contentType: img.type,
+        upsert: false,
+      });
+      if (error) {
+        console.error("Order photo upload failed", error.message);
+        await cleanup();
+        return null;
+      }
+      uploaded.push(path);
     }
+  } catch (err) {
+    console.error("Order photo upload failed", err instanceof Error ? err.message : err);
+    await cleanup();
+    return null;
   }
   return paths;
 }

@@ -21,6 +21,8 @@ import {
 import type { Json } from "@/integrations/supabase/types";
 import { asObject, type Args, type DB, type MoriRowDraft } from "./mori-context.server";
 import { executeMoriTool, type MoriToolContext } from "./mori-execute.server";
+import { createTurnTimer, type TurnTimer } from "./mori-timing.server";
+import { serializeToolResult } from "./mori-tool-output";
 import { finishMoriTurn, history } from "./mori-turn.server";
 
 // Any tool-capable model ID from https://ai-gateway.vercel.sh/v1/models; override with AI_GATEWAY_MODEL.
@@ -45,12 +47,15 @@ async function streamWithFallback(
   signal: AbortSignal | undefined,
   oidcToken: string | null | undefined,
   mustUseTool = false,
+  onModel?: (model: string) => void,
 ) {
   for (let i = 0; ; i++) {
+    const model = MODELS[i] ?? MODEL;
+    onModel?.(model);
     try {
       return await streamResponse(
         {
-          model: MODELS[i] ?? MODEL,
+          model,
           instructions: SYSTEM,
           input,
           tools,
@@ -78,6 +83,7 @@ export async function runMori({
   since,
   location,
   country,
+  timing,
 }: {
   db: DB;
   userId: string;
@@ -89,12 +95,17 @@ export async function runMori({
   since?: string | undefined;
   location?: string | undefined;
   country?: string | undefined;
+  timing?: TurnTimer;
 }) {
+  const ownTimer = !timing;
+  const timer = timing ?? createTurnTimer();
   // Images go to the model on this turn; the transcript keeps only a note, not the image data.
   const stored = images.length
     ? `${message}\n[Sent ${images.length === 1 ? "a card photo: the front" : `${images.length} card photos: front and back`}]`
     : message;
+  const historyStarted = Date.now();
   const past = await history(db, since);
+  timer.recordStage("history", Date.now() - historyStarted);
   const ins = await db
     .from("mori_messages")
     // The chat this message belongs to (its start time, sent by the app), so History lists one
@@ -113,9 +124,13 @@ export async function runMori({
       ? await latestSync(db, userId, since)
       : null;
   if (collectr !== null || priorSync) {
-    if (collectr !== null && !isCollectrLink(collectr))
-      return finishMoriTurn(db, [], COLLECTR_BAD_LINK, askedAt, emit);
+    if (collectr !== null && !isCollectrLink(collectr)) {
+      const done = await finishMoriTurn(db, [], COLLECTR_BAD_LINK, askedAt, emit);
+      if (ownTimer) timer.flush("done");
+      return done;
+    }
     try {
+      const syncStarted = Date.now();
       const row = await startSync(
         db,
         userId,
@@ -123,6 +138,7 @@ export async function runMori({
           ? { followUp: message, prior: priorSync }
           : { link: collectr!, binder: collectrSyncBinder(message) },
       );
+      timer.recordStage("collectr_sync", Date.now() - syncStarted);
       const ins = await db
         .from("mori_messages")
         .insert(row)
@@ -130,16 +146,19 @@ export async function runMori({
         .single();
       if (ins.error) throw ins.error;
       emit({ type: "done", rows: [ins.data as unknown as MoriRow] });
+      if (ownTimer) timer.flush("done");
       return;
     } catch (e) {
       console.error("Collectr sync failed to start", e instanceof Error ? e.message : e);
-      return finishMoriTurn(
+      const done = await finishMoriTurn(
         db,
         [],
         "I could not start the Collectr sync just now. Please try again in a moment.",
         askedAt,
         emit,
       );
+      if (ownTimer) timer.flush("done");
+      return done;
     }
   }
 
@@ -166,7 +185,13 @@ export async function runMori({
     }
     return saved;
   };
-  const ctx: MoriToolContext = { message, seenIds: new Set<string>(), lastCard: "", orderPhotos };
+  const ctx: MoriToolContext = {
+    message,
+    seenIds: new Set<string>(),
+    lastCard: "",
+    orderPhotos,
+    timing: timer,
+  };
   // Card ids Mori has actually looked up in this chat, so it never proposes a card from a guessed id.
   for (const id of JSON.stringify(past).match(/[a-z0-9.]+-[a-z0-9]+(?=\\?")/gi) ?? [])
     ctx.seenIds.add(id);
@@ -178,7 +203,7 @@ export async function runMori({
       {
         role: "developer",
         content:
-          `[App note: the collector is in ${market.name} (country code ${market.country}). Show prices in ${market.currency} (${market.symbol}); their eBay site is ${market.ebay}. Pass country "${market.country}" and currency "${market.currency}" to get_card_prices. Today 1 US$ = ${rate} ${market.currency}; convert the collector's price to US$ for set_order at that rate.]` +
+          `[App note: the collector is in ${market.name} (country code ${market.country}). Show prices in ${market.currency} (${market.symbol}); their eBay site is ${market.ebay}. Pass country "${market.country}" and currency "${market.currency}" to get_card_prices. ${rate ? `Today 1 US$ = ${rate} ${market.currency}; convert the collector's price to US$ for set_order at that rate.` : "Live FX conversion is unavailable right now; fall back to US$ if needed."}]` +
           (location
             ? `\n[App note: the collector's location, from their phone: ${location}. Use it for nearby shows, events and stores; never assume another city.]`
             : ""),
@@ -199,16 +224,37 @@ export async function runMori({
       // Questions about the collector's own cards, prices or plans must look at real data first,
       // so the first step has to use a tool (the model sometimes answers from guesswork otherwise).
       const mustUseTool = turn === 0 && NEEDS_DATA.test(message);
-      const stream = await streamWithFallback(input, signal, oidcToken, mustUseTool);
-      const streamText = !mustUseTool && !onlyPrice();
+      const modelStarted = Date.now();
+      let activeModel = MODEL;
       let res: ResponsesResponse | undefined;
-      for await (const event of stream) {
-        if (event.type === "response.output_text.delta" && streamText)
-          emit({ type: "text", text: event.delta ?? "" });
-        if (event.type === "response.completed") res = event.response;
-        if (event.type === "response.incomplete") throw new Error("Mori response incomplete");
+      try {
+        const stream = await streamWithFallback(input, signal, oidcToken, mustUseTool, (m) => {
+          activeModel = m;
+        });
+        const streamText = !mustUseTool && !onlyPrice();
+        for await (const event of stream) {
+          if (event.type === "response.output_text.delta" && streamText)
+            emit({ type: "text", text: event.delta ?? "" });
+          if (event.type === "response.completed") res = event.response;
+          if (event.type === "response.incomplete") throw new Error("Mori response incomplete");
+        }
+        if (!res) throw new Error("Mori response did not complete");
+        timer.recordModel({
+          turn: turn + 1,
+          model: activeModel,
+          ms: Date.now() - modelStarted,
+          ok: true,
+        });
+      } catch (modelErr) {
+        timer.recordModel({
+          turn: turn + 1,
+          model: activeModel,
+          ms: Date.now() - modelStarted,
+          ok: false,
+          ...(modelErr instanceof GatewayError ? { code: modelErr.code } : {}),
+        });
+        throw modelErr;
       }
-      if (!res) throw new Error("Mori response did not complete");
       const output = res.output ?? [];
       const calls = output.filter((o) => o.type === "function_call");
       const text = output
@@ -245,7 +291,15 @@ export async function runMori({
           name,
           arguments: call.arguments ?? "{}",
         });
+        const toolStarted = Date.now();
         const out = await executeMoriTool(db, userId, name, args, ctx);
+        const toolOk = !(
+          out.result &&
+          typeof out.result === "object" &&
+          !Array.isArray(out.result) &&
+          "error" in out.result
+        );
+        timer.recordTool({ name, ms: Date.now() - toolStarted, ok: toolOk });
         rows.push(...out.rows);
         const result = out.result;
         if (name === "get_card_prices") {
@@ -254,15 +308,16 @@ export async function runMori({
           if (typeof id === "string")
             priced.set(id, { output, condition: toCondition(args["condition"]) ?? "nm" });
         }
+        const serializedResult = serializeToolResult(result);
         statusRow.payload = {
           name,
           input: args as Json,
-          output: JSON.parse(JSON.stringify(result)) as Json,
+          output: JSON.parse(serializedResult) as Json,
         };
         input.push({
           type: "function_call_output",
           call_id: call.call_id ?? "",
-          output: JSON.stringify(result).slice(0, 8000),
+          output: serializedResult,
         });
         if (out.stop) {
           // A batch can contain several writes. Never execute calls after the card we showed.
@@ -275,24 +330,31 @@ export async function runMori({
       }
     }
     if (onlyPrice()) {
+      const priceCardStarted = Date.now();
       const [id, { output, condition }] = [...priced][0]!;
       const row = await priceCardRow(id, market, output, condition).catch(() => null);
+      timer.recordStage("price_card", Date.now() - priceCardStarted);
       if (row) {
         rows.push(row);
         cardsOnly = true;
       }
     }
   } catch (e) {
-    if (signal?.aborted) throw e;
+    if (signal?.aborted) {
+      if (ownTimer) timer.flush("aborted", "aborted");
+      throw e;
+    }
     console.error(
       "Mori gateway error",
       e instanceof GatewayError ? { code: e.code, ids: e.ids } : e,
     );
-    finalText =
-      e instanceof GatewayError && e.code === "rate_limited"
-        ? "I am a little busy right now. Please try again in a moment."
-        : "Sorry, I could not answer just now. Please try again.";
+    if (ownTimer) timer.flush("error", e instanceof GatewayError ? e.code : "internal");
+    throw e;
   }
 
-  return finishMoriTurn(db, rows, finalText, askedAt, emit, cardsOnly);
+  const finishStarted = Date.now();
+  const done = await finishMoriTurn(db, rows, finalText, askedAt, emit, cardsOnly);
+  timer.recordStage("finish", Date.now() - finishStarted);
+  if (ownTimer) timer.flush("done");
+  return done;
 }

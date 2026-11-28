@@ -1,7 +1,7 @@
 import type { Json } from "@/integrations/supabase/types";
 import type { Market } from "./market";
 import type { MoriRowDraft } from "./mori-context.server";
-import { ebaySoldPrices } from "./silphco.server";
+import { ebaySoldPricesLookup } from "./silphco.server";
 import { cardImage, getCardPricing, priceScale, usdRange } from "./tcgdex";
 
 /** A card's prices for the collector's market: today's market points converted into their currency,
@@ -10,43 +10,72 @@ export async function marketPrices(
   card: { id: string; name: string; number: string },
   pricing: Parameters<typeof priceScale>[0],
   market: Market,
-  /** Sales the agent read with the Apify actor itself (used instead of the server's lookup). */
-  agentSales?: unknown[],
   /** The raw card's condition; sold prices are for this condition only. */
   condition: import("./ebay-sold.server").Condition = "nm",
 ) {
-  const { usdTo } = await import("./fx.server");
-  const { localSoldPrices, summarise, CONDITIONS } = await import("./ebay-sold.server");
-  const rate = market.currency === "USD" ? 1 : await usdTo(market.currency);
+  const [
+    { resolveMarketFx },
+    { localSoldPricesLookup, CONDITIONS },
+    { browseCandidates, pickBrowseLowest },
+  ] = await Promise.all([
+    import("./fx.server"),
+    import("./ebay-sold.server"),
+    import("./ebay-browse.server"),
+  ]);
+  const scale = priceScale(pricing);
+  // Run independent work in parallel: FX and local sold listings start immediately (local sold
+  // queries the collector's eBay site in its native currency and does not need FX). Browse starts
+  // as soon as FX resolves using only the market-price floor so it runs alongside sold listings;
+  // the sold-based floor is applied afterwards to the returned candidates.
+  const fxPromise = resolveMarketFx(market);
+  const localPromise = localSoldPricesLookup(card, market, condition);
+  const browsePromise = fxPromise.then(({ market: effMarket, rate: fxRate }) => {
+    const marketFloor =
+      typeof scale?.market === "number"
+        ? (Math.round(scale.market * fxRate * 100) / 100) * 0.4
+        : undefined;
+    return browseCandidates(card, effMarket, condition, marketFloor || undefined).catch(() => ({
+      status: "error" as const,
+      data: null,
+      fromCache: undefined,
+    }));
+  });
+
+  const [fx, localLookup] = await Promise.all([fxPromise, localPromise]);
+  const rawLocal = localLookup.data;
+  const effMarket = fx.market;
+  const rate = fx.rate;
   const x = (v: number | null | undefined) =>
     typeof v === "number" ? Math.round(v * rate * 100) / 100 : null;
-  const scale = priceScale(pricing);
-  const sales = (agentSales ?? []).filter(
-    (
-      x,
-    ): x is {
-      title?: string;
-      soldPrice?: string | number;
-      soldCurrency?: string;
-      endedAt?: string;
-    } => Boolean(x) && typeof x === "object",
+
+  // On a cold FX failure that fell back to US$, never mix foreign local sold prices into a US$
+  // response.
+  const local = rawLocal && rawLocal.currency === effMarket.currency ? rawLocal : null;
+  const hasLocalSales = Boolean(
+    local && (local.raw.n > 0 || local.psa9.n > 0 || local.psa10.n > 0),
   );
-  // Without item locations the sales can't be limited to the collector's country, so the server
-  // looks them up itself instead.
-  const located = sales.some((x) => "itemLocation" in x);
-  const local =
-    sales.length && located
-      ? summarise(sales.slice(0, 60), card.number, market, condition)
-      : await localSoldPrices(card, market, condition);
-  // The pooled fallback is near mint only, so it is never shown for another condition.
-  const pooled = local || condition !== "nm" ? null : await ebaySoldPrices(card.id);
+  // Fall back to pooled SilphCo near-mint sold prices when local sold data failed, is
+  // unconfigured, or returned zero sales (empty). Never shown for non-near-mint conditions.
+  const pooledPromise =
+    hasLocalSales || condition !== "nm" ? Promise.resolve(null) : ebaySoldPricesLookup(card.id);
+
+  const [pooledLookup, initialBrowse] = await Promise.all([pooledPromise, browsePromise]);
+  const pooled = pooledLookup?.data ?? null;
   const label = CONDITIONS[condition].label;
-  // Today's lowest listings (worldwide and in their country) from eBay's own Browse API, with a
-  // floor at half the recent sold average (else 40% of the converted market price) so skins, cases
-  // and fan art drop out. No scraping and no Apify here.
-  const { browseLowest } = await import("./ebay-browse.server");
+  // Today's lowest listings (worldwide and in their country) from eBay's Browse API, applying a
+  // floor at half the recent sold average when present (else 40% of the converted market price) so
+  // skins, cases and fan art drop out.
   const ref = local?.raw.avg_last_3 ? local.raw.avg_last_3 * 0.5 : (x(scale?.market) ?? 0) * 0.4;
-  const lowest = await browseLowest(card, market, condition, ref || undefined).catch(() => null);
+  // Only if the sold-based floor is strictly lower than the market-based floor queried upstream do
+  // we refetch at the lower floor so valid cheaper listings aren't missed.
+  const browseResult =
+    initialBrowse.data && ref > 0 && initialBrowse.data.queryFloor > Math.floor(ref)
+      ? await browseCandidates(card, effMarket, condition, ref).catch(() => initialBrowse)
+      : initialBrowse;
+  const lowest =
+    browseResult.data && (browseResult.status === "ok" || browseResult.status === "empty")
+      ? pickBrowseLowest(browseResult.data, card, effMarket, condition, ref || undefined)
+      : null;
   // Without listings (no keys yet, or eBay unavailable) the card still shows its new layout, with
   // "–" in place of the listing prices.
   const listings = {
@@ -66,15 +95,23 @@ export async function marketPrices(
     sales: v.n ?? null,
     status: v.status,
   });
+  const cache: Record<string, boolean> = {};
+  if (typeof fx.fromCache === "boolean") cache["fx"] = fx.fromCache;
+  if (typeof localLookup.fromCache === "boolean") cache["ebay_sold"] = localLookup.fromCache;
+  if (typeof pooledLookup?.fromCache === "boolean") cache["silphco"] = pooledLookup.fromCache;
+  if (typeof browseResult.fromCache === "boolean") cache["ebay_browse"] = browseResult.fromCache;
   return {
     rate,
     scale,
     local,
     pooled,
     listings,
+    cache,
     forTool: {
-      currency: market.currency,
-      ebay_site: market.ebay,
+      currency: effMarket.currency,
+      // Set when no exchange rate was available, so every price here is in US$ instead.
+      ...(fx.fallbackToUsd ? { fx_fallback: true } : {}),
+      ebay_site: effMarket.ebay,
       listings: {
         condition: label,
         lowest_worldwide: listings.lowest_worldwide,
@@ -84,22 +121,22 @@ export async function marketPrices(
       price_points: scale
         ? { lowest_listing: x(scale.low), market: x(scale.market), mid: x(scale.mid) }
         : null,
-      recent_sold: local
-        ? { from: market.ebay, condition: label, raw: soldOut(local.raw) }
+      recent_sold: hasLocalSales
+        ? { from: effMarket.ebay, condition: label, raw: soldOut(local!.raw) }
         : pooled
           ? { condition: label, raw: { value: x(pooled.raw.value_usd), status: pooled.raw.status } }
-          : null,
+          : local
+            ? { from: effMarket.ebay, condition: label, raw: soldOut(local.raw) }
+            : null,
     },
   };
 }
 
 /** 7-day vs 30-day average price change for these cards, biggest rise first. A few lookups at a
- *  time, retrying once, so a busy moment at TCGdex does not lose them all. */
+ *  time (the catalogue client retries on its own), so a busy moment at TCGdex does not lose them
+ *  all. */
 export async function priceMoves(ids: string[]) {
-  const lookup = (id: string) =>
-    getCardPricing(id).catch(() =>
-      new Promise((r) => setTimeout(r, 400)).then(() => getCardPricing(id).catch(() => null)),
-    );
+  const lookup = (id: string) => getCardPricing(id).catch(() => null);
   const priced: Awaited<ReturnType<typeof lookup>>[] = [];
   for (let i = 0; i < ids.length; i += 6)
     priced.push(...(await Promise.all(ids.slice(i, i + 6).map(lookup))));
@@ -132,8 +169,9 @@ export async function priceCardRow(
   if (!r) return null;
   // Reuse the prices the agent just fetched for this market; look them up only if missing.
   const tool =
-    fromTool && fromTool["currency"] === market.currency
+    fromTool && (fromTool["currency"] === market.currency || fromTool["fx_fallback"] === true)
       ? (fromTool as {
+          currency?: string;
           price_points?: Record<string, number | null> | null;
           recent_sold?: Record<string, unknown> | null;
           listings?: Record<string, unknown> | null;
@@ -143,10 +181,14 @@ export async function priceCardRow(
             { id: r.card.id, name: r.card.name, number: r.card.localId },
             r.pricing,
             market,
-            undefined,
             condition,
           )
         ).forTool;
+  // Without an exchange rate the prices come back in US$; label them as such.
+  const shown: Market =
+    tool.currency === "USD" && market.currency !== "USD"
+      ? { ...market, currency: "USD", symbol: "US$" }
+      : market;
   const pts = tool.price_points ?? null;
   const soldAll = (tool.recent_sold ?? null) as Record<string, unknown> | null;
   const sold = soldAll as Record<
@@ -178,7 +220,7 @@ export async function priceCardRow(
   return {
     role: "mori",
     kind: "price",
-    content: `Price check: ${r.card.name} ${r.card.localId}${typeof headline === "number" ? `, ${market.symbol}${Math.round(headline)}` : ""}`,
+    content: `Price check: ${r.card.name} ${r.card.localId}${typeof headline === "number" ? `, ${shown.symbol}${Math.round(headline)}` : ""}`,
     payload: {
       card: {
         id: r.card.id,
@@ -190,8 +232,8 @@ export async function priceCardRow(
       },
       // Everything here is already in the collector's currency.
       market: {
-        currency: market.currency,
-        symbol: market.symbol,
+        currency: shown.currency,
+        symbol: shown.symbol,
         ebay: market.ebay,
         country: market.name.replace(/^the\s+/i, ""),
       },

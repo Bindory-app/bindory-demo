@@ -1,18 +1,19 @@
 /** Public TCGdex card service. Images are hotlinked from TCGdex and never stored. */
-const BASE = "https://api.tcgdex.net/v2/en";
+import { createCache } from "./cache.server";
+import { upstreamFetchJson, type UpstreamJsonResponse } from "./upstream-fetch";
 
-/** TCGdex fetch that retries twice on a server error or network failure (TCGdex has brief
- *  outages), so one bad moment does not turn into "card not found". */
-async function tcgFetch(url: string, init?: RequestInit): Promise<Response> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const res = await fetch(url, init);
-      if (res.status < 500 || attempt >= 2) return res;
-    } catch (e) {
-      if (attempt >= 2) throw e;
-    }
-    await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
-  }
+const BASE = "https://api.tcgdex.net/v2/en";
+const TCGDEX_TIMEOUT_MS = 8_000;
+
+/** TCGdex JSON fetch with a timeout covering both headers and body, plus capped transient retries. */
+function tcgFetchJson<T>(url: string, init?: RequestInit): Promise<UpstreamJsonResponse<T>> {
+  return upstreamFetchJson<T>(url, {
+    ...init,
+    timeoutMs: TCGDEX_TIMEOUT_MS,
+    maxAttempts: 3,
+    baseDelayMs: 300,
+    maxDelayMs: 2_000,
+  });
 }
 
 type CardBrief = { id: string; localId: string; name: string; image?: string | undefined };
@@ -31,12 +32,11 @@ export const cardImage = (image: string | undefined, quality: "high" | "low" = "
 export async function searchCards(name: string, limit = 24): Promise<CardBrief[]> {
   const q = name.trim();
   if (!q) return [];
-  const res = await tcgFetch(
+  const res = await tcgFetchJson<CardBrief[]>(
     `${BASE}/cards?name=${encodeURIComponent(q)}&pagination:itemsPerPage=${limit}`,
   );
   if (!res.ok) throw new Error(`TCGdex search failed (${res.status})`);
-  const data = (await res.json()) as CardBrief[];
-  return data.slice(0, limit);
+  return Array.isArray(res.data) ? res.data.slice(0, limit) : [];
 }
 
 /** Find cards by name, optionally narrowed by card number ("58" or "58/102") and set name, with each
@@ -54,9 +54,9 @@ export async function findCards(
   const [num, total] = (number ?? "").split("/").map((x) => x.trim());
   const params = new URLSearchParams({ name: q, "pagination:itemsPerPage": "60" });
   if (num) params.set("localId", num.replace(/^0+(?=\d)/, ""));
-  const res = await tcgFetch(`${BASE}/cards?${params}`);
+  const res = await tcgFetchJson<CardBrief[]>(`${BASE}/cards?${params}`);
   if (!res.ok) throw new Error(`TCGdex search failed (${res.status})`);
-  let list = (await res.json()) as CardBrief[];
+  let list = Array.isArray(res.data) ? res.data : [];
   // A number search matches exactly (TCGdex also returns e.g. 58 for 5), with or without leading zeros.
   if (num)
     list = list.filter((c) => c.localId.replace(/^0+(?=\d)/, "") === num.replace(/^0+(?=\d)/, ""));
@@ -86,11 +86,33 @@ export async function findCards(
   return out.slice(0, limit);
 }
 
+// One turn reads the same card several times (catalogue match, prices, proposal). The detail
+// carries TCGdex's daily prices, so a few minutes in this process is enough; errors are not kept.
+const CARD_TTL_MS = 5 * 60_000;
+const cardCache = createCache<CardDetail | null>({
+  namespace: "tcgdex-card",
+  ttlMs: CARD_TTL_MS,
+  emptyTtlMs: 60_000,
+  shared: false,
+});
+
+/** Forgets cached card details (tests only). */
+export function resetCardCacheForTest(): void {
+  cardCache.clear();
+}
+
 export async function getCard(id: string): Promise<CardDetail | null> {
-  const res = await tcgFetch(`${BASE}/cards/${encodeURIComponent(id)}`);
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`TCGdex card lookup failed (${res.status})`);
-  return (await res.json()) as CardDetail;
+  const clean = id.trim();
+  if (!clean) return null;
+  let status = 0;
+  const found = await cardCache.getOrLoad(clean, async () => {
+    const res = await tcgFetchJson<CardDetail>(`${BASE}/cards/${encodeURIComponent(clean)}`);
+    status = res.status;
+    if (res.status === 404) return { kind: "empty", value: null };
+    return res.ok ? { kind: "hit", value: res.data } : { kind: "error" };
+  });
+  if (!found.ok) throw new Error(`TCGdex card lookup failed (${status || "no response"})`);
+  return found.value;
 }
 
 type CardPricing = {
@@ -118,7 +140,8 @@ export function usdRange(
           typeof v === "object" && v !== null && ("marketPrice" in v || "midPrice" in v),
       )
     : [];
-  const v = variants.find((x) => typeof x.marketPrice === "number") ?? variants[0];
+  const v =
+    variants.find((x) => typeof x.marketPrice === "number" && x.marketPrice > 0) ?? variants[0];
   const market =
     typeof v?.marketPrice === "number" && v.marketPrice > 0 ? v.marketPrice : undefined;
   const mid = typeof v?.midPrice === "number" && v.midPrice > 0 ? v.midPrice : undefined;
@@ -152,7 +175,9 @@ export function priceScale(pricing: CardPricing | null | undefined): {
       typeof e[1] === "object" && e[1] !== null && ("marketPrice" in e[1] || "midPrice" in e[1]),
   );
   const [variant, v] =
-    variants.find(([, x]) => typeof x.marketPrice === "number") ?? variants[0] ?? [];
+    variants.find(([, x]) => typeof x.marketPrice === "number" && x.marketPrice > 0) ??
+    variants[0] ??
+    [];
   if (!variant || !v) return null;
   const num = (n: unknown) =>
     typeof n === "number" && n > 0 ? Math.round(n * 100) / 100 : undefined;
@@ -166,25 +191,28 @@ export async function getSetCards(
   id: string,
 ): Promise<{ id: string; name: string; cards: CardBrief[] } | null> {
   if (!id.trim()) return null;
-  const res = await tcgFetch(`${BASE}/sets/${encodeURIComponent(id.trim())}`);
-  if (!res.ok) return null;
-  const d = (await res.json()) as { id: string; name: string; cards?: CardBrief[] };
-  return { id: d.id, name: d.name, cards: d.cards ?? [] };
+  const res = await tcgFetchJson<{ id: string; name: string; cards?: CardBrief[] }>(
+    `${BASE}/sets/${encodeURIComponent(id.trim())}`,
+  );
+  if (!res.ok || !res.data) return null;
+  return { id: res.data.id, name: res.data.name, cards: res.data.cards ?? [] };
 }
 
 type SetDetail = { id: string; name: string; releaseDate?: string | undefined };
 
 export async function getSet(id: string): Promise<SetDetail | null> {
-  const res = await tcgFetch(`${BASE}/sets/${encodeURIComponent(id)}`);
+  const clean = id.trim();
+  if (!clean) return null;
+  const res = await tcgFetchJson<SetDetail>(`${BASE}/sets/${encodeURIComponent(clean)}`);
   if (!res.ok) return null;
-  return (await res.json()) as SetDetail;
+  return res.data;
 }
 
 /** Cards by the same illustrator (TCGdex filter). */
 export async function cardsByIllustrator(name: string, limit = 8): Promise<CardBrief[]> {
-  const res = await tcgFetch(
+  const res = await tcgFetchJson<CardBrief[]>(
     `${BASE}/cards?illustrator=${encodeURIComponent(name)}&pagination:itemsPerPage=${limit}`,
   );
-  if (!res.ok) return [];
-  return ((await res.json()) as CardBrief[]).slice(0, limit);
+  if (!res.ok || !Array.isArray(res.data)) return [];
+  return res.data.slice(0, limit);
 }

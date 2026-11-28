@@ -164,7 +164,8 @@ describe("the direct Mori tool loop", () => {
       suggestions: ["Set a buy order", "Pre-grade this card"],
     });
     expect(events.some((e) => e.type === "text")).toBe(false);
-    expect(vi.mocked(marketPrices).mock.calls[0]?.[3]).toBeUndefined();
+    // marketPrices takes no sales argument: card, pricing, market, condition.
+    expect(vi.mocked(marketPrices).mock.calls[0]?.slice(3)).toEqual(["nm"]);
     const schema = vi
       .mocked(streamResponse)
       .mock.calls[0]![0].tools?.find((t) => t.name === "get_card_prices");

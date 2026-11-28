@@ -4,11 +4,15 @@
  * search runs on two providers with at most 5 results each, fetch reads at most 3 pages and keeps
  * 6,000 characters of each, so a web lookup costs about a cent.
  */
+import { upstreamFetchJson } from "./upstream-fetch";
+
 const API = "https://router.telem.ai/v1";
 const SEARCH_PROVIDERS = ["brave", "tavily"];
 const MAX_RESULTS = 5;
 const MAX_URLS = 3;
 const MAX_CHARS = 6000;
+const SEARCH_TIMEOUT_MS = 20_000;
+const FETCH_TIMEOUT_MS = 25_000;
 
 type WebResult = { title: string; url: string; summary?: string | undefined };
 type WebPage = {
@@ -26,7 +30,15 @@ function key() {
 }
 
 async function post(path: string, body: unknown, timeoutMs: number) {
-  const res = await fetch(`${API}${path}`, {
+  // Paid POST (~1 cent/call): retry only fast 429/502/503 rejections; never retry timeouts or
+  // network drops after submission.
+  type TelemResponse = {
+    preprocessor_runs?: {
+      status?: string;
+      output_payload?: { results?: unknown[]; fetched_results?: unknown[] } | null;
+    }[];
+  };
+  const res = await upstreamFetchJson<TelemResponse>(`${API}${path}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${key()}`,
@@ -34,18 +46,20 @@ async function post(path: string, body: unknown, timeoutMs: number) {
       Accept: "application/json",
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
+    timeoutMs,
+    maxAttempts: 2,
+    retryStatuses: [429, 502, 503],
+    retryOnTimeout: false,
+    retryOnNetworkError: false,
+    maxRetryElapsedMs: 5_000,
+    baseDelayMs: 300,
+    maxDelayMs: 1_500,
   });
   if (!res.ok) {
     console.error("Telem request failed", path, res.status);
     throw new Error(res.status === 429 ? "Web search is busy" : "Web search failed");
   }
-  return (await res.json()) as {
-    preprocessor_runs?: {
-      status?: string;
-      output_payload?: { results?: unknown[]; fetched_results?: unknown[] } | null;
-    }[];
-  };
+  return res.data ?? {};
 }
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
@@ -70,7 +84,7 @@ export async function webSearch(query: string): Promise<WebResult[]> {
       user_input: { query: q },
       search: { providers: { include: SEARCH_PROVIDERS }, num_results: MAX_RESULTS },
     },
-    30_000,
+    SEARCH_TIMEOUT_MS,
   );
   const seen = new Set<string>();
   const ranked: (WebResult & { rank: number })[] = [];
@@ -107,7 +121,7 @@ export async function webFetch(urls: string[]): Promise<WebPage[]> {
   const d = await post(
     "/fetch",
     { urls: list, options: { content_format: "markdown", inline_max_chars: MAX_CHARS } },
-    45_000,
+    FETCH_TIMEOUT_MS,
   );
   const pages: WebPage[] = [];
   for (const run of d.preprocessor_runs ?? []) {

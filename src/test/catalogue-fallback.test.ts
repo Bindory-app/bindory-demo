@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { findCards } from "@/lib/tcgdex";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { findCards, resetCardCacheForTest } from "@/lib/tcgdex";
 import { writeSchemas } from "@/lib/mori-validation";
 
+beforeEach(() => resetCardCacheForTest());
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Catalogue search fallback", () => {
@@ -59,6 +60,23 @@ describe("Catalogue resilience", () => {
     );
     expect(await getCard("me02-125")).toMatchObject({ id: "me02-125" });
     expect(calls).toBe(2);
+  });
+
+  it("reads a card once for the lookups that follow in the same turn, but never keeps a failure", async () => {
+    let ok = false;
+    const fetchMock = vi.fn(async () =>
+      ok
+        ? new Response(JSON.stringify({ id: "me02-125", name: "Mega Charizard X ex" }))
+        : new Response("no", { status: 400 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(getCard("me02-125")).rejects.toThrow("TCGdex card lookup failed (400)");
+    ok = true;
+    const [a, b] = await Promise.all([getCard("me02-125"), getCard(" me02-125 ")]);
+    expect(a).toMatchObject({ id: "me02-125" });
+    expect(b).toBe(a);
+    expect(await getCard("me02-125")).toBe(a);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('turns a label like "Charizard 125/094" into the catalogue card', async () => {
