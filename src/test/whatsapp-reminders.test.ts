@@ -123,3 +123,19 @@ it("keeps candidate scans service-only, read-only, keyset ordered and filtered t
     expect(sql).toContain(part);
   expect(sql).not.toMatch(/SECURITY DEFINER|UPDATE public\.market_orders/i);
 });
+it("keeps the rolling slot across unlink/relink without retaining either sender identity", () => {
+  const sql = readFileSync("setup/018_whatsapp_reminders.sql", "utf8");
+  const table = sql.split("CREATE TABLE public.whatsapp_reminder_slots (")[1]!.split(");")[0]!;
+  expect(table).toContain("user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE");
+  expect(table).not.toMatch(/phone|bsuid|channel|order_id/);
+  for (const part of [
+    "REVOKE ALL ON public.whatsapp_reminder_slots FROM PUBLIC,anon,authenticated",
+    "BEFORE UPDATE OF last_reminder ON public.whatsapp_links",
+    "ON CONFLICT(user_id) DO UPDATE",
+    "s.reminded_at<=EXCLUDED.reminded_at-interval '24 hours'",
+    "IF NOT FOUND THEN RETURN NULL",
+    "SELECT user_id,last_reminder FROM public.whatsapp_links",
+    "NOT EXISTS (SELECT 1 FROM public.whatsapp_reminder_slots",
+  ])
+    expect(sql).toContain(part);
+});
