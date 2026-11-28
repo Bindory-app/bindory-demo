@@ -641,7 +641,11 @@ describe("the direct Mori tool loop", () => {
     expect(rows.find((r) => r.kind === "text")?.content).toContain("front and back");
     expect(rows.find((r) => r.kind === "status")?.payload).toMatchObject({
       name: "request_card_photos",
-      output: { card: "photo_request", order_proposed: false },
+      output: {
+        card: "photo_request",
+        order_proposed: false,
+        note: expect.stringContaining("Wait for the collector"),
+      },
     });
     expect(rows.find((r) => r.kind === "photos")?.payload).toMatchObject({
       for: "sell",
@@ -655,6 +659,7 @@ describe("the direct Mori tool loop", () => {
     gateway(say("I need the front and back."));
     await send("What are you waiting for?");
     const next = requests[1]!.input;
+    expect(JSON.stringify(next)).not.toContain("before set_order or pre_grade_report");
     expect(
       next.some(
         (i) =>
