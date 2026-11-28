@@ -42,5 +42,9 @@ describe("order confirmation edits", () => {
       expires_days: 30,
     });
     expect(() => orderChanges(old, { price: 0.0001 })).toThrow("valid price");
+    expect(orderChanges({ ...p, fx_rate: 2 }, { price: 2.01 })).toEqual({
+      price_amount: 2.01,
+      price_usd: 1.01,
+    });
   });
 });
