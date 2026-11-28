@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 describe("Event tickets", () => {
   it("shows the organiser's ticket page with its options, never a bad link", async () => {
     const { executeMoriTool } = await import("@/lib/mori-execute.server");
-    const ctx = { seenIds: new Set<string>(), message: "", lastCard: "" };
+    const ctx = {
+      seenIds: new Set<string>(),
+      message: "",
+      lastCard: "",
+      orderPhotos: async () => null,
+    };
     const ok = await executeMoriTool(
       null as never,
       "u1",
