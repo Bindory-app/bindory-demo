@@ -46,7 +46,11 @@ export async function confirmWith(
     ...(details ? { p_card_details: details } : {}),
   });
   if (result.error) throw result.error;
-  return result.data as unknown as { done: "confirmed" | "edited"; reply: MoriRow | null };
+  return result.data as unknown as {
+    done: "confirmed" | "edited";
+    reply: MoriRow | null;
+    order_status?: "pending";
+  };
 }
 
 /** Old proposals had only a USD amount. New edits are in the proposal's original currency,

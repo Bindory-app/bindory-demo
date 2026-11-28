@@ -1,0 +1,123 @@
+-- 016: Orders are saved on confirmation; explicitly connecting a demo payment label
+-- activates eligible orders. Apply after 015. No provider credentials or payments.
+BEGIN;
+
+ALTER TABLE public.market_orders DROP CONSTRAINT IF EXISTS market_orders_status_check;
+ALTER TABLE public.market_orders ADD CONSTRAINT market_orders_status_check
+ CHECK (status IN ('pending','open','cancelled','filled'));
+ALTER TABLE public.market_orders ALTER COLUMN status SET DEFAULT 'pending';
+
+CREATE OR REPLACE FUNCTION public.confirm_mori_proposal(p_message_id uuid, p_action text, p_card_details jsonb DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path = public AS $$
+DECLARE o_photos text[]; m public.mori_messages%ROWTYPE; p jsonb; c jsonb; card_row_id uuid; binder_id uuid; reply text; reply_row public.mori_messages%ROWTYPE; pos integer := 0; o_side text; o_price numeric; o_days integer;
+BEGIN
+ IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Sign in first'; END IF;
+ IF p_action NOT IN ('confirm','edit') THEN RAISE EXCEPTION 'Invalid action'; END IF;
+ SELECT * INTO m FROM public.mori_messages WHERE id=p_message_id AND user_id=auth.uid() AND kind='confirm' FOR UPDATE;
+ IF NOT FOUND THEN RAISE EXCEPTION 'Confirmation not found'; END IF;
+ p := m.payload;
+ IF p->>'status' <> 'pending' THEN RAISE EXCEPTION 'This proposal was already handled'; END IF;
+ IF p_action='edit' THEN
+  UPDATE public.mori_messages SET payload=jsonb_set(p,'{status}','"edited"') WHERE id=m.id;
+  RETURN jsonb_build_object('done','edited','reply',NULL);
+ END IF;
+ CASE p->>'tool'
+ WHEN 'add_card_to_collection' THEN
+  c := p->'card';
+  IF p_card_details IS NULL OR p_card_details->>'tcgdex_id' IS DISTINCT FROM c->>'tcgdex_id' THEN RAISE EXCEPTION 'Card details missing'; END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended(auth.uid()::text || ':' || (c->>'tcgdex_id'),0));
+  SELECT id INTO card_row_id FROM public.cards WHERE user_id=auth.uid() AND tcgdex_id=c->>'tcgdex_id' LIMIT 1;
+  IF card_row_id IS NULL THEN
+   INSERT INTO public.cards(user_id,tcgdex_id,name,set_name,set_id,number,image_url,illustrator,rarity,year)
+   VALUES(auth.uid(),p_card_details->>'tcgdex_id',p_card_details->>'name',p_card_details->>'set_name',p_card_details->>'set_id',p_card_details->>'number',p_card_details->>'image_url',p_card_details->>'illustrator',p_card_details->>'rarity',(p_card_details->>'year')::integer);
+   reply := (p_card_details->>'name') || ' is in your collection now. +10 points.';
+  ELSE reply := (c->>'name') || ' was already in your collection.'; END IF;
+ WHEN 'add_to_wishlist' THEN
+  c := p->'card';
+  INSERT INTO public.wishlist(user_id,tcgdex_id,name,image_url,note) VALUES(auth.uid(),c->>'tcgdex_id',c->>'name',c->>'image',p->>'note');
+  reply := (c->>'name') || ' is on your wishlist.';
+ WHEN 'create_binder' THEN
+  IF jsonb_array_length(p->'cards')=0 THEN RAISE EXCEPTION 'Choose cards first'; END IF;
+  INSERT INTO public.binders(user_id,name,description) VALUES(auth.uid(),p->>'name',p->>'description') RETURNING id INTO binder_id;
+  FOR c IN SELECT value FROM jsonb_array_elements(p->'cards') LOOP
+   SELECT id INTO card_row_id FROM public.cards WHERE user_id=auth.uid() AND tcgdex_id=c->>'tcgdex_id' LIMIT 1;
+   IF card_row_id IS NULL THEN RAISE EXCEPTION 'A binder can only include cards you own'; END IF;
+   IF nullif(trim(c->>'reason'),'') IS NULL THEN RAISE EXCEPTION 'Every card needs a reason'; END IF;
+   INSERT INTO public.binder_cards(user_id,binder_id,card_id,position,reason) VALUES(auth.uid(),binder_id,card_row_id,pos,c->>'reason');
+   pos := pos+1;
+  END LOOP;
+  reply := U&'Your binder \201C' || (p->>'name') || U&'\201D is ready with ' || pos || ' cards.';
+ WHEN 'save_memory' THEN
+  IF p->>'photo_path' IS NOT NULL AND split_part(p->>'photo_path','/',1)<>auth.uid()::text THEN RAISE EXCEPTION 'Photo must belong to you'; END IF;
+  INSERT INTO public.memories(user_id,title,note,place,with_whom,happened_on,card_tcgdex_id,traded_card_tcgdex_id,photo_path,is_private)
+  VALUES(auth.uid(),p->>'title',p->>'story',p->>'place',p->>'with_whom',nullif(p->>'date','')::date,p->'card'->>'tcgdex_id',p->'traded_card'->>'tcgdex_id',p->>'photo_path',true);
+  reply := U&'Saved \201C' || (p->>'title') || U&'\201D as a private memory. +25 points.';
+ WHEN 'set_order' THEN
+  c := p->'card';
+  -- The collector may change side, price and duration on the card before confirming.
+  o_side := coalesce(p_card_details->>'side', p->>'side');
+  o_price := coalesce((p_card_details->>'price_usd')::numeric, (p->>'price_usd')::numeric);
+  o_days := coalesce((p_card_details->>'expires_days')::integer, 30);
+  IF p_card_details ? 'price_amount' AND jsonb_typeof(p->'price') = 'object' THEN
+   IF coalesce((p->>'fx_rate')::numeric,0) <= 0 OR (p_card_details->>'price_amount')::numeric <= 0 THEN RAISE EXCEPTION 'Invalid order quote'; END IF;
+   p := jsonb_set(p,'{price,amount}',p_card_details->'price_amount');
+   o_price := round((p->'price'->>'amount')::numeric / (p->>'fx_rate')::numeric,2);
+  ELSIF p_card_details ? 'price_usd' AND jsonb_typeof(p->'price') = 'object' THEN
+   IF p->'price'->>'currency' <> 'USD' THEN RAISE EXCEPTION 'Edit the original currency amount'; END IF;
+   p := jsonb_set(p,'{price,amount}',to_jsonb(o_price));
+  END IF;
+  IF o_side NOT IN ('buy','sell') OR o_price <= 0 OR o_price > 1000000 OR o_days NOT IN (7,30,90) THEN RAISE EXCEPTION 'Invalid order'; END IF;
+  -- Sell orders keep the collector's own front and back photos (their private folder only) and the
+  -- condition read from them, for the marketplace listing.
+  o_photos := NULL;
+  IF o_side = 'sell' THEN
+   IF nullif(p->'photos'->>'front','') IS NULL OR nullif(p->'photos'->>'back','') IS NULL OR p->'photos'->>'front' = p->'photos'->>'back' THEN
+    RAISE EXCEPTION 'A sell order needs front and back photos';
+   END IF;
+   IF left(p->'photos'->>'front', length(auth.uid()::text) + 8) <> auth.uid()::text || '/orders/'
+      OR left(p->'photos'->>'back', length(auth.uid()::text) + 8) <> auth.uid()::text || '/orders/'
+      OR (p->'photos'->>'front') LIKE '%..%' OR (p->'photos'->>'back') LIKE '%..%' THEN
+    RAISE EXCEPTION 'Invalid order photos';
+   END IF;
+   o_photos := ARRAY[p->'photos'->>'front', p->'photos'->>'back'];
+  END IF;
+  INSERT INTO public.market_orders(user_id,side,tcgdex_id,card_name,image_url,price_usd,note,status,expires_at,photo_paths,condition)
+  VALUES(auth.uid(),o_side,c->>'tcgdex_id',c->>'name',c->>'image',o_price,p->>'note','pending',now() + make_interval(days => o_days),
+   o_photos, CASE WHEN o_side = 'sell' AND jsonb_typeof(p->'condition') = 'object' THEN p->'condition' END);
+  p := p || jsonb_build_object('side',o_side,'price_usd',o_price,'expires_days',o_days);
+  reply := 'Your ' || o_side || ' order for ' || (c->>'name') || ' at ' ||
+   CASE WHEN p->'price'->>'currency' <> 'USD' THEN (p->'price'->>'amount') || ' ' || (p->'price'->>'currency') || ' (US$' || to_char(o_price,'FM999G999G990D00') || ')'
+    ELSE 'US$' || to_char(o_price,'FM999G999G990D00') END || ' is saved. Add a payment method to make it live for ' || o_days || ' days.';
+ ELSE RAISE EXCEPTION 'Unknown proposal';
+ END CASE;
+ UPDATE public.mori_messages SET payload=jsonb_set(p,'{status}','"confirmed"') WHERE id=m.id;
+ INSERT INTO public.mori_messages(user_id,role,content) VALUES(auth.uid(),'mori',reply) RETURNING * INTO reply_row;
+ RETURN jsonb_build_object('done','confirmed','reply',to_jsonb(reply_row)) ||
+  CASE WHEN p->>'tool'='set_order' THEN jsonb_build_object('order_status','pending') ELSE '{}'::jsonb END;
+END; $$;
+REVOKE ALL ON FUNCTION public.confirm_mori_proposal(uuid,text,jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.confirm_mori_proposal(uuid,text,jsonb) TO authenticated;
+
+-- Single app activation seam. Preserve notification preferences and the duration
+-- chosen on the order card; repeated connects cannot extend already-open orders.
+CREATE OR REPLACE FUNCTION public.connect_order_payment(p_wallet text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path = public AS $$
+DECLARE uid uuid := auth.uid(); activated jsonb;
+BEGIN
+ IF uid IS NULL THEN RAISE EXCEPTION 'Sign in first'; END IF;
+ IF p_wallet IS NULL OR p_wallet NOT IN ('card','crypto','paypal','google_pay') THEN
+  RAISE EXCEPTION 'Invalid payment method';
+ END IF;
+ INSERT INTO public.order_settings(user_id,wallet,updated_at) VALUES(uid,p_wallet,now())
+ ON CONFLICT (user_id) DO UPDATE SET wallet=EXCLUDED.wallet, updated_at=EXCLUDED.updated_at;
+ WITH opened AS (
+  UPDATE public.market_orders SET status='open', expires_at=now() + (expires_at - created_at)
+  WHERE user_id=uid AND status='pending' AND expires_at>now() RETURNING id
+ )
+ SELECT coalesce(jsonb_agg(id),'[]'::jsonb) INTO activated FROM opened;
+ RETURN jsonb_build_object('activated_ids',activated);
+END; $$;
+REVOKE ALL ON FUNCTION public.connect_order_payment(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.connect_order_payment(text) TO authenticated;
+
+COMMIT;

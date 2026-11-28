@@ -243,13 +243,13 @@ export async function executeMoriTool(
       rows.push({
         role: "mori",
         kind: "orders",
-        content: `${result.length} open order${result.length > 1 ? "s" : ""}`,
+        content: `${result.length} order${result.length > 1 ? "s" : ""}`,
         payload: { orders: result } as unknown as Json,
       });
       result = {
         shown_to_user: true,
         count: result.length,
-        note: 'The open orders are on screen as cards, each with a Cancel button. Reply in one short, warm line such as "Here are your open orders. Tap Cancel on any you no longer want." Do not list them again.',
+        note: "The orders are on screen with their status and a Cancel button. Do not list them again.",
       };
     }
   } else if (

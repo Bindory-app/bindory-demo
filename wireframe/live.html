@@ -485,7 +485,7 @@
         const list = P.ordersListHTML(r.payload.orders || []);
         if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", list);
         else last = ui.say(stepsHTML + list);
-        if (last) refreshOrders(last);
+        if (last) { (r.payload.orders || []).forEach(o => showOrderStatus(last, o)); refreshOrders(last); }
       }
       else if (r.kind === "price" && r.payload) {
         // Mori's reply and the price card share one bubble.
@@ -1190,7 +1190,7 @@
       sb.from("memories").select("title").order("created_at", { ascending: false }).limit(20),
       sb.from("wishlist").select("name, image_url").order("created_at", { ascending: false }).limit(3),
       sb.from("mori_messages").select("payload").eq("kind", "price").order("created_at", { ascending: false }).limit(10),
-      sb.from("market_orders").select("id").eq("status", "open").limit(5),
+      sb.from("market_orders").select("id").in("status", ["open", "pending"]).gt("expires_at", new Date().toISOString()).limit(5),
     ]);
     const cards = cardsQ.data || [], memories = mems.data || [], pricedRows = (priced.data || []).map((r) => r.payload && r.payload.card).filter((c) => c && c.name);
     const binders = (bins.data || []).map((x) => ({ name: x.name, n: (x.binder_cards || []).length, img: ((x.binder_cards || []).map((bc) => bc.cards && bc.cards.image_url).find(Boolean)) || null }));
@@ -1889,33 +1889,160 @@
 
   window.bdLive.reload = loadMyData;
   // Order alerts and the demo payment method (setup/010). Only a label is stored, never payment details.
-  const loadOrderSettings = async () => {
-    if (!session) return;
-    const { data } = await sb.from("order_settings").select("alert_push, alert_email, wallet").maybeSingle();
-    if (data) Object.assign(P.orderSettings || (P.orderSettings = {}), data);
-  };
+  const paymentLabels = { card: "Debit or credit card", crypto: "Crypto wallet", paypal: "PayPal", google_pay: "Google Pay" };
+  const paymentReminder = "You have pending orders. Add a payment method to make them live.";
+  let walletGroup = 0, connectingOwner = null;
+  function clearPaymentSteps() {
+    app.querySelectorAll("[data-bd-payment-step]").forEach(el => el.closest(".cp-mori-msg")?.remove());
+  }
+  function afterOrderConfirm(order, status, uid) {
+    if (status === "pending") pendingOrderStep("alerts", uid);
+    else if (!status && P.orderNext) setTimeout(() => {
+      if (session?.user.id === uid) P.orderNext({ side: order.side, card: order.name, price: order.price, days: order.days });
+    }, 500);
+  }
+  function pendingOrderStep(step, uid) {
+    if (session?.user.id !== uid) return;
+    const settings = P.orderSettings || {};
+    const button = (key, label, primary) => '<button type="button" data-bd-payment="' + key + '"' + (primary ? ' class="cp-mori-go"' : '') + '>' + label + '</button>';
+    let body, actions;
+    if (step === "alerts") {
+      const option = (key, label, checked) => '<label class="cp-order-opt"><input type="checkbox" data-bd-alert="' + key + '"' + (checked ? ' checked' : '') + '><span><b>' + label + '</b></span><i aria-hidden="true"></i></label>';
+      body = '<small>1 of 2</small><b>Choose your notification preferences</b>' +
+        option("push", "Phone notification", settings.alert_push !== false) + option("email", "Email", !!settings.alert_email);
+      actions = button("alerts", "Save preferences", true) + button("skip-alerts", "Not now");
+    } else if (step === "wallet") {
+      const group = "bd-wallet-" + (window.crypto?.randomUUID?.() || Date.now()) + "-" + ++walletGroup;
+      body = '<small>2 of 2</small><b>Connect a payment method</b><p>Connect to activate all your pending, unexpired orders.</p><div class="cp-order-wallets">' +
+        Object.entries(paymentLabels).map(([key, label]) => '<label><input type="radio" name="' + group + '" value="' + key + '"' +
+          (key === (settings.wallet || "card") ? ' checked' : '') + '><span><b>' + label + '</b></span></label>').join("") +
+        '</div><p class="cp-order-demo">Demo only. Nothing is charged and no payment details are collected.</p>';
+      actions = button("connect", "Connect", true) + button("skip-wallet", "Skip for now");
+    } else {
+      body = "<b>" + (step === "reminder" ? paymentReminder : "Payment skipped. Your order stays pending until you connect a payment method.") + "</b>";
+      actions = button("wallet", "Add payment method", true);
+    }
+    clearPaymentSteps();
+    P.moriUI.say('<div class="cp-order-step" data-bd-payment-step="' + step + '" data-bd-payment-owner="' + esc(uid) + '">' + body + '<div class="cp-mori-actions">' + actions + '</div></div>');
+  }
+  app.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-bd-payment]");
+    if (!b || b.disabled) return;
+    const box = b.closest("[data-bd-payment-owner]"), uid = box.dataset.bdPaymentOwner;
+    if (session?.user.id !== uid) return;
+    const action = b.dataset.bdPayment;
+    if (action === "connect" && connectingOwner === uid) return;
+    const controls = box.querySelectorAll("button,input");
+    const lock = (value) => controls.forEach(el => el.disabled = value);
+    lock(true);
+    try {
+      if (action === "alerts") {
+        let push = box.querySelector('[data-bd-alert="push"]').checked;
+        const email = box.querySelector('[data-bd-alert="email"]').checked;
+        if (push) {
+          try { push = "Notification" in window && await Notification.requestPermission() === "granted"; }
+          catch { push = false; }
+        }
+        if (session?.user.id !== uid || !app.contains(box)) return;
+        const prefs = { alert_push: push, alert_email: email };
+        const { error } = await sb.from("order_settings").upsert({ user_id: uid, ...prefs, updated_at: new Date().toISOString() });
+        if (error) throw error;
+        if (session?.user.id !== uid || !app.contains(box)) return;
+        Object.assign(P.orderSettings, prefs);
+      }
+      if (action === "connect") {
+        connectingOwner = uid;
+        const wallet = box.querySelector("input:checked").value;
+        const { data, error } = await sb.rpc("connect_order_payment", { p_wallet: wallet });
+        if (error || !Array.isArray(data?.activated_ids)) throw new Error("activation not confirmed");
+        if (session?.user.id !== uid) return;
+        P.orderSettings.wallet = wallet;
+        const n = data.activated_ids.length;
+        P.moriUI.say("<p>" + (n === 1 ? "Payment method connected. One order is now live." : n ? "Payment method connected. " + n + " orders are now live." : "Payment method connected. No pending orders needed activation.") + "</p>");
+        clearPaymentSteps();
+        refreshOrders(app);
+      } else {
+        pendingOrderStep(action === "skip-wallet" ? "pending" : "wallet", uid);
+      }
+    } catch {
+      if (session?.user.id !== uid || !app.contains(box)) return;
+      lock(false);
+      P.toast(action === "connect" ? "Could not confirm activation. Try Connect again." : "Could not save notification preferences. Try again or choose Not now.");
+    } finally {
+      if (action === "connect" && connectingOwner === uid) connectingOwner = null;
+    }
+  });
+
+  let orderSettingsOwner = null;
+  async function loadOrderSettings() {
+    const uid = session?.user.id;
+    if (!uid || orderSettingsOwner === uid) return;
+    orderSettingsOwner = uid;
+    P.orderSettings = {};
+    const [settings, pending] = await Promise.all([
+      sb.from("order_settings").select("alert_push, alert_email, wallet").eq("user_id", uid).maybeSingle(),
+      sb.from("market_orders").select("id").eq("user_id", uid).eq("status", "pending").gt("expires_at", new Date().toISOString()).limit(1),
+    ]);
+    if (session?.user.id !== uid || orderSettingsOwner !== uid) return;
+    if (settings.data) Object.assign(P.orderSettings, settings.data);
+    if (!pending.data?.length) return;
+    // Email-code auth signs in before the base closes its sheet and resets Mori's thread.
+    // Mutation delivery is after that reset. Do not consume the device reminder before then.
+    const sheet = app.querySelector("[data-auth-sheet].is-open");
+    if (sheet) {
+      await new Promise(resolve => {
+        const observer = new MutationObserver(() => {
+          if (!sheet.classList.contains("is-open")) { observer.disconnect(); resolve(); }
+        });
+        observer.observe(sheet, { attributes: true, attributeFilter: ["class"] });
+      });
+      if (session?.user.id !== uid || orderSettingsOwner !== uid) return;
+    }
+    pendingOrderStep("reminder", uid);
+    if (!P.orderSettings.alert_push || !("Notification" in window) || Notification.permission !== "granted") return;
+    try {
+      const key = "bd-payment-reminder:" + uid, now = Date.now();
+      if (now - Number(localStorage.getItem(key)) < 864e5) return;
+      localStorage.setItem(key, String(now));
+      new Notification("Mori", { body: paymentReminder });
+    } catch { /* Local storage or device notifications may be unavailable. */ }
+  }
   app.addEventListener("cp:order-settings", async (e) => {
     if (!(await fresh())) return;
     const { error } = await sb.from("order_settings").upsert({ user_id: session.user.id, ...e.detail, updated_at: new Date().toISOString() });
     if (error) console.warn("Order settings not saved", error.message);
   });
   fresh().then((s) => s && loadOrderSettings());
-  sb.auth.onAuthStateChange((event) => { if (event === "SIGNED_IN") setTimeout(loadOrderSettings, 0); });
+  sb.auth.onAuthStateChange((event) => {
+    if (event === "SIGNED_IN") setTimeout(loadOrderSettings, 0);
+    if (event === "SIGNED_OUT") { orderSettingsOwner = null; P.orderSettings = {}; }
+  });
   fresh().then((s) => s && loadMyData());
   sb.auth.onAuthStateChange((event) => { if (event === "SIGNED_IN") setTimeout(loadMyData, 0); });
 
-  // Order cards drawn from chat history may be out of date: mark ones already cancelled.
+  // Paint saved status immediately, then reconcile history cards with their current state.
+  function showOrderStatus(el, o) {
+    for (const item of el.querySelectorAll('[data-order-id="' + CSS.escape(o.id) + '"]')) {
+      const label = item.querySelector("span small"), side = label.textContent.split(" · ")[0];
+      const days = Math.ceil((Date.parse(o.expires_at) - Date.now()) / 864e5);
+      if (o.status === "cancelled" || o.status === "filled" || days <= 0) {
+        label.textContent = side;
+        markClosed(item, o.status === "cancelled" ? "Cancelled" : o.status === "filled" ? "Filled" : "Expired");
+      } else if (o.status === "pending") label.textContent = side + " · Pending payment";
+      else if (o.status === "open") label.textContent = side + " · " + days + (days === 1 ? " day" : " days") + " left";
+    }
+  }
   async function refreshOrders(el) {
     const ids = [...el.querySelectorAll("[data-order-id]")].map((x) => x.dataset.orderId);
     if (!ids.length) return;
-    const { data } = await sb.from("market_orders").select("id, status").in("id", ids);
-    (data || []).forEach((o) => { if (o.status !== "open") markCancelled(el.querySelector('[data-order-id="' + o.id + '"]')); });
+    const { data } = await sb.from("market_orders").select("id, status, expires_at").in("id", ids);
+    (data || []).forEach(o => showOrderStatus(el, o));
   }
-  function markCancelled(item) {
+  function markClosed(item, status) {
     if (!item) return;
     item.classList.remove("is-asking");
     item.classList.add("is-cancelled");
-    item.querySelector(".cp-order-item-act").innerHTML = "<mark>Cancelled</mark>";
+    item.querySelector(".cp-order-item-act").innerHTML = "<mark>" + esc(status) + "</mark>";
   }
   // Post or save a video Mori storyboarded (posts table, owner-only by RLS).
   const videos = new Map();
@@ -1967,7 +2094,7 @@
     if (body && P.nextUpHTML) body.insertAdjacentHTML("beforeend", P.nextUpHTML(["Plan a video of this binder", "Price check this card", "Add another card"]));
   });
 
-  // Cancel on an open order: ask once, then cancel it (owner-only by RLS).
+  // Cancel a pending or open order after confirmation (owner-only by RLS).
   app.addEventListener("click", async (e) => {
     const b = e.target.closest("[data-bd-order-cancel],[data-bd-order-yes],[data-bd-order-keep]");
     if (!b || !app.contains(b)) return;
@@ -1985,9 +2112,9 @@
     }
     act.querySelectorAll("button").forEach((x) => (x.disabled = true));
     await fresh();
-    const { error } = await sb.from("market_orders").update({ status: "cancelled" }).eq("id", item.dataset.orderId).eq("status", "open");
-    if (error) { act.querySelectorAll("button").forEach((x) => (x.disabled = false)); P.toast("Could not cancel that. Please try again."); return; }
-    markCancelled(item);
+    const { data, error } = await sb.from("market_orders").update({ status: "cancelled" }).eq("id", item.dataset.orderId).in("status", ["open", "pending"]).gt("expires_at", new Date().toISOString()).select("id").maybeSingle();
+    if (!data || error) { act.querySelectorAll("button").forEach((x) => (x.disabled = false)); refreshOrders(app); P.toast("Could not cancel that. Please try again."); return; }
+    showOrderStatus(app, {id:data.id, status:"cancelled"});
     P.toast("Order cancelled");
   });
 
@@ -2039,6 +2166,7 @@
     box.querySelectorAll("button").forEach((x) => (x.disabled = true));
     try {
       await fresh();
+      const confirmOwner = session.user.id;
       const res = await fetch("/api/mori-confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
@@ -2047,6 +2175,7 @@
       if (res.status === 409) { box.querySelectorAll("button").forEach(x => { x.disabled = false; }); P.toast(await res.text()); return; }
       if (!res.ok) throw new Error("failed");
       const out = await res.json();
+      if (session?.user.id !== confirmOwner) return;
       const plan = action === "confirm" ? binderPlans.get(id) : null;
       if (plan) {
         binderPlans.delete(id);
@@ -2078,7 +2207,7 @@
       }
       if (action === "confirm" && order) {
         orders.delete(id);
-        if (P.orderNext) setTimeout(() => P.orderNext({ side: order.side, card: order.name, price: order.price, days: order.days }), 500);
+        afterOrderConfirm(order, out.order_status, confirmOwner);
       }
       if (action === "edit") {
         // Other proposals: Mori asks what to change, and the next message makes a new card.
