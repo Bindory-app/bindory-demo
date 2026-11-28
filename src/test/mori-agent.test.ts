@@ -4,7 +4,11 @@ import { runMori } from "@/lib/mori-agent.server";
 import { resolveMarketFx } from "@/lib/fx.server";
 import { marketFor } from "@/lib/market";
 import type { OrderIntent } from "@/lib/mori-validation";
-import type { ResponsesRequest, ResponsesResponse } from "@/lib/ai-gateway.server";
+import {
+  GatewayError,
+  type ResponsesRequest,
+  type ResponsesResponse,
+} from "@/lib/ai-gateway.server";
 import { latestSync, startSync } from "@/lib/collectr-sync.server";
 import { marketPrices } from "@/lib/mori-prices.server";
 import { asObject, type DB } from "@/lib/mori-context.server";
@@ -79,7 +83,7 @@ function chat(rows: Row[] = []) {
     message: string,
     opts: Pick<
       Parameters<typeof runMori>[0],
-      "images" | "location" | "country" | "intent" | "timing"
+      "images" | "location" | "country" | "intent" | "timing" | "signal"
     > = {},
   ) =>
     runMori({
@@ -138,6 +142,181 @@ afterEach(() => {
   expect(replies).toHaveLength(0);
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+});
+
+describe("structured pre-grading", () => {
+  const candidate = {
+    id: "base1-25",
+    name: "Pikachu",
+    number: "25",
+    set: "Base Set",
+    set_size: 102,
+  };
+  const intent = { kind: "pre_grade", card: { id: candidate.id } };
+  const reading = { name: "Pikachu", number: "25/102", set: "Base Set", confidence: "high" };
+  const report = {
+    outcomes: [
+      { grade: 9, probability: 70 },
+      { grade: 8, probability: 30 },
+    ],
+    take: "The card is worth $9999.",
+    confidence: 81,
+    notes: "Light edge wear",
+    overall: { psa: 9 },
+    subgrades: { corners: { psa: 80 } },
+  };
+  it.each([[], images.slice(0, 1)].map((shots) => ({ shots })))(
+    "requests the pair and keeps the exact intent with $shots",
+    async ({ shots }) => {
+      const { send, rows, upload } = chat();
+      const pending = { ...intent, card: { name: "Pikachu", number: "25/102", set: "Base Set" } };
+      await send("Pre-grade this card", { intent: pending, images: shots });
+      expect(requests).toHaveLength(0);
+      expect(getCardPricing).not.toHaveBeenCalled();
+      expect(rows.find((r) => r.kind === "photos")?.payload).toEqual({
+        for: "grade",
+        intent: pending,
+      });
+      expect(upload).not.toHaveBeenCalled();
+    },
+  );
+  it("prices a known card while vision is pending and records one turn-zero call", async () => {
+    const { send, rows, events, bucket } = chat();
+    const timing = createTurnTimer(Date.now, () => {});
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const mockGateway = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementationOnce(async (...args) => {
+      await gate;
+      return mockGateway(...args);
+    });
+    gateway(call("pre_grade_report", report));
+    const pending = send("Pre-grade", { intent, images, timing });
+    try {
+      await vi.waitFor(() => {
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(getCardPricing).toHaveBeenCalledWith(candidate.id);
+      });
+    } finally {
+      release();
+    }
+    await pending;
+    expect(rows.filter((r) => r.kind === "grade")).toHaveLength(1);
+    expect(rows.find((r) => r.kind === "grade")?.payload).toMatchObject({
+      card: "Pikachu 25 (Base Set)",
+      card_id: candidate.id,
+      raw_price: { amount: 10, currency: "USD" },
+      notes: report.notes,
+    });
+    expect(JSON.stringify(rows)).not.toMatch(/data:image|9999/);
+    expect(bucket).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      tool_choice: "required",
+      max_output_tokens: 2000,
+      tools: [{ name: "pre_grade_report" }],
+    });
+    expect(JSON.stringify(requests[0]?.tools)).not.toContain('"reading"');
+    for (const shot of images) expect(JSON.stringify(requests[0]?.input)).toContain(shot);
+    expect(timing.finish("done").models).toMatchObject([{ turn: 0, ok: true }]);
+    expect(events.filter((e) => e.type === "status").map((e) => e.name)).toEqual([
+      "pre_grade_report",
+      "get_card_prices",
+    ]);
+  });
+  it.each([
+    ["AUD", false],
+    ["USD", true],
+  ] as const)(
+    "identifies both photos in the same call and labels the real %s price",
+    async (currency, fallback) => {
+      vi.mocked(findCards).mockResolvedValue([candidate]);
+      const market = vi.mocked(marketPrices).getMockImplementation()!;
+      vi.mocked(marketPrices).mockImplementationOnce(async (...args) => {
+        const m = await market(...args);
+        return { ...m, forTool: { ...m.forTool, currency, fx_fallback: fallback } };
+      });
+      gateway(call("pre_grade_report", { ...report, reading }));
+      const { send, rows } = chat();
+      await send("Pre-grade", { intent: { kind: "pre_grade" }, images, country: "AU" });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.tools?.[0]?.parameters["required"]).toContain("reading");
+      expect(findCards).toHaveBeenCalledWith("Pikachu", "25/102", "Base Set");
+      expect(
+        rows.filter((r) => r.kind === "status").map((r) => asObject(r.payload)["name"]),
+      ).toEqual(["search_catalogue", "get_card_prices"]);
+      expect(rows.find((r) => r.kind === "grade")?.payload).toMatchObject({
+        card_id: candidate.id,
+        raw_price: { amount: 10, currency },
+      });
+    },
+  );
+  it.each(["low confidence", "ambiguous printing", "price unavailable"])(
+    "keeps the assessment without a price on %s",
+    async (reason) => {
+      vi.mocked(findCards).mockResolvedValue(
+        reason === "ambiguous printing"
+          ? [candidate, { ...candidate, id: "base1-25b" }]
+          : [candidate],
+      );
+      if (reason === "price unavailable")
+        vi.mocked(getCardPricing).mockRejectedValueOnce(new Error("offline"));
+      gateway(
+        call("pre_grade_report", {
+          ...report,
+          reading: { ...reading, confidence: reason === "low confidence" ? "low" : "high" },
+        }),
+      );
+      const { send, rows } = chat();
+      await send("Pre-grade", { intent: { kind: "pre_grade" }, images });
+      const row = rows.find((r) => r.kind === "grade");
+      expect(asObject(row?.payload)["price_note"]).toContain("couldn't verify");
+      expect(asObject(row?.payload)["raw_price"]).toBeUndefined();
+      if (reason !== "price unavailable") expect(getCardPricing).not.toHaveBeenCalled();
+      expect(requests).toHaveLength(1);
+    },
+  );
+  it("falls back on invalid outcomes without storing photos, even if chat asks for an order", async () => {
+    const { send, rows, bucket } = chat();
+    gateway(call("pre_grade_report", { ...report, outcomes: [{ grade: 9, probability: 100 }] }));
+    gateway(order("sell"));
+    await send("Pre-grade my card", { intent, images });
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.tools?.length).toBeGreaterThan(1);
+    expect(rows.filter((r) => r.role === "user")).toHaveLength(1);
+    expect(rows.some((r) => r.kind === "grade")).toBe(false);
+    expect(bucket).not.toHaveBeenCalled();
+  });
+  it("reports a gateway failure at once instead of retrying the photos in the chat loop", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { send, rows } = chat();
+      await expect(send("Pre-grade", { intent, images })).rejects.toBeInstanceOf(GatewayError);
+      // Only the forced call's own attempts reached the gateway; none carried the chat tools.
+      expect(requests.every((r) => r.tool_choice === "required" && r.tools?.length === 1)).toBe(
+        true,
+      );
+      expect(rows.some((r) => r.kind === "grade")).toBe(false);
+    } finally {
+      error.mockRestore();
+    }
+  });
+  it("propagates cancellation during pricing rather than persisting a report or retrying in chat", async () => {
+    const controller = new AbortController();
+    vi.mocked(getCardPricing).mockImplementationOnce(async () => {
+      controller.abort();
+      throw controller.signal.reason;
+    });
+    gateway(call("pre_grade_report", report));
+    const { send, rows } = chat();
+    await expect(
+      send("Pre-grade", { intent, images, signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(requests.length).toBeLessThanOrEqual(1);
+    expect(rows.some((r) => r.kind === "grade")).toBe(false);
+  });
 });
 
 describe("the direct Mori tool loop", () => {
@@ -619,6 +798,9 @@ describe("explicit price-check turns", () => {
       price: { amount: -10, currency: "USD" },
     },
     { kind: "price_check", card: { name: "" } },
+    { kind: "pre_grade", card: { id: "not a catalogue id" } },
+    { kind: "pre_grade", card: { name: "Pikachu", set: "" } },
+    { kind: "pre_grade", card: { id: "base1-25", name: "Pikachu" } },
     { kind: "price_check" },
   ])("logs and ignores malformed, unsupported or image-less intents", async (bad) => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -654,6 +836,7 @@ describe("explicit price-check turns", () => {
     expect(requests[0]).toMatchObject({
       tool_choice: "required",
       tools: [{ name: "identify_card" }],
+      max_output_tokens: 500,
     });
     expect(JSON.stringify(requests[0]?.input)).toContain(images[0]);
     expect(findCards).toHaveBeenCalledWith("Pikachu", "25/102", "Base Set");

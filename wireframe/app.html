@@ -4959,12 +4959,23 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     file.disabled = false;
   });
 
+  // The base renderers own the chip and tile markup. Tag only the action for this price card.
+  function withGradeIntent(html, attr, question, card) {
+    if (!card || (!card.id && !card.name)) return html;
+    const t = document.createElement("template"); t.innerHTML = html;
+    const button = [...t.content.querySelectorAll("button[" + attr + "]")].find(b => b.getAttribute(attr) === question);
+    if (!button) return html;
+    const printing = card.id ? { id: card.id } : { name: card.name, ...(card.number ? { number: card.number } : {}), ...(card.set ? { set: card.set } : {}) };
+    button.dataset.bdIntent = JSON.stringify({ kind: "pre_grade", card: printing });
+    return t.innerHTML;
+  }
+
   function renderRows(rows, ui, steps) {
     steps = [...new Set(steps)];
     // The steps ("Searching the web" ...) show only while Mori works, in the typing bubble; the
     // finished answer is shown without them.
     let stepsHTML = "";
-    let last = null, lastKind = "";
+    let last = null, lastKind = "", priceCard = null;
     for (const r of rows) {
       if (r.role !== "mori" || r.kind === "status") continue;
       if (r.kind === "choices") {
@@ -4989,8 +5000,9 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
         // Follow-up questions go under the last bubble of this answer.
         const list = (r.payload && r.payload.suggestions) || [];
         if (list.length && P.nextUpHTML) {
-          if (last) last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", P.nextUpHTML(list));
-          else ui.say(P.nextUpHTML(list));
+          const chips = withGradeIntent(P.nextUpHTML(list), "data-mori-ask", "Pre-grade this card", lastKind === "price" && priceCard);
+          if (last) last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", chips);
+          else ui.say(chips);
           ui.scrollDown();
         }
         continue;
@@ -5006,7 +5018,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       else if (r.kind === "photos") {
         // Take a photo / Upload send the front and back for a sell order or a pre-grade (the wireframe's own photo step).
         const why = r.payload && r.payload.for === "grade" ? "grade" : "sell";
-        const pending = r.payload?.intent ? ' data-bd-pending-order="' + esc(JSON.stringify(r.payload.intent)) + '"' : "";
+        const pending = r.payload?.intent ? ' data-bd-pending-intent="' + esc(JSON.stringify(r.payload.intent)) + '"' : "";
         const btns = '<div class="cp-mori-chips"' + pending + '><button data-mori-act="card-photo" data-mori-arg="' + why + '">Take a photo</button><button data-mori-act="card-photo" data-mori-arg="' + why + '">Upload from my photos</button></div>';
         if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", btns);
         else last = ui.say(stepsHTML + btns);
@@ -5037,6 +5049,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       }
       else if (r.kind === "price" && r.payload) {
         // Mori's reply and the price card share one bubble.
+        priceCard = r.payload.card;
         const card = priceCardHTML(r.payload);
         if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", card);
         else last = ui.say(stepsHTML + card);
@@ -5046,7 +5059,9 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
         // Mori's own intro line and the "Should I grade?" card share one bubble.
         if (last && lastKind === "text") last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", should);
         else ui.say(stepsHTML + should);
-        last = ui.say(take);
+        const raw = r.payload.raw_price;
+        const reference = raw ? "Raw price: " + orderMoney(raw.amount, raw.currency) : r.payload.price_note;
+        last = ui.say(take + (reference ? '<p class="cp-grade-notes">' + esc(reference) + '</p>' : ""));
       }
       else last = ui.say(stepsHTML + "<p>" + fmt(r.content) + "</p>");
       lastKind = r.kind;
@@ -5057,8 +5072,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   // Each visit and each "New chat" starts a fresh conversation for Mori (the server only sends it
   // messages after this time). A few seconds back, so a slightly fast phone clock cannot hide the first message.
   let chatSince = new Date(Date.now() - 5000).toISOString();
-  app.addEventListener("click", (e) => { if (e.target.closest("[data-mori-reset]")) chatSince = new Date(Date.now() - 5000).toISOString(); }, true);
-  app.addEventListener("cp:mori-new-chat", () => { chatSince = new Date().toISOString(); });
+  app.addEventListener("click", (e) => { if (e.target.closest("[data-mori-reset]")) { chatSince = new Date(Date.now() - 5000).toISOString(); attachedShot = null; } }, true);
+  app.addEventListener("cp:mori-new-chat", () => { chatSince = new Date().toISOString(); attachedShot = null; });
 
   // Card photos: "Take a photo" opens the phone's camera, "Upload from my photos" and the photo
   // icon in the chat box open its photo album. The picker is opened in the tap itself (a capture
@@ -5171,8 +5186,9 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
       const select = el.closest(".cp-mori-body")?.querySelector('form[data-fill="price"] select[name="condition"]');
       photoIntents.set(shots, { kind: "price_check", condition: conditions[select?.value] });
     }
-    const pending = el.closest("[data-bd-pending-order]");
-    if (kind === "sell" && pending) photoIntents.set(shots, JSON.parse(pending.dataset.bdPendingOrder));
+    const pending = el.closest("[data-bd-pending-intent]");
+    if (needsBack(kind) && pending) photoIntents.set(shots, JSON.parse(pending.dataset.bdPendingIntent));
+    else if (kind === "grade") photoIntents.set(shots, { kind: "pre_grade" });
     return shots;
   };
 
@@ -5351,12 +5367,13 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 
   // Tapping a choice sends it as the collector's answer; it gets a tick and the others are set aside.
   document.addEventListener("click", (e) => {
-    const c = e.target.closest && e.target.closest(".bd-choice");
+    const c = e.target.closest && e.target.closest(".bd-choice, button[data-bd-intent]");
     if (!c || !app.contains(c) || c.closest(".bd-choices.is-done")) return;
     const group = c.closest(".bd-choices");
     if (c.dataset.bdIntent) {
       try { tagIntent(e, JSON.parse(c.dataset.bdIntent), choicePhotos.get(c)); } catch { /* Old choices remain plain text. */ }
     }
+    if (!group) return;
     if ("bdChoiceOwn" in c.dataset) {
       e.preventDefault(); e.stopImmediatePropagation();
       const inp = app.querySelector("[data-mori-input]");
@@ -5747,14 +5764,16 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     const w = (wish.data || [])[0];
     if (w) ideas.push({ img: cardPic(w.image_url), kicker: "On your chase list", title: "Chase " + w.name, why: "Set a buy order and Mori watches listings for you.", ask: "Set a buy order for " + w.name });
     const pc = pricedRows[0];
-    if (pc) ideas.push({ img: cardPic(pc.image), kicker: "Worth a look", title: "Should you grade " + pc.name + "?", why: "You checked its price recently.", ask: "Pre-grade my " + pc.name + (pc.number ? " " + pc.number : "") });
+    const gradeAsk = pc && ("Pre-grade my " + pc.name + (pc.number ? " " + pc.number : ""));
+    if (pc) ideas.push({ img: cardPic(pc.image), kicker: "Worth a look", title: "Should you grade " + pc.name + "?", why: "You checked its price recently.", ask: gradeAsk });
     const setPic = set && cards.find((c) => c.set_name === set[0] && c.image_url);
     if (set && set[1] >= 3) ideas.push({ img: cardPic(setPic && setPic.image_url), glyph: "◎", kicker: "Complete a set", title: "Fill the gaps in " + set[0], why: set[1] + " of your cards are from this set.", ask: "Which cards would complete my " + set[0] + " collection?" });
     const loc = getLoc();
     ideas.push({ glyph: "⌖", kicker: "Near you", title: loc && loc.place.includes(",") ? "Card shows near " + loc.place.split(",")[0] : "Card shows near you", why: "Dates, tickets and what to bring.", ask: "When is the next card show near me?" });
     if (pricedRows.length >= 2 || (orders.data || []).length) ideas.push({ glyph: "↗", kicker: "Your market", title: "See which of your cards went up", why: "You keep an eye on prices.", ask: "Which of my cards went up in value this month?" });
     if (!cards.length) ideas.push({ glyph: "+", kicker: "Get started", title: "Bring in your cards", why: "Add them one by one, from a photo, or from Collectr.", ask: "Add cards to my collection" });
-    return P.ideaBoard ? P.ideaBoard({ title, traits: traits.slice(0, 4) }, ideas.slice(0, 8)) : "";
+    const board = P.ideaBoard ? P.ideaBoard({ title, traits: traits.slice(0, 4) }, ideas.slice(0, 8)) : "";
+    return withGradeIntent(board, "data-mori-panel-ask", gradeAsk, pc);
   };
 
   // Goals: kept on the collector's profile (settings.goals); Mori helps work toward each one.
@@ -6154,7 +6173,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     if (intent?.kind === "order" && intent.side === "sell" && ui.photos?.length === 2) ui.sellShots = ui.photos;
     // A photo attached from the chat box goes with this message and shows in its bubble.
     const shot = attachedShot; attachedShot = null;
-    if (shot && !ui.photos && intent?.kind !== "order") {
+    if (shot && !ui.photos && intent?.kind !== "order" && intent?.kind !== "pre_grade") {
       const mine = [...app.querySelectorAll("[data-mori-thread] .cp-mori-body")].pop();
       if (mine) { mine.insertAdjacentHTML("beforeend", '<div class="cp-mori-photos"><span><img src="' + shot + '" alt="Your card"></span></div>'); ui.scrollDown(); }
       ui = Object.assign({}, ui, { photos: [shot] });

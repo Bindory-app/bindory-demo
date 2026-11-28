@@ -24,10 +24,8 @@ const namedCard = z
       .optional(),
   })
   .strict();
-const intentCard = z.union([
-  namedCard,
-  z.object({ id: cardId.regex(/^[a-z\d.-]+-[a-z\d.-]+$/i) }).strict(),
-]);
+const catalogId = z.object({ id: cardId.regex(/^[a-z\d.-]+-[a-z\d.-]+$/i) }).strict();
+const intentCard = z.union([namedCard, catalogId]);
 const priceCheckIntent = z
   .object({
     kind: z.literal("price_check"),
@@ -48,7 +46,14 @@ const orderIntent = z
   })
   .strict();
 export type OrderIntent = z.infer<typeof orderIntent>;
-const moriIntent = z.discriminatedUnion("kind", [priceCheckIntent, orderIntent]);
+const preGradeIntent = z
+  .object({
+    kind: z.literal("pre_grade"),
+    card: z.union([catalogId, namedCard.extend({ set: short.optional() })]).optional(),
+  })
+  .strict();
+export type PreGradeIntent = z.infer<typeof preGradeIntent>;
+const moriIntent = z.discriminatedUnion("kind", [priceCheckIntent, orderIntent, preGradeIntent]);
 
 export function parseMoriIntent(raw: unknown, hasPhotos: boolean) {
   if (raw === undefined) return null;
