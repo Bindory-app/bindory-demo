@@ -29,9 +29,14 @@ export default defineConfig(({ command, mode }) => {
       nitro({
         preset: "vercel",
         vercel: {
+          config: {
+            version: 3,
+            crons: [{ path: "/api/whatsapp-reminders", schedule: "0 12 * * *" }],
+          },
           functionRules: {
             "/api/mori-chat": { maxDuration: 60 },
             "/api/whatsapp-webhook": { maxDuration: 60 },
+            "/api/whatsapp-reminders": { maxDuration: 300 },
           },
         },
       }),

@@ -19,6 +19,7 @@ import { Route as ApiMoriSyncRouteImport } from './routes/api/mori-sync'
 import { Route as ApiTradeupRouteImport } from './routes/api/tradeup'
 import { Route as ApiWhatsappLinkRouteImport } from './routes/api/whatsapp-link'
 import { Route as ApiWhatsappPaymentRouteImport } from './routes/api/whatsapp-payment'
+import { Route as ApiWhatsappRemindersRouteImport } from './routes/api/whatsapp-reminders'
 import { Route as ApiWhatsappWebhookRouteImport } from './routes/api/whatsapp-webhook'
 
 const IndexRoute = IndexRouteImport.update({
@@ -71,6 +72,11 @@ const ApiWhatsappPaymentRoute = ApiWhatsappPaymentRouteImport.update({
   path: '/api/whatsapp-payment',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiWhatsappRemindersRoute = ApiWhatsappRemindersRouteImport.update({
+  id: '/api/whatsapp-reminders',
+  path: '/api/whatsapp-reminders',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiWhatsappWebhookRoute = ApiWhatsappWebhookRouteImport.update({
   id: '/api/whatsapp-webhook',
   path: '/api/whatsapp-webhook',
@@ -88,6 +94,7 @@ export interface FileRoutesByFullPath {
   '/api/tradeup': typeof ApiTradeupRoute
   '/api/whatsapp-link': typeof ApiWhatsappLinkRoute
   '/api/whatsapp-payment': typeof ApiWhatsappPaymentRoute
+  '/api/whatsapp-reminders': typeof ApiWhatsappRemindersRoute
   '/api/whatsapp-webhook': typeof ApiWhatsappWebhookRoute
 }
 export interface FileRoutesByTo {
@@ -101,6 +108,7 @@ export interface FileRoutesByTo {
   '/api/tradeup': typeof ApiTradeupRoute
   '/api/whatsapp-link': typeof ApiWhatsappLinkRoute
   '/api/whatsapp-payment': typeof ApiWhatsappPaymentRoute
+  '/api/whatsapp-reminders': typeof ApiWhatsappRemindersRoute
   '/api/whatsapp-webhook': typeof ApiWhatsappWebhookRoute
 }
 export interface FileRoutesById {
@@ -115,6 +123,7 @@ export interface FileRoutesById {
   '/api/tradeup': typeof ApiTradeupRoute
   '/api/whatsapp-link': typeof ApiWhatsappLinkRoute
   '/api/whatsapp-payment': typeof ApiWhatsappPaymentRoute
+  '/api/whatsapp-reminders': typeof ApiWhatsappRemindersRoute
   '/api/whatsapp-webhook': typeof ApiWhatsappWebhookRoute
 }
 export interface FileRouteTypes {
@@ -130,6 +139,7 @@ export interface FileRouteTypes {
     | '/api/tradeup'
     | '/api/whatsapp-link'
     | '/api/whatsapp-payment'
+    | '/api/whatsapp-reminders'
     | '/api/whatsapp-webhook'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -143,6 +153,7 @@ export interface FileRouteTypes {
     | '/api/tradeup'
     | '/api/whatsapp-link'
     | '/api/whatsapp-payment'
+    | '/api/whatsapp-reminders'
     | '/api/whatsapp-webhook'
   id:
     | '__root__'
@@ -156,6 +167,7 @@ export interface FileRouteTypes {
     | '/api/tradeup'
     | '/api/whatsapp-link'
     | '/api/whatsapp-payment'
+    | '/api/whatsapp-reminders'
     | '/api/whatsapp-webhook'
   fileRoutesById: FileRoutesById
 }
@@ -170,6 +182,7 @@ export interface RootRouteChildren {
   ApiTradeupRoute: typeof ApiTradeupRoute
   ApiWhatsappLinkRoute: typeof ApiWhatsappLinkRoute
   ApiWhatsappPaymentRoute: typeof ApiWhatsappPaymentRoute
+  ApiWhatsappRemindersRoute: typeof ApiWhatsappRemindersRoute
   ApiWhatsappWebhookRoute: typeof ApiWhatsappWebhookRoute
 }
 
@@ -245,6 +258,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiWhatsappPaymentRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/whatsapp-reminders': {
+      id: '/api/whatsapp-reminders'
+      path: '/api/whatsapp-reminders'
+      fullPath: '/api/whatsapp-reminders'
+      preLoaderRoute: typeof ApiWhatsappRemindersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/whatsapp-webhook': {
       id: '/api/whatsapp-webhook'
       path: '/api/whatsapp-webhook'
@@ -266,6 +286,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTradeupRoute: ApiTradeupRoute,
   ApiWhatsappLinkRoute: ApiWhatsappLinkRoute,
   ApiWhatsappPaymentRoute: ApiWhatsappPaymentRoute,
+  ApiWhatsappRemindersRoute: ApiWhatsappRemindersRoute,
   ApiWhatsappWebhookRoute: ApiWhatsappWebhookRoute,
 }
 export const routeTree = rootRouteImport
