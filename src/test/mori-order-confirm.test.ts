@@ -91,7 +91,7 @@ describe("pending order contracts", () => {
   it("keeps the 015 confirmation safeguards and installs both 016 RPCs atomically", () => {
     const base = readFileSync("setup/015_order_confirmation.sql", "utf8");
     const sql = readFileSync("setup/016_pending_orders.sql", "utf8");
-    expect(sql).not.toMatch(/[^\x00-\x7f]/);
+    expect(Buffer.byteLength(sql, "utf8")).toBe(sql.length);
     expect(sql).toContain(
       base.slice(
         base.indexOf("CREATE OR REPLACE FUNCTION"),
