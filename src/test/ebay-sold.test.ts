@@ -65,17 +65,19 @@ describe("Last 3 and last 5 sold averages", () => {
     expect(r.avg_last_5).toBe(30);
     expect(r.n).toBe(5);
   });
-  it("asks the actor for one raw-only search of 3 on the collector's site", async () => {
-    const { actorInput } = await import("@/lib/ebay-sold.server");
+  it("over-fetches one raw-only search on the collector's site", async () => {
+    const { actorInput, SOLD_FETCH_COUNT, SOLD_KEEP_COUNT } =
+      await import("@/lib/ebay-sold.server");
     const { MARKETS } = await import("@/lib/market");
     const input = actorInput({ name: "Umbreon ex", number: "161" }, MARKETS["AU"]!);
+    expect(SOLD_FETCH_COUNT).toBeGreaterThan(SOLD_KEEP_COUNT);
     expect(input.keywords).toHaveLength(1);
     expect(input.keywords[0]).toMatch(/^Umbreon ex 161 -custom -proxy .*-psa .*-graded/);
     expect(input).toMatchObject({
       ebaySite: "ebay.com.au",
       categoryId: "183454",
       conditionId: 4000,
-      count: 3,
+      count: SOLD_FETCH_COUNT,
       aspectFilter: { "Card Condition": "Near Mint or Better" },
     });
     expect(

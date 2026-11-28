@@ -66,7 +66,6 @@ export async function runReadTool(db: DB, name: string, a: Args): Promise<unknow
         card,
         r.pricing,
         marketFromArgs(a),
-        undefined,
         toCondition(a["condition"]) ?? "nm",
       );
       return {

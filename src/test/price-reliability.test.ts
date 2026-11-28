@@ -390,7 +390,6 @@ describe("Parallel marketPrices execution, post-applied floor, and empty-local f
       { id: "sv08-238", name: "Pikachu ex", number: "238" },
       { tcgplayer: { holofoil: { marketPrice: 210 } } },
       MARKETS["AU"]!,
-      undefined,
       "nm",
     );
     expect(silphcoCalls).toBe(1);
@@ -405,7 +404,6 @@ describe("Parallel marketPrices execution, post-applied floor, and empty-local f
       { id: "sv08-238", name: "Pikachu ex", number: "238" },
       { tcgplayer: { holofoil: { marketPrice: 210 } } },
       MARKETS["AU"]!,
-      undefined,
       "lp",
     );
     expect(silphcoCalls).toBe(1);

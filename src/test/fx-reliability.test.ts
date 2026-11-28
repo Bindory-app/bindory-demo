@@ -4,7 +4,7 @@ import { resetBrowseCacheForTest } from "@/lib/ebay-browse.server";
 import { resetLocalSoldCacheForTest } from "@/lib/ebay-sold.server";
 import { resetFxCacheForTest, resolveMarketFx, usdRatesWithMeta, usdTo } from "@/lib/fx.server";
 import { MARKETS } from "@/lib/market";
-import { marketPrices } from "@/lib/mori-prices.server";
+import { marketPrices, priceCardRow } from "@/lib/mori-prices.server";
 import { resetSilphcoCacheForTest } from "@/lib/silphco.server";
 import { Route as FxRoute } from "@/routes/api/fx";
 
@@ -196,12 +196,39 @@ describe("FX failure handling", () => {
 
     expect(out.rate).toBe(1);
     expect(out.forTool.currency).toBe("USD");
+    expect(out.forTool.fx_fallback).toBe(true);
     expect(out.forTool.price_points).toEqual({ lowest_listing: 900, market: 1000, mid: 1100 });
     expect(out.local).toBeNull();
     // Fell back to USD SilphCo sold price instead of showing A$1500 as US$1500.
     expect(out.forTool.recent_sold).toEqual({
       condition: "Near mint or better",
       raw: { value: 950, status: "ok" },
+    });
+  });
+
+  it("labels the price card in US$ when the prices fell back to US$", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          id: "sv08.5-161",
+          localId: "161",
+          name: "Umbreon ex",
+          rarity: "Special illustration rare",
+          set: { id: "sv08.5", name: "Prismatic Evolutions" },
+        }),
+      ),
+    );
+    const row = await priceCardRow("sv08.5-161", MARKETS["AU"]!, {
+      currency: "USD",
+      fx_fallback: true,
+      price_points: { lowest_listing: 900, market: 1000, mid: 1100 },
+    });
+    expect(row?.content).toBe("Price check: Umbreon ex 161, US$1000");
+    expect((row?.payload as { market: unknown }).market).toMatchObject({
+      currency: "USD",
+      symbol: "US$",
+      ebay: "ebay.com.au",
     });
   });
 });

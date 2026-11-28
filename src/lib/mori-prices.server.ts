@@ -10,14 +10,12 @@ export async function marketPrices(
   card: { id: string; name: string; number: string },
   pricing: Parameters<typeof priceScale>[0],
   market: Market,
-  /** Sales the agent read with the Apify actor itself (used instead of the server's lookup). */
-  agentSales?: unknown[],
   /** The raw card's condition; sold prices are for this condition only. */
   condition: import("./ebay-sold.server").Condition = "nm",
 ) {
   const [
     { resolveMarketFx },
-    { localSoldPrices, summarise, CONDITIONS },
+    { localSoldPrices, CONDITIONS },
     { browseCandidates, pickBrowseLowest },
   ] = await Promise.all([
     import("./fx.server"),
@@ -25,29 +23,12 @@ export async function marketPrices(
     import("./ebay-browse.server"),
   ]);
   const scale = priceScale(pricing);
-  const sales = (agentSales ?? []).filter(
-    (
-      x,
-    ): x is {
-      title?: string;
-      soldPrice?: string | number;
-      soldCurrency?: string;
-      endedAt?: string;
-    } => Boolean(x) && typeof x === "object",
-  );
-  // Without item locations the sales can't be limited to the collector's country, so the server
-  // looks them up itself instead.
-  const located = sales.some((x) => "itemLocation" in x);
-
   // Run independent work in parallel: FX and local sold listings start immediately (local sold
   // queries the collector's eBay site in its native currency and does not need FX). Browse starts
   // as soon as FX resolves using only the market-price floor so it runs alongside sold listings;
   // the sold-based floor is applied afterwards to the returned candidates.
   const fxPromise = resolveMarketFx(market);
-  const localPromise =
-    sales.length && located
-      ? Promise.resolve(summarise(sales.slice(0, 60), card.number, market, condition))
-      : localSoldPrices(card, market, condition);
+  const localPromise = localSoldPrices(card, market, condition);
   const browsePromise = fxPromise.then(({ market: effMarket, rate: fxRate }) => {
     const marketFloor =
       typeof scale?.market === "number"
@@ -119,6 +100,8 @@ export async function marketPrices(
     listings,
     forTool: {
       currency: effMarket.currency,
+      // Set when no exchange rate was available, so every price here is in US$ instead.
+      ...(fx.fallbackToUsd ? { fx_fallback: true } : {}),
       ebay_site: effMarket.ebay,
       listings: {
         condition: label,
@@ -141,12 +124,10 @@ export async function marketPrices(
 }
 
 /** 7-day vs 30-day average price change for these cards, biggest rise first. A few lookups at a
- *  time, retrying once, so a busy moment at TCGdex does not lose them all. */
+ *  time (the catalogue client retries on its own), so a busy moment at TCGdex does not lose them
+ *  all. */
 export async function priceMoves(ids: string[]) {
-  const lookup = (id: string) =>
-    getCardPricing(id).catch(() =>
-      new Promise((r) => setTimeout(r, 400)).then(() => getCardPricing(id).catch(() => null)),
-    );
+  const lookup = (id: string) => getCardPricing(id).catch(() => null);
   const priced: Awaited<ReturnType<typeof lookup>>[] = [];
   for (let i = 0; i < ids.length; i += 6)
     priced.push(...(await Promise.all(ids.slice(i, i + 6).map(lookup))));
@@ -179,8 +160,9 @@ export async function priceCardRow(
   if (!r) return null;
   // Reuse the prices the agent just fetched for this market; look them up only if missing.
   const tool =
-    fromTool && fromTool["currency"] === market.currency
+    fromTool && (fromTool["currency"] === market.currency || fromTool["fx_fallback"] === true)
       ? (fromTool as {
+          currency?: string;
           price_points?: Record<string, number | null> | null;
           recent_sold?: Record<string, unknown> | null;
           listings?: Record<string, unknown> | null;
@@ -190,10 +172,14 @@ export async function priceCardRow(
             { id: r.card.id, name: r.card.name, number: r.card.localId },
             r.pricing,
             market,
-            undefined,
             condition,
           )
         ).forTool;
+  // Without an exchange rate the prices come back in US$; label them as such.
+  const shown: Market =
+    tool.currency === "USD" && market.currency !== "USD"
+      ? { ...market, currency: "USD", symbol: "US$" }
+      : market;
   const pts = tool.price_points ?? null;
   const soldAll = (tool.recent_sold ?? null) as Record<string, unknown> | null;
   const sold = soldAll as Record<
@@ -225,7 +211,7 @@ export async function priceCardRow(
   return {
     role: "mori",
     kind: "price",
-    content: `Price check: ${r.card.name} ${r.card.localId}${typeof headline === "number" ? `, ${market.symbol}${Math.round(headline)}` : ""}`,
+    content: `Price check: ${r.card.name} ${r.card.localId}${typeof headline === "number" ? `, ${shown.symbol}${Math.round(headline)}` : ""}`,
     payload: {
       card: {
         id: r.card.id,
@@ -237,8 +223,8 @@ export async function priceCardRow(
       },
       // Everything here is already in the collector's currency.
       market: {
-        currency: market.currency,
-        symbol: market.symbol,
+        currency: shown.currency,
+        symbol: shown.symbol,
         ebay: market.ebay,
         country: market.name.replace(/^the\s+/i, ""),
       },
