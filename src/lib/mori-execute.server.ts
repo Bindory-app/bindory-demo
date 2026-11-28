@@ -1,6 +1,6 @@
 import type { Json } from "@/integrations/supabase/types";
 import { asObject, stringArg, type Args, type DB, type MoriRowDraft } from "./mori-context.server";
-import { buildProposal, gradeReport } from "./mori-proposals.server";
+import { buildProposal, gradeReport, gradeReportRow } from "./mori-proposals.server";
 import { runReadTool } from "./mori-read-tools.server";
 import { isWriteTool, proposalTitle, type ProposalPayload } from "./mori-tools";
 import type { TurnTimer } from "./mori-timing.server";
@@ -61,17 +61,13 @@ export async function executeMoriTool(
   let result: unknown;
   if (name === "pre_grade_report") {
     const report = gradeReport(args);
-    if (!("error" in report) && ctx.lastCard) report.card = ctx.lastCard;
-    if ("error" in report) result = report;
+    if (!report)
+      result = {
+        error: "Give 2 to 4 distinct whole grades from 1 to 10 with probabilities and Mori's take.",
+      };
     else {
-      rows.push({
-        role: "mori",
-        kind: "grade",
-        content: `Pre-grade${report.card ? ` for ${report.card}` : ""}: ${report.outcomes
-          .map((o) => `${o.grade} (${o.probability}%)`)
-          .join(", ")}. ${report.take}`,
-        payload: report as unknown as Json,
-      });
+      if (ctx.lastCard) report.card = ctx.lastCard;
+      rows.push(gradeReportRow(report));
       result = { shown_to_user: true, note: "The report is on screen." };
       stop = true;
     }

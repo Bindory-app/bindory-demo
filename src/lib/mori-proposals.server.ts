@@ -1,4 +1,5 @@
-import { stringArg, type Args, type DB } from "./mori-context.server";
+import type { Json } from "@/integrations/supabase/types";
+import { asObject, stringArg, type Args, type DB, type MoriRowDraft } from "./mori-context.server";
 import { isWriteTool, type Proposal, type ProposalCard } from "./mori-tools";
 import { cardImage, getCard, getCardPricing, findCards, usdRange } from "./tcgdex";
 import { validateWriteArgs, ownPhotoPath, writeSchemas } from "./mori-validation";
@@ -164,23 +165,46 @@ export function gradeReport(a: Args) {
     const n = Number(v);
     return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : undefined;
   };
-  const outcomes = (Array.isArray(a["outcomes"]) ? (a["outcomes"] as Args[]) : [])
-    .map((o) => ({
-      grade: num(o["grade"], 1, 10),
-      probability: num(o["probability"], 0, 100) ?? 0,
-      reason: stringArg(o["reason"])?.slice(0, 120) ?? "",
-    }))
-    .filter(
-      (o): o is { grade: number; probability: number; reason: string } => o.grade !== undefined,
-    )
-    .slice(0, 4);
+  const list = a["outcomes"];
   const take = stringArg(a["take"])?.slice(0, 400);
-  if (outcomes.length < 2 || !take)
-    return { error: "Give at least two likely grades and Mori's take." };
-  const total = outcomes.reduce((n, o) => n + o.probability, 0) || 1;
-  outcomes.forEach((o) => (o.probability = Math.round((o.probability / total) * 100)));
+  if (!Array.isArray(list) || list.length < 2 || list.length > 4 || !take) return null;
+  const seen = new Set<number>();
+  const wholeGrade = (v: unknown): v is number =>
+    typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 10;
+  const weighted = [];
+  for (const item of list) {
+    const { grade, probability, reason } = asObject(item);
+    if (
+      !wholeGrade(grade) ||
+      seen.has(grade) ||
+      typeof probability !== "number" ||
+      !Number.isFinite(probability) ||
+      probability < 0 ||
+      probability > 100
+    )
+      return null;
+    seen.add(grade);
+    if (probability > 0)
+      weighted.push({ grade, probability, reason: stringArg(reason)?.slice(0, 120) ?? "" });
+  }
+  if (weighted.length < 2) return null;
+  // Largest remainder: allocate whole percents first, then the remaining points to the
+  // largest fractional shares (stable input order breaks a tie).
+  const total = weighted.reduce((sum, o) => sum + o.probability, 0);
+  const shares = weighted.map((o) => {
+    const exact = (o.probability / total) * 100;
+    o.probability = Math.floor(exact);
+    return { o, remainder: exact - o.probability };
+  });
+  const left = 100 - weighted.reduce((sum, o) => sum + o.probability, 0);
+  for (const { o } of shares.sort((a, b) => b.remainder - a.remainder).slice(0, left))
+    o.probability++;
+  const outcomes = weighted.filter((o) => o.probability > 0);
+  if (outcomes.length < 2) return null;
   outcomes.sort((x, y) => y.grade - x.grade);
   const companies = ["psa", "cgc", "bgs", "tag"] as const;
+  const overall = asObject(a["overall"]);
+  if (companies.some((c) => overall[c] != null && !wholeGrade(overall[c]))) return null;
   const block = (v: unknown, lo: number, hi: number) =>
     Object.fromEntries(
       companies.map((c) => [
@@ -208,5 +232,24 @@ export function gradeReport(a: Args) {
     ),
     overall: block(a["overall"], 1, 10),
     notes: stringArg(a["notes"])?.slice(0, 160),
+  };
+}
+
+/** Both pre-grade paths persist the same row for the existing grade card. */
+export function gradeReportRow(
+  report: NonNullable<ReturnType<typeof gradeReport>>,
+  reference?: {
+    card_id?: string;
+    raw_price?: { amount: number; currency: string };
+    price_note?: string;
+  },
+): MoriRowDraft {
+  return {
+    role: "mori",
+    kind: "grade",
+    content: `Pre-grade${report.card ? ` for ${report.card}` : ""}: ${report.outcomes
+      .map((o) => `${o.grade} (${o.probability}%)`)
+      .join(", ")}. ${report.take}`,
+    payload: { ...report, ...reference } as unknown as Json,
   };
 }
