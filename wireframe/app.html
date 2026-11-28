@@ -4960,9 +4960,12 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
         // Mori asked a question: its likely answers, one tap each (like option cards).
         const list = (r.payload && r.payload.choices) || [];
         if (list.length) {
-          const html = '<div class="bd-choices">' + list.map((c) => /…$|\.\.\.$/.test(c)
-            ? '<button type="button" class="bd-choice is-own" data-bd-choice-own>' + esc(c) + "</button>"
-            : '<button type="button" class="bd-choice" data-mori-ask="' + esc(c) + '">' + esc(c) + "</button>").join("") + "</div>";
+          const html = '<div class="bd-choices">' + list.map((c) => {
+            const label = typeof c === "string" ? c : c.label;
+            if (typeof c === "string" && /…$|\.\.\.$/.test(c)) return '<button type="button" class="bd-choice is-own" data-bd-choice-own>' + esc(label) + "</button>";
+            const intent = c && c.intent ? ' data-bd-intent="' + esc(JSON.stringify(c.intent)) + '"' : "";
+            return '<button type="button" class="bd-choice" data-mori-ask="' + esc(label) + '"' + intent + '>' + esc(label) + "</button>";
+          }).join("") + "</div>";
           if (last) last.querySelector(".cp-mori-body").insertAdjacentHTML("beforeend", html);
           else ui.say(html);
           ui.scrollDown();
@@ -5125,6 +5128,16 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   // The right picker for a tap: camera (phone camera, or the laptop's live view) or the album/files.
   const openPicker = (camera, multiple) => (camera && !isPhone() ? webcamPhoto() : pickImages(camera, multiple));
   const needsBack = (kind) => kind === "grade" || kind === "sell";
+  // The base wireframe calls bdLiveRoute synchronously from its submit/click handler.
+  // Bind an intent to that DOM event (not to matching text or the next message).
+  let intentEvent = null;
+  function tagIntent(event, intent) {
+    const entry = { event, intent }; intentEvent = entry;
+    setTimeout(() => { if (intentEvent === entry) intentEvent = null; }, 0);
+  }
+  const conditions = { "Near mint or better": "near_mint", "Lightly played": "lightly_played", "Moderately played": "moderately_played", "Heavily played": "heavily_played" };
+  // Photo selection is async; its intent belongs to this exact attachment array.
+  const photoIntents = new WeakMap();
   let pendingPick = null;
   window.bdPickCardPhotos = async (el, kind) => {
     const camera = !/upload/i.test(el.textContent || "");
@@ -5140,6 +5153,10 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     }
     const shots = (await Promise.all(files.map(shrinkImage))).filter(Boolean);
     if (shots.length < files.length || !shots.length) { alert("That photo could not be opened. Please try a JPEG or PNG photo."); return false; }
+    if (kind === "price") {
+      const select = el.closest(".cp-mori-body")?.querySelector('form[data-fill="price"] select[name="condition"]');
+      photoIntents.set(shots, { kind: "price_check", condition: conditions[select?.value] });
+    }
     return shots;
   };
 
@@ -5234,6 +5251,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
         .replace(/\s+/g, " ").trim();
       box.remove();
       const form = inp.closest("form");
+      if (/^price check:?\s+\[(?:card name\]\s+\[card number|card \+ number)\]$/i.test(tpl.trim()))
+        tagIntent(e, { kind: "price_check", card: { name, number } });
       if (form && form.requestSubmit) form.requestSubmit(); else inp.focus();
     });
   }
@@ -5292,6 +5311,9 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     const c = e.target.closest && e.target.closest(".bd-choice");
     if (!c || !app.contains(c) || c.closest(".bd-choices.is-done")) return;
     const group = c.closest(".bd-choices");
+    if (c.dataset.bdIntent) {
+      try { tagIntent(e, JSON.parse(c.dataset.bdIntent)); } catch { /* Old choices remain plain text. */ }
+    }
     if ("bdChoiceOwn" in c.dataset) {
       e.preventDefault(); e.stopImmediatePropagation();
       const inp = app.querySelector("[data-mori-input]");
@@ -5337,11 +5359,20 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
   }, true);
   // While Mori answers, Enter does not send; a photo sent with no words goes to Mori as a price check.
   document.addEventListener("submit", (e) => {
+    // Observe the named fields before the base form validates, disables them and calls send().
+    if (e.target.matches?.('form[data-fill="price"]')) {
+      const f = e.target.elements;
+      const name = f.name.value.trim().replace(/\s+/g, " "), num = f.num.value.trim().toUpperCase(), of = f.of.value.trim().toUpperCase();
+      tagIntent(e, { kind: "price_check", card: { name, number: of ? num + "/" + of : num }, condition: conditions[f.condition.value] });
+      return;
+    }
     if (!e.target.matches || !e.target.matches("[data-mori-form]")) return;
     if (liveRun) { e.preventDefault(); e.stopImmediatePropagation(); return; }
     const inp = e.target.querySelector("[data-mori-input]");
-    if (attachedShot && inp && !inp.value.trim())
+    if (attachedShot && inp && !inp.value.trim()) {
+      if (!shotForAdd) tagIntent(e, { kind: "price_check" });
       inp.value = shotForAdd ? "Please add this card to my collection. Here is a photo of it." : "Here is a photo of my card. What is this card worth?";
+    }
     if (attachedShot) shotForAdd = false;
   }, true);
 
@@ -6052,6 +6083,8 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
 
   // Called from the wireframe's own route() (patched at build time) for typed and tapped messages.
   window.bdLiveRoute = async (text, ui) => {
+    const intent = photoIntents.get(ui.photos) || (intentEvent && intentEvent.event.eventPhase !== Event.NONE ? intentEvent.intent : undefined);
+    intentEvent = null;
     // A photo attached from the chat box goes with this message and shows in its bubble.
     const shot = attachedShot; attachedShot = null;
     if (shot && !ui.photos) {
@@ -6082,7 +6115,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
         signal: run.signal,
-        body: JSON.stringify(Object.assign({ message: text, since: chatSince, country: myCountry() }, loc ? { location: loc.place } : {}, ui.photos && ui.photos.length ? { photos: ui.photos } : {})),
+        body: JSON.stringify(Object.assign({ message: text, intent, since: chatSince, country: myCountry() }, loc ? { location: loc.place } : {}, ui.photos && ui.photos.length ? { photos: ui.photos } : {})),
       });
       clearTimeout(headerTimer); headerTimer = null;
       if (!res.ok || !res.body) throw new Error("unavailable");
