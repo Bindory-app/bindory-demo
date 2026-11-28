@@ -58,7 +58,9 @@ function plausibleMatches(query: CardQuery, result: unknown): Candidate[] {
   const possible = matches.filter(
     (c) =>
       (!num || c.number.toLowerCase().replace(/^0+(?=\d)/, "") === num) &&
-      (!total || !c.set_size || String(c.set_size) === total),
+      // The official numeric set size cannot verify a subset code such as "TG30".
+      (!total || !/^\d+$/.test(total) || !c.set_size || String(c.set_size) === total) &&
+      (!query.set || c.set.toLowerCase().includes(query.set.toLowerCase())),
   );
   if (!num) return possible;
   const exact = possible.filter((c) => c.name.toLowerCase() === query.name.toLowerCase());

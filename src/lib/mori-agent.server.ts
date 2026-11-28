@@ -247,7 +247,7 @@ export async function runMori({
     turns: for (let turn = 0; turn < 6; turn++) {
       // Questions about the collector's own cards, prices or plans must look at real data first,
       // so the first step has to use a tool (the model sometimes answers from guesswork otherwise).
-      const mustUseTool = turn === 0 && NEEDS_DATA.test(message);
+      const mustUseTool = turn === 0 && !(intent && rows.length) && NEEDS_DATA.test(message);
       const modelStarted = Date.now();
       let activeModel = "";
       let res: ResponsesResponse | undefined;

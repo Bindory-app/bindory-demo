@@ -29,11 +29,13 @@ const priceCheckIntent = z
   })
   .strict();
 export type PriceCheckIntent = z.infer<typeof priceCheckIntent>;
+const moriIntent = z.discriminatedUnion("kind", [priceCheckIntent]);
 
 export function parseMoriIntent(raw: unknown, hasPhotos: boolean) {
   if (raw === undefined) return null;
-  const parsed = priceCheckIntent.safeParse(raw);
-  if (parsed.success && (parsed.data.card || hasPhotos)) return parsed.data;
+  const parsed = moriIntent.safeParse(raw);
+  if (parsed.success && (parsed.data.kind !== "price_check" || parsed.data.card || hasPhotos))
+    return parsed.data;
   // Never log the message, catalogue fields or image data.
   console.warn("Invalid or unsupported Mori intent; using chat");
   return null;

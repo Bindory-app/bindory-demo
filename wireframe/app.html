@@ -6097,7 +6097,7 @@ body[data-mode="dark"] #clickable-prototype .cp-mori-askbar{background:linear-gr
     if (/^start a trade-?up (challenge|game)\.?$/i.test(text.trim())) { ui.say(tradeupStartHTML()); ui.scrollDown(); return true; }
     // "Near me" questions need the collector's location first (the phone asks once).
     let loc = getLoc();
-    if (!loc && NEEDS_LOC.test(text)) {
+    if (!intent && !loc && NEEDS_LOC.test(text)) {
       const place = await askLocation(ui, text);
       if (!place) return true; // waiting for the collector to allow location or type a city
       loc = { place };
