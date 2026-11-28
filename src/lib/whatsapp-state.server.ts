@@ -110,16 +110,33 @@ export async function paymentLink(nonce: string): Promise<Linked | null> {
   if (error) throw error;
   return data as Linked | null;
 }
-export async function claimReminder(l: Linked, allowTemplate = false) {
+type ReminderCandidate = Pick<Linked, "user_id" | "channel_id">;
+export async function reminderCandidates(
+  after: string | null,
+  allowTemplate: boolean,
+  limit: number,
+) {
+  const { data, error } = await store
+    .rpc("whatsapp_reminder_candidates", {
+      p_after: after,
+      p_template: allowTemplate,
+      p_limit: limit,
+    })
+    .abortSignal(AbortSignal.timeout(8000));
+  if (error || !Array.isArray(data)) throw new Error("Reminder candidates unavailable");
+  return data as ReminderCandidate[];
+}
+export async function claimReminder(l: ReminderCandidate, allowTemplate = false) {
   const { data, error } = await store
     .rpc("claim_whatsapp_reminder", {
       p_user: l.user_id,
       p_channel: l.channel_id,
       p_template: allowTemplate,
     })
+    .abortSignal(AbortSignal.timeout(8000))
     .maybeSingle();
   if (error) throw error;
-  return data as (Address & { freeform_until: string }) | null;
+  return data as (Address & { freeform_until: string | null }) | null;
 }
 export async function unlinkWhatsApp(l: Linked) {
   const { error } = await store

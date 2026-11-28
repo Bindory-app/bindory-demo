@@ -7,6 +7,8 @@ import {
   startLink,
   touchLink,
   setStep,
+  claimReminder,
+  reminderCandidates,
   type Linked,
 } from "@/lib/whatsapp-state.server";
 import { whatsappNonce } from "@/lib/mori-signing.server";
@@ -18,6 +20,7 @@ const q = vi.hoisted(() => ({
   upsert: vi.fn(),
   insert: vi.fn(),
   rpc: vi.fn(),
+  abortSignal: vi.fn(),
   maybeSingle: vi.fn(),
 }));
 vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: q }));
@@ -67,6 +70,27 @@ it("de-duplicates a hashed id and fails closed on ledger errors", async () => {
   expect(await firstDelivery(m.id)).toBe(false);
   await expect(firstDelivery(m.id)).rejects.toThrow("offline");
   expect(q.insert).toHaveBeenCalledWith({ id: expect.stringMatching(/^[a-f0-9]{64}$/) });
+});
+it("passes the cursor, template flag and link identity to service-only bookkeeping", async () => {
+  q.rpc.mockReturnValueOnce(q);
+  q.abortSignal.mockResolvedValueOnce({ data: [l] });
+  expect(await reminderCandidates("prior-user", false, 50)).toEqual([l]);
+  expect(q.rpc).toHaveBeenCalledWith("whatsapp_reminder_candidates", {
+    p_after: "prior-user",
+    p_template: false,
+    p_limit: 50,
+  });
+  q.rpc.mockReturnValueOnce(q);
+  q.abortSignal.mockReturnValueOnce(q);
+  q.maybeSingle.mockResolvedValueOnce({ data: null });
+  expect(await claimReminder(l, true)).toBeNull();
+  expect(q.abortSignal).toHaveBeenCalledTimes(2);
+  expect(q.abortSignal).toHaveBeenCalledWith(expect.any(AbortSignal));
+  expect(q.rpc).toHaveBeenCalledWith("claim_whatsapp_reminder", {
+    p_user: "uid",
+    p_channel: "cid",
+    p_template: true,
+  });
 });
 it("uses the locked database photo-pair RPC, not two client statements, and CASes steps", async () => {
   q.rpc.mockReturnValueOnce(q);

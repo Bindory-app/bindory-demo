@@ -6,6 +6,7 @@ import { marketFor } from "@/lib/market";
 import type { OrderIntent } from "@/lib/mori-validation";
 import {
   GatewayError,
+  REASONING_HEADROOM_TOKENS,
   type ResponsesRequest,
   type ResponsesResponse,
 } from "@/lib/ai-gateway.server";
@@ -250,7 +251,7 @@ describe("structured pre-grading", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       tool_choice: "required",
-      max_output_tokens: 2000,
+      max_output_tokens: 2000 + REASONING_HEADROOM_TOKENS,
       tools: [{ name: "pre_grade_report" }],
     });
     expect(JSON.stringify(requests[0]?.tools)).not.toContain('"reading"');
@@ -1178,7 +1179,7 @@ describe("explicit price-check turns", () => {
     expect(requests[0]).toMatchObject({
       tool_choice: "required",
       tools: [{ name: "identify_card" }],
-      max_output_tokens: 500,
+      max_output_tokens: 500 + REASONING_HEADROOM_TOKENS,
     });
     expect(JSON.stringify(requests[0]?.input)).toContain(images[0]);
     expect(findCards).toHaveBeenCalledWith("Pikachu", "25/102", "Base Set");
