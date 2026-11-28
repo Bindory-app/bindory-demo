@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseRetryAfterMs, upstreamFetch } from "@/lib/upstream-fetch";
+import { parseRetryAfterMs, upstreamFetch, upstreamFetchJson } from "@/lib/upstream-fetch";
 import { localSoldPrices, resetLocalSoldCacheForTest } from "@/lib/ebay-sold.server";
 import { MARKETS } from "@/lib/market";
 
@@ -204,5 +204,59 @@ describe("Apify sold-listings retry guard", () => {
     );
     expect(r2).toBeNull();
     expect(err500Mock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("upstreamFetchJson body deadline", () => {
+  it("times out when response headers arrive promptly but the JSON body stalls", async () => {
+    const fetchMock = vi.fn(async () => {
+      const stalledBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"partial":'));
+          // Never closes or sends the rest of the JSON payload.
+        },
+      });
+      return new Response(stalledBody, {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const p = upstreamFetchJson("https://example.com/slow-body", {
+      timeoutMs: 1_500,
+      maxAttempts: 1,
+    });
+    const handled = p.catch((e: unknown) => e);
+
+    await vi.advanceTimersByTimeAsync(1_600);
+    const err = await handled;
+    expect((err as Error).name).toBe("TimeoutError");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a 503 response and parses JSON under the deadline", async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls++;
+      if (calls === 1) return new Response("busy", { status: 503 });
+      return new Response(JSON.stringify({ ok: true, items: [1, 2] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const p = upstreamFetchJson<{ ok: boolean; items: number[] }>("https://example.com/json", {
+      timeoutMs: 2_000,
+      maxAttempts: 2,
+      baseDelayMs: 50,
+    });
+    await vi.advanceTimersByTimeAsync(200);
+    const res = await p;
+    expect(res.ok).toBe(true);
+    expect(res.status).toBe(200);
+    expect(res.data).toEqual({ ok: true, items: [1, 2] });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

@@ -18,7 +18,7 @@ import { CONDITIONS, type Condition } from "./ebay-sold.server";
 import { pickLowest, type Listing, type ScrapedItem } from "./ebay-listings.server";
 import { usdRates } from "./fx.server";
 import type { Market } from "./market";
-import { upstreamFetch } from "./upstream-fetch";
+import { upstreamFetchJson } from "./upstream-fetch";
 
 const API = "https://api.ebay.com";
 const BROWSE_TTL_MS = 60 * 60 * 1000;
@@ -58,10 +58,10 @@ export type BrowseCandidates = {
 };
 
 export type BrowseCandidatesLookup =
-  | { status: "ok"; data: BrowseCandidates }
-  | { status: "empty"; data: BrowseCandidates }
-  | { status: "error"; data: null }
-  | { status: "unconfigured"; data: null };
+  | { status: "ok"; data: BrowseCandidates; fromCache?: boolean }
+  | { status: "empty"; data: BrowseCandidates; fromCache?: boolean }
+  | { status: "error"; data: null; fromCache?: boolean }
+  | { status: "unconfigured"; data: null; fromCache?: boolean };
 
 type Money = { value?: string; currency?: string };
 type BrowseItem = {
@@ -105,7 +105,10 @@ async function appToken(): Promise<string> {
   const res = await tokenCache.getOrLoad("oauth", async () => {
     const id = process.env["EBAY_CLIENT_ID"]!.trim();
     const secret = process.env["EBAY_CLIENT_SECRET"]!.trim();
-    const r = await upstreamFetch(`${API}/identity/v1/oauth2/token`, {
+    const r = await upstreamFetchJson<{
+      access_token?: string;
+      expires_in?: number;
+    }>(`${API}/identity/v1/oauth2/token`, {
       method: "POST",
       headers: {
         Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`,
@@ -117,13 +120,9 @@ async function appToken(): Promise<string> {
       baseDelayMs: 250,
       maxDelayMs: 2_000,
     });
-    const j = (await r.json().catch(() => ({}))) as {
-      access_token?: string;
-      expires_in?: number;
-      error_description?: string;
-    };
+    const j = r.data ?? {};
     if (!r.ok || !j.access_token) {
-      throw new Error(`eBay token ${r.status} ${j.error_description ?? ""}`);
+      throw new Error(`eBay token ${r.status}`);
     }
     const ttlMs = Math.max(60, (j.expires_in ?? 7200) - 300) * 1000;
     return { kind: "hit", value: j.access_token, ttlMs };
@@ -196,7 +195,7 @@ async function search(
   allowTokenRefresh = true,
 ): Promise<BrowseItem[]> {
   const mp = MARKETPLACE[market.country] ?? MARKETPLACE["US"]!;
-  const res = await upstreamFetch(url, {
+  const res = await upstreamFetchJson<{ itemSummaries?: BrowseItem[] }>(url, {
     headers: {
       Authorization: `Bearer ${await appToken()}`,
       "X-EBAY-C-MARKETPLACE-ID": mp.id,
@@ -208,13 +207,11 @@ async function search(
     maxDelayMs: 2_000,
   });
   if (res.status === 401 && allowTokenRefresh) {
-    void res.body?.cancel().catch(() => {});
     await tokenCache.delete("oauth");
     return search(url, market, false);
   }
-  if (!res.ok) throw new Error(`eBay search ${res.status} ${(await res.text()).slice(0, 200)}`);
-  const j = (await res.json()) as { itemSummaries?: BrowseItem[] };
-  return j.itemSummaries ?? [];
+  if (!res.ok) throw new Error(`eBay search ${res.status}`);
+  return res.data?.itemSummaries ?? [];
 }
 
 /** Picks the lowest worldwide and local listings from cached Browse candidates using `floor`. */
@@ -294,8 +291,8 @@ export async function browseCandidates(
     res = await load();
   }
 
-  if (!res.ok) return { status: "error", data: null };
-  return { status: res.empty ? "empty" : "ok", data: res.value };
+  if (!res.ok) return { status: "error", data: null, fromCache: false };
+  return { status: res.empty ? "empty" : "ok", data: res.value, fromCache: res.fromCache };
 }
 
 /** Lowest listings worldwide and in the collector's country; null without keys or on error. */

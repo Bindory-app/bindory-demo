@@ -58,6 +58,7 @@ describe("FX failure handling", () => {
       rate: 1,
       stale: false,
       fallbackToUsd: true,
+      fromCache: false,
     });
   });
 
@@ -83,6 +84,7 @@ describe("FX failure handling", () => {
       rates: { USD: 1, AUD: 1.54, GBP: 0.79 },
       stale: true,
       ok: true,
+      fromCache: true,
     });
 
     const resolvedPromise = resolveMarketFx(MARKETS["AU"]!);
@@ -92,6 +94,7 @@ describe("FX failure handling", () => {
       rate: 1.54,
       stale: true,
       fallbackToUsd: false,
+      fromCache: true,
     });
   });
 

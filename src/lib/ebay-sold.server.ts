@@ -17,7 +17,7 @@
  */
 import { createCache, type SharedStore } from "./cache.server";
 import { MARKETS, type Market } from "./market";
-import { upstreamFetch } from "./upstream-fetch";
+import { upstreamFetchJson } from "./upstream-fetch";
 
 const ACTOR = "oTtB3VgfuE9GtxQt2";
 /**
@@ -88,10 +88,10 @@ export type LocalSold = {
 };
 
 export type LocalSoldLookup =
-  | { status: "ok"; data: LocalSold }
-  | { status: "empty"; data: LocalSold }
-  | { status: "error"; data: null }
-  | { status: "unconfigured"; data: null };
+  | { status: "ok"; data: LocalSold; fromCache?: boolean }
+  | { status: "empty"; data: LocalSold; fromCache?: boolean }
+  | { status: "error"; data: null; fromCache?: boolean }
+  | { status: "unconfigured"; data: null; fromCache?: boolean };
 
 type Sale = {
   title?: string;
@@ -282,7 +282,7 @@ export async function localSoldPricesLookup(
       try {
         // Paid run-sync POST (~US$0.025/lookup): never retry after a timeout, network error, or
         // slow status where an actor run may have started; only retry fast 429/502/503 rejections.
-        const r = await upstreamFetch(
+        const r = await upstreamFetchJson<Sale[]>(
           `https://api.apify.com/v2/acts/${ACTOR}/run-sync-get-dataset-items?timeout=${APIFY_ACTOR_TIMEOUT_SEC}`,
           {
             method: "POST",
@@ -302,7 +302,7 @@ export async function localSoldPricesLookup(
           console.error("Apify sold prices failed", r.status);
           return { kind: "error" };
         }
-        const items = (await r.json().catch(() => null)) as Sale[] | null;
+        const items = r.data;
         if (!Array.isArray(items)) return { kind: "error" };
         const value = summarise(items, card.number, market, condition);
         return hasAnySales(value) ? { kind: "hit", value } : { kind: "empty", value };
@@ -313,8 +313,8 @@ export async function localSoldPricesLookup(
     },
     { now },
   );
-  if (!res.ok) return { status: "error", data: null };
-  return { status: res.empty ? "empty" : "ok", data: res.value };
+  if (!res.ok) return { status: "error", data: null, fromCache: false };
+  return { status: res.empty ? "empty" : "ok", data: res.value, fromCache: res.fromCache };
 }
 
 /** Sold prices for one card on the collector's eBay site; null when unavailable. */

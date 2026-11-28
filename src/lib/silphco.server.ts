@@ -7,7 +7,7 @@
  * empty responses are cached briefly, and errors are never cached.
  */
 import { createCache, type SharedStore } from "./cache.server";
-import { upstreamFetch } from "./upstream-fetch";
+import { upstreamFetchJson } from "./upstream-fetch";
 
 const API = "https://silphcoanalytics.xyz/api/v3";
 const TTL_MS = 6 * 60 * 60 * 1000;
@@ -31,10 +31,10 @@ export type EbaySold = {
 };
 
 export type SilphcoLookup =
-  | { status: "ok"; data: EbaySold }
-  | { status: "empty"; data: null }
-  | { status: "error"; data: null }
-  | { status: "unconfigured"; data: null };
+  | { status: "ok"; data: EbaySold; fromCache?: boolean }
+  | { status: "empty"; data: null; fromCache?: boolean }
+  | { status: "error"; data: null; fromCache?: boolean }
+  | { status: "unconfigured"; data: null; fromCache?: boolean };
 
 const GRADES = [
   ["raw", undefined],
@@ -85,32 +85,33 @@ export async function ebaySoldPricesLookup(
     id,
     async () => {
       try {
-        const r = await upstreamFetch(`${API}/price/batch`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${key}`,
-            "Content-Type": "application/json",
-            Accept: "application/json",
+        const r = await upstreamFetchJson<{ data?: { results?: unknown[] } }>(
+          `${API}/price/batch`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${key}`,
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              items: GRADES.map(([, grade]) =>
+                grade ? { tcg_card_id: id, grade_key: grade } : { tcg_card_id: id },
+              ),
+              marketplace: "ebay",
+            }),
+            timeoutMs: TIMEOUT_MS,
+            maxAttempts: 2,
+            retryOnTimeout: false,
+            baseDelayMs: 250,
+            maxDelayMs: 1_500,
           },
-          body: JSON.stringify({
-            items: GRADES.map(([, grade]) =>
-              grade ? { tcg_card_id: id, grade_key: grade } : { tcg_card_id: id },
-            ),
-            marketplace: "ebay",
-          }),
-          timeoutMs: TIMEOUT_MS,
-          maxAttempts: 2,
-          retryOnTimeout: false,
-          baseDelayMs: 250,
-          maxDelayMs: 1_500,
-        });
+        );
         if (!r.ok) {
           console.error("SilphCo price lookup failed", r.status);
           return { kind: "error" };
         }
-        const body = (await r.json().catch(() => null)) as {
-          data?: { results?: unknown[] };
-        } | null;
+        const body = r.data;
         if (!body || !Array.isArray(body.data?.results)) return { kind: "error" };
         const results = body.data.results;
         const pick = (i: number) => {
@@ -141,9 +142,9 @@ export async function ebaySoldPricesLookup(
     },
     { now },
   );
-  if (!res.ok) return { status: "error", data: null };
-  if (res.empty || !res.value) return { status: "empty", data: null };
-  return { status: "ok", data: res.value };
+  if (!res.ok) return { status: "error", data: null, fromCache: false };
+  if (res.empty || !res.value) return { status: "empty", data: null, fromCache: res.fromCache };
+  return { status: "ok", data: res.value, fromCache: res.fromCache };
 }
 
 /** eBay sold prices for one TCGdex card id, or null when not configured, empty, or unavailable. */

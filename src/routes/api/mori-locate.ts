@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import type { Cache } from "@/lib/cache.server";
-import { upstreamFetch } from "@/lib/upstream-fetch";
+import { upstreamFetchJson } from "@/lib/upstream-fetch";
 
 /**
  * Turns the collector's phone location into a place name ("Sydney, New South Wales, Australia")
@@ -55,7 +55,7 @@ export const Route = createFileRoute("/api/mori-locate")({
         const cache = await getPlaceCache();
         const result = await cache.getOrLoad(k, async () => {
           try {
-            const res = await upstreamFetch(
+            const res = await upstreamFetchJson<{ address?: Record<string, string> }>(
               `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&accept-language=en&lat=${lat.toFixed(2)}&lon=${lon.toFixed(2)}`,
               {
                 headers: { "User-Agent": "MoriLocation/1.0" },
@@ -66,12 +66,8 @@ export const Route = createFileRoute("/api/mori-locate")({
                 signal: request.signal,
               },
             );
-            if (!res.ok) return { kind: "error" };
-            const j = (await res.json().catch(() => null)) as {
-              address?: Record<string, string>;
-            } | null;
-            if (!j) return { kind: "error" };
-            const a = j.address ?? {};
+            if (!res.ok || !res.data) return { kind: "error" };
+            const a = res.data.address ?? {};
             const city = a["city"] ?? a["town"] ?? a["village"] ?? a["suburb"] ?? a["county"];
             const place = [city, a["state"], a["country"]].filter(Boolean).join(", ");
             return place ? { kind: "hit", value: place } : { kind: "empty", value: null };

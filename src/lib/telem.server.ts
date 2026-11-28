@@ -4,7 +4,7 @@
  * search runs on two providers with at most 5 results each, fetch reads at most 3 pages and keeps
  * 6,000 characters of each, so a web lookup costs about a cent.
  */
-import { upstreamFetch } from "./upstream-fetch";
+import { upstreamFetchJson } from "./upstream-fetch";
 
 const API = "https://router.telem.ai/v1";
 const SEARCH_PROVIDERS = ["brave", "tavily"];
@@ -32,7 +32,13 @@ function key() {
 async function post(path: string, body: unknown, timeoutMs: number) {
   // Paid POST (~1 cent/call): retry only fast 429/502/503 rejections; never retry timeouts or
   // network drops after submission.
-  const res = await upstreamFetch(`${API}${path}`, {
+  type TelemResponse = {
+    preprocessor_runs?: {
+      status?: string;
+      output_payload?: { results?: unknown[]; fetched_results?: unknown[] } | null;
+    }[];
+  };
+  const res = await upstreamFetchJson<TelemResponse>(`${API}${path}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${key()}`,
@@ -53,12 +59,7 @@ async function post(path: string, body: unknown, timeoutMs: number) {
     console.error("Telem request failed", path, res.status);
     throw new Error(res.status === 429 ? "Web search is busy" : "Web search failed");
   }
-  return (await res.json()) as {
-    preprocessor_runs?: {
-      status?: string;
-      output_payload?: { results?: unknown[]; fetched_results?: unknown[] } | null;
-    }[];
-  };
+  return res.data ?? {};
 }
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);

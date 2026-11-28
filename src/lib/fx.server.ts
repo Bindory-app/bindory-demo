@@ -9,7 +9,7 @@
  */
 import { createCache, type SharedStore } from "./cache.server";
 import type { Market } from "./market";
-import { upstreamFetch } from "./upstream-fetch";
+import { upstreamFetchJson } from "./upstream-fetch";
 
 const FX_URL = "https://api.frankfurter.dev/v1/latest?base=USD";
 const FX_TTL_MS = 12 * 60 * 60 * 1000;
@@ -21,6 +21,8 @@ export type FxRatesResult = {
   stale: boolean;
   /** False when no live or cached FX rates exist (only `{ USD: 1 }` is available). */
   ok: boolean;
+  /** True when served from memory or shared cache. */
+  fromCache?: boolean;
 };
 
 export type ResolvedMarketFx = {
@@ -32,6 +34,8 @@ export type ResolvedMarketFx = {
   stale: boolean;
   /** True when no rate existed for a non-USD market and we fell back honestly to US$. */
   fallbackToUsd: boolean;
+  /** True when served from memory or shared cache (always true for USD). */
+  fromCache?: boolean;
 };
 
 function makeFxCache(store?: SharedStore | null) {
@@ -52,7 +56,7 @@ export function resetFxCacheForTest(store?: SharedStore | null): void {
 
 async function fetchUsdRates(): Promise<Record<string, number> | null> {
   try {
-    const res = await upstreamFetch(FX_URL, {
+    const res = await upstreamFetchJson<{ rates?: Record<string, unknown> }>(FX_URL, {
       timeoutMs: FX_TIMEOUT_MS,
       maxAttempts: 3,
       baseDelayMs: 250,
@@ -62,9 +66,7 @@ async function fetchUsdRates(): Promise<Record<string, number> | null> {
       console.error("FX rate lookup failed", res.status);
       return null;
     }
-    const j = (await res.json().catch(() => null)) as {
-      rates?: Record<string, unknown>;
-    } | null;
+    const j = res.data;
     if (!j?.rates || typeof j.rates !== "object") return null;
     const clean: Record<string, number> = { USD: 1 };
     let count = 0;
@@ -90,8 +92,8 @@ export async function usdRatesWithMeta(now = Date.now()): Promise<FxRatesResult>
     },
     { now },
   );
-  if (res.ok) return { rates: res.value, stale: res.stale, ok: true };
-  return { rates: { USD: 1 }, stale: false, ok: false };
+  if (res.ok) return { rates: res.value, stale: res.stale, ok: true, fromCache: res.fromCache };
+  return { rates: { USD: 1 }, stale: false, ok: false, fromCache: false };
 }
 
 export async function usdRates(now = Date.now()): Promise<Record<string, number>> {
@@ -115,17 +117,18 @@ export async function usdTo(currency: string, now = Date.now()): Promise<number 
  */
 export async function resolveMarketFx(market: Market, now = Date.now()): Promise<ResolvedMarketFx> {
   if (market.currency === "USD") {
-    return { market, rate: 1, stale: false, fallbackToUsd: false };
+    return { market, rate: 1, stale: false, fallbackToUsd: false, fromCache: true };
   }
-  const { rates, stale } = await usdRatesWithMeta(now);
+  const { rates, stale, fromCache } = await usdRatesWithMeta(now);
   const v = rates[market.currency];
   if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-    return { market, rate: v, stale, fallbackToUsd: false };
+    return { market, rate: v, stale, fallbackToUsd: false, fromCache: Boolean(fromCache) };
   }
   return {
     market: { ...market, currency: "USD", symbol: "US$" },
     rate: 1,
     stale: false,
     fallbackToUsd: true,
+    fromCache: false,
   };
 }

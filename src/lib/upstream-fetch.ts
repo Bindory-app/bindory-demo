@@ -98,10 +98,50 @@ function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
   });
 }
 
-export async function upstreamFetch(
+export type UpstreamJsonResponse<T = unknown> = {
+  ok: boolean;
+  status: number;
+  headers: Headers;
+  /** Parsed JSON body when `ok` is true and the body was valid JSON; otherwise null. */
+  data: T | null;
+};
+
+function readJsonWithSignal(res: Response, signal: AbortSignal): Promise<unknown> {
+  if (signal.aborted) {
+    void res.body?.cancel().catch(() => {});
+    return Promise.reject(makeAbortError(signal));
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      void res.body?.cancel().catch(() => {});
+      reject(makeAbortError(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    res.json().then(
+      (data) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        resolve(data);
+      },
+      (err: unknown) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
+async function runAttemptLoop<R>(
   url: string,
-  options: UpstreamFetchOptions = {},
-): Promise<Response> {
+  options: UpstreamFetchOptions,
+  handleResponse: (res: Response, signal: AbortSignal) => Promise<R>,
+): Promise<R> {
   const {
     timeoutMs = DEFAULT_TIMEOUT_MS,
     maxAttempts: rawMaxAttempts = DEFAULT_MAX_ATTEMPTS,
@@ -138,25 +178,32 @@ export async function upstreamFetch(
 
     try {
       const res = await fetch(url, { ...fetchInit, signal: controller.signal });
-      clearTimeout(timer);
-      callerSignal?.removeEventListener("abort", onCallerAbort);
 
       const hasMoreAttempts = attempt + 1 < maxAttempts;
-      if (!hasMoreAttempts || !isRetryableStatus(res.status, retryStatuses)) return res;
+      const shouldCheckRetry = hasMoreAttempts && isRetryableStatus(res.status, retryStatuses);
+      if (shouldCheckRetry) {
+        const elapsed = Date.now() - attemptStart;
+        const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
+        const withinElapsed = maxRetryElapsedMs === undefined || elapsed <= maxRetryElapsedMs;
+        // Never violate an explicit Retry-After longer than our cap or stall the serverless request.
+        const withinRetryAfter = retryAfterMs === null || retryAfterMs <= maxDelayMs;
+        if (withinElapsed && withinRetryAfter) {
+          clearTimeout(timer);
+          callerSignal?.removeEventListener("abort", onCallerAbort);
+          const delay =
+            retryAfterMs !== null
+              ? retryAfterMs
+              : backoffDelayMs(attempt, baseDelayMs, maxDelayMs, random);
+          void res.body?.cancel().catch(() => {});
+          await sleep(delay, callerSignal);
+          continue;
+        }
+      }
 
-      const elapsed = Date.now() - attemptStart;
-      if (maxRetryElapsedMs !== undefined && elapsed > maxRetryElapsedMs) return res;
-
-      const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
-      // Never violate an explicit Retry-After longer than our cap or stall the serverless request.
-      if (retryAfterMs !== null && retryAfterMs > maxDelayMs) return res;
-
-      const delay =
-        retryAfterMs !== null
-          ? retryAfterMs
-          : backoffDelayMs(attempt, baseDelayMs, maxDelayMs, random);
-      void res.body?.cancel().catch(() => {});
-      await sleep(delay, callerSignal);
+      const out = await handleResponse(res, controller.signal);
+      clearTimeout(timer);
+      callerSignal?.removeEventListener("abort", onCallerAbort);
+      return out;
     } catch (err) {
       clearTimeout(timer);
       callerSignal?.removeEventListener("abort", onCallerAbort);
@@ -175,4 +222,37 @@ export async function upstreamFetch(
   }
 
   throw new Error("Upstream fetch exhausted attempts");
+}
+
+export async function upstreamFetch(
+  url: string,
+  options: UpstreamFetchOptions = {},
+): Promise<Response> {
+  return runAttemptLoop(url, options, async (res) => res);
+}
+
+/**
+ * Fetches an upstream JSON endpoint and reads the JSON body under the same per-attempt timeout
+ * deadline so a provider that sends headers then stalls cannot hang `res.json()`.
+ */
+export async function upstreamFetchJson<T = unknown>(
+  url: string,
+  options: UpstreamFetchOptions = {},
+): Promise<UpstreamJsonResponse<T>> {
+  return runAttemptLoop(url, options, async (res, signal) => {
+    if (!res.ok) {
+      void res.body?.cancel().catch(() => {});
+      return { ok: false, status: res.status, headers: res.headers, data: null };
+    }
+    try {
+      const data = (await readJsonWithSignal(res, signal)) as T;
+      return { ok: true, status: res.status, headers: res.headers, data };
+    } catch (err) {
+      // Malformed JSON on a completed 2xx response is not a transient transport failure.
+      if (!signal.aborted && err instanceof SyntaxError) {
+        return { ok: true, status: res.status, headers: res.headers, data: null };
+      }
+      throw err;
+    }
+  });
 }
